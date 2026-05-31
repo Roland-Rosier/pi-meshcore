@@ -1,0 +1,7 @@
+{
+  "python.pythonPath": "venv313/bin/python",  // Linux/macOS
+  // "python.pythonPath": "venv\\Scripts\\python.exe"  // Windows
+  "python.analysis.extraPaths": [
+    "./venv313/lib/python3.13/site-packages"
+  ]
+}

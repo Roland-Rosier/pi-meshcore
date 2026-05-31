@@ -1,0 +1,11 @@
+# Core dependencies (version-pinned for stability)
+meshcore==2.3.7        # Official MeshCore Python library (LoRa communication)
+fastapi==0.68.0        # ASGI framework for building APIs (web interface)
+uvicorn==0.15.0        # ASGI server for running FastAPI
+spidev==3.8            # Python module for SPI communication with hardware modules
+gpiod==2.4.2           # Python module to access GPIO lines
+
+# Type hinting and type checking
+typing==3.7.4         # Type annotations (Python 3.8+)
+mypy==0.950           # Optional: Static type checker (for development)
+

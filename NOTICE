@@ -1,0 +1,22 @@
+===========================================================================
+Notice for [Your Project Name]
+===========================================================================
+
+This product includes software developed by Roland Rosier
+Licensed under the Apache License, version 2.0.
+
+---------------------------------------------------------------------------
+SECURITY & USER RESPONSIBILITY NOTICE
+---------------------------------------------------------------------------
+This project incorporates a strict Security Policy. By utilizing, forking, 
+or distributing this codebase, users explicitly acknowledge that:
+
+1. The software is provided "as-is" with no security audits performed.
+2. Downstream users bear 100% of the responsibility to detect, audit, 
+   and mitigate cybersecurity issues or vulnerabilities.
+3. The original maintainer is under no obligation to issue security patches.
+
+The complete, actionable Security Policy and scanning guidelines are 
+defined in the accompanying SECURITY.md file located in this repository. 
+Downstream distributors MUST retain this notice and the accompanying 
+SECURITY.md file in accordance with Section 4(d) of the Apache 2.0 License.

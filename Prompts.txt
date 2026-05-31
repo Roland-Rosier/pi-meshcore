@@ -1,0 +1,47 @@
+You are a senior software architect who also has electronics hardware and ham radio experience.
+
+You are asked to help architect a new project.
+
+The project is to create an implementation of MeshCore (https://meshcore.co.uk/) on a Rapsberry PI 4 (or greater).
+
+The Rapsberry PI has a LoRa (https://en.wikipedia.org/wiki/LoRa) expansion hat attached to it which contains two radio modules, one for the 434MHz spectrum and one for the 868MHz spectrum.
+
+The LoRa modules are from Uptronics https://store.uputronics.com/products/raspberry-pi-loratm-expansion-board?variant=48647705624910.
+
+The LoRa modules are the HopeRF RFM95W (868MHz) and RFM98W (434MHz).
+
+The RFM95W uses the Semtech SX1276 chip (https://dwmzone.com/en/lora-wireless-modules/670-rfm95w-semtech-sx1276-868mhz-915mhz-hoperf-lora-transceiver-rf-module.html)
+
+The RFM98W uses the Semtech SX1278 chip (https://dwmzone.com/ru/lora-wireless-modules/614-rfm96w-rfm98w-sx1276-sx1278-433mhz-470mhz-hoperf-lora-rf-module.html)
+
+The datasheet for these modules is at: https://github.com/SeeedDocument/RFM95-98_LoRa_Module/blob/master/RFM95_96_97_98_DataSheet.pdf
+
+The datasheet for the SX1276 and SX1278 chips is at: https://semtech.my.salesforce.com/sfc/p/#E0000000JelG/a/2R0000001Rbr/6EfVZUorrpoKFfvaF_Fkpgp5kzjiNyiAbqcpqh9qSjE
+
+Both modules are connected over SPI.
+
+The module in the CE0 slot is connected to DIO0/WPi6 and DIO5/WPi5 and is the 868MHz variant RFM95W.
+
+The module in the CE1 slot is connected to DIO0/WPi27 and DIO5/WPi26 and is the 484MHz variant RFM98W.
+
+The project is to create an implementation of MeshCore which can:
+ * Act as a client
+ * Act as a repeater
+
+In both modes, it will have the following interfaces:
+ * A command line interface similar to the meshtui (https://github.com/ekollof/meshtui) or meshcore-cli projects.
+ * A Web interface, potentially using the FastAPI mechanism.
+ * An exposed API which follows the standard MeshCore API used by https://github.com/meshcore-dev/meshcore_py
+
+ The Over The Air protocol should follow that defined in the meshcore-dev project at: https://github.com/meshcore-dev/MeshCore
+
+ The drivers for the RFM95W and RFM98W modules should draw inspiration from the various SX127* files in the src/helpers/radiolib directory of the MeshCore project (https://github.com/meshcore-dev/MeshCore/tree/main/src/helpers/radiolib)
+
+ The immediate task is to complete an ai.md file so that it can be used by both human developers and AI tools to understand the project scope.
+
+ A template has been prepared as an ai.md file and needs filling and completed.
+
+ Please make suggestions to complete this file.
+
+ Please do not implement any code at this time. The ai.md file is the only file in scope.
+
