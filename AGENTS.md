@@ -157,30 +157,6 @@ Before creating or modifying any file, always verify the current state of the fi
 3. **Safe Modification** - Use `edit_existing_file` instead of `create_new_file` when the file already exists
 4. **Idempotency** - Ensure changes are idempotent (can be applied multiple times without causing issues)
 
-### Example Implementation
-```python
-import os
-
-def safe_file_operation(filepath, new_content):
-    # Check if file exists
-    if os.path.exists(filepath):
-        # Read existing content
-        with open(filepath, 'r') as f:
-            existing_content = f.read()
-        
-        # Compare with new content (basic check)
-        if existing_content == new_content:
-            print(f"File {filepath} already contains the requested content")
-            return
-    
-    # If file doesn't exist or content differs, create it
-    with open(filepath, 'w') as f:
-        f.write(new_content)
-    print(f"File {filepath} created/updated")
-```
-
-This ensures we never accidentally overwrite existing files like `src/cli/check_hardware.py` that may contain important content or functionality we're not aware of.
-
 ## Documentation Requirements
 
 1. API documentation for:
