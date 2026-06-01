@@ -33,5 +33,18 @@ user what you plan to do and allowing them to continue after each batch.
 * Only output a complete, standalone code block if you are creating a brand-new file that does not exist.
 * Limit file creations or edits to a maximum of 2 files per conversational turn to protect memory stability.
 
+### Top-of-File Insertion Protocol via `single_find_and_replace`
+* When inserting a copyright header, structural block, or other text at the top of a file, you must invoke the `single_find_and_replace` tool. 
+* Emphasize precision: Anchor your change to the very first line of code in the file to control exactly what is injected at the beginning of the file.
+
+* **Required `single_find_and_replace` Payload Structure:**
+  ```json
+  {
+    "filepath": "src/main.py",
+    "find": "import os",
+    "replace": "# Copyright (c) 2026 Project Authors. All rights reserved.\n\nimport os"
+  }
+  ```
+
 ## Strict Sequential Structure Summary
 Think completely inside the tags; execute flawlessly outside the tags.
