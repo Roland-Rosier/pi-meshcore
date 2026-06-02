@@ -59,8 +59,10 @@ class LoRaModule:
             if test_register is not None:
                 self.communication_success = True
                 self.silicon_revision = self.read_register(0x42)
-                self._determine_module_type()
                 self._check_frequency_support()
+                self._test_lf_mode_retention()
+                self._determine_module_type()
+                print(f"SPI device {self.ce_pin} initialized")
         except Exception as e:
             print(f"Initialization error for CE {self.ce_pin}: {e}")
 
@@ -112,6 +114,7 @@ class LoRaModule:
         lsb = int(freq_register_value & 0xFF)
         mid = int((freq_register_value & 0xFF00) >> 8)
         msb = int((freq_register_value & 0xFF0000) >> 16)
+        print(f"Calculated registers for frequency of {a_freq_in_khz} kHz with register values (0x{msb:02X} 0x{mid:02X} 0x{lsb:02X})")
         return (msb, mid, lsb)
 
     def _read_frequency_registers(self) -> Tuple[int, int, int]:
@@ -149,35 +152,84 @@ class LoRaModule:
             verify_success = True
         return (verify_success, req_msb, req_mid, req_lsb, msb, mid, lsb)
 
-    def _determine_module_type(self) -> None:
-        """Determine the module type based on silicon revision and LF mode."""
-        if self.silicon_revision == 0x12:
-            self.module_type = "RFM95W (Semtech SX1276)"
-        elif self.silicon_revision == 0x19:
-            self.module_type = "RFM98W (Semtech SX1278)"
-        else:
-            # Use LF mode bit to determine module type
-            self.write_register(REG_OP_MODE, MODE_SLEEP | BIT_LF_MODE_ON)
-            time.sleep(0.01)
-            mod_check = self.read_register(REG_OP_MODE)
-            if (mod_check & BIT_LF_MODE_ON) == BIT_LF_MODE_ON:
-                self.module_type = "RFM98W (Low-Band 433MHz / Semtech SX1278)"
-            else:
-                self.module_type = "RFM95W (High-Band 868MHz / Semtech SX1276)"
-
     def _check_frequency_support(self) -> None:
         """Check if the module supports high and low frequency settings."""
-        # Verify High Frequency (868 MHz) for RFM95W validation
-        high_freq = {"supported": False, "freq_type": "high", "freq_khz": 868000}
+        # Verify High Frequency (1015- MHz) to see if it supports high frequencies (which *may* indicate RFM95W)
+        high_freq = {"supported": False, "freq_type": "high", "freq_khz": 1015000}
         (verify_success, _, _, _, _, _, _) = self._write_and_verify_frequency_for_khz(high_freq["freq_khz"])
         if verify_success:
             self.supports_high_frequency = True
 
-        # Verify Low Frequency (433 MHz) for RFM98W validation
-        low_freq = {"supported": False, "freq_type": "low", "freq_khz": 433000}
+        # Verify Low Frequency (415 MHz) for RFM98W validation
+        low_freq = {"supported": False, "freq_type": "low", "freq_khz": 415000}
         (verify_success, _, _, _, _, _, _) = self._write_and_verify_frequency_for_khz(low_freq["freq_khz"])
         if verify_success:
             self.supports_low_frequency = True
+
+    def _test_lf_mode_retention(self) -> None:
+        """Test if LF mode can be set and unset."""
+        # The LF Mode Bit might not be retained when switching between Sleep and Standby modes
+        # Set LF mode
+        self.write_register(REG_OP_MODE, MODE_SLEEP | BIT_LF_MODE_ON)
+        time.sleep(0.01)
+        # Change to STANDBY mode to activate internal logic
+        self.write_register(REG_OP_MODE, MODE_STANDBY | BIT_LF_MODE_ON)
+        time.sleep(0.01)
+        # Re-read the register after mode change
+        mod_check = self.read_register(REG_OP_MODE)
+        if mod_check is not None:
+            self.lf_mode_success = ((mod_check & BIT_LF_MODE_ON) == BIT_LF_MODE_ON)
+
+        # Unset LF mode
+        self.write_register(REG_OP_MODE, MODE_SLEEP)
+        time.sleep(0.01)
+        # Change to STANDBY mode again to activate internal logic
+        self.write_register(REG_OP_MODE, MODE_STANDBY)
+        time.sleep(0.01)
+        # Re-read the register after mode change
+        mod_check = self.read_register(REG_OP_MODE)
+        if mod_check is not None:
+            self.lf_mode_not_success = ((mod_check & BIT_LF_MODE_ON) != BIT_LF_MODE_ON)
+        
+        # Put the device back into sleep mode with LF_MODE_ON
+        self.write_register(REG_OP_MODE, MODE_SLEEP | BIT_LF_MODE_ON)
+        time.sleep(0.01)
+
+    def _determine_module_type(self) -> None:
+        """Determine the module type based on silicon revision and LF mode.
+        
+        Note: The silicon revision appears to be the same for all modules.
+        """
+        # if self.silicon_revision == 0x12:
+        #     self.module_type = "RFM95W (Semtech SX1276)"
+        # elif self.silicon_revision == 0x19:
+        #     self.module_type = "RFM98W (Semtech SX1278)"
+        # else:
+        potentially_multi_band_support = False
+        if self.supports_high_frequency and self.supports_low_frequency:
+            potentially_multi_band_support = True
+        elif self.supports_high_frequency:
+            self.module_type = "RFM95W (High-Band 868MHz / Semtech SX1276)"
+        elif self.supports_low_frequency:
+            self.module_type = "RFM98W (Low-Band 433Mhz / Semtech SX1278)"
+        else:
+            self.module_type = "Unknown / Communication Error"
+
+        if potentially_multi_band_support:
+            if self.lf_mode_not_success and self.lf_mode_success:
+                # Note an SX1276 can be dropped into a slot reserved for an SX1278 and it will work perfectly at low frequencies
+                # But if the pins 21 and 22 are connected to ground, it will fail at high frequencies (like an SX1278 would)
+                # Software cannot detect if it is high-frequency capable; transmission has to be attempted to see if that
+                # transmission fails.
+                # Note also that being able to select 1010 MHz suggests that it is *not* an SX1279
+                # Note it could be an SX1277, which cannot do all the spreading factors, we might want to detect that
+                self.module_type = "Multi-band - Likely RFM95W (High-Band 868MHz and/or Low-Band 433Mhz / Semtech SX1276)"
+            elif self.lf_mode_not_success:
+                self.module_type = "RFM95W (High-Band 868MHz / Semtech SX1276)"
+            elif self.lf_mode_success:
+                self.module_type = "RFM98W (Low-Band 433Mhz / Semtech SX1278)"
+            else:
+                self.module_type = "Unknown / Communication Error"
 
     def test_unique_value_retention(self, frequency_khz: int) -> bool:
         """
@@ -221,28 +273,3 @@ class LoRaModule:
                 current_mid == self.unique_mid and 
                 current_lsb == self.unique_lsb)
     
-    def _test_lf_mode(self) -> None:
-        """Test if LF mode can be set and unset."""
-        # Set LF mode
-        self.write_register(REG_OP_MODE, MODE_SLEEP | BIT_LF_MODE_ON)
-        time.sleep(0.01)
-        # Change to STANDBY mode to activate internal logic
-        self.write_register(REG_OP_MODE, MODE_STANDBY | BIT_LF_MODE_ON)
-        time.sleep(0.01)
-        # Re-read the register after mode change
-        mod_check = self.read_register(REG_OP_MODE)
-        self.lf_mode_success = ((mod_check & BIT_LF_MODE_ON) == BIT_LF_MODE_ON)
-
-        # Unset LF mode
-        self.write_register(REG_OP_MODE, MODE_SLEEP)
-        time.sleep(0.01)
-        # Change to STANDBY mode again to activate internal logic
-        self.write_register(REG_OP_MODE, MODE_STANDBY)
-        time.sleep(0.01)
-        # Re-read the register after mode change
-        mod_check = self.read_register(REG_OP_MODE)
-        self.lf_mode_not_success = ((mod_check & BIT_LF_MODE_ON) != BIT_LF_MODE_ON)
-        
-        # Put the device back into sleep mode with LF_MODE_ON
-        self.write_register(REG_OP_MODE, MODE_SLEEP | BIT_LF_MODE_ON)
-        time.sleep(0.01)
