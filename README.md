@@ -6,7 +6,7 @@ This project implements [MeshCore](https://meshcore.co.uk/) on a Raspberry Pi 4 
 
 ---
 
-## 📌 Project Overview
+## Project Overview
 
 This implementation includes:
 - **MeshCore Protocol**: Client/Repeater implementation using [meshcore_py](https://github.com/meshcore-dev/meshcore_py)
@@ -16,7 +16,7 @@ This implementation includes:
 
 ---
 
-## 🛠️ Hardware Requirements
+## Hardware Requirements
 
 ### Raspberry Pi 4
 - Minimum 4GB RAM
@@ -35,7 +35,7 @@ This implementation includes:
 
 ---
 
-## 🧠 Software Architecture
+## Software Architecture
 
 ### Core Components
 1. **MeshCore Implementation**
@@ -60,7 +60,7 @@ This implementation includes:
 
 ---
 
-## 🧪 Development Guidelines
+## Development Guidelines
 
 ### Hardware Driver Implementation
 - Use SX1276/SX1278 datasheet: [RFM95-98 DataSheet](https://github.com/SeeedDocument/RFM95-98_LoRa_Module/blob/master/RFM95_96_97_98_DataSheet.pdf)
@@ -79,13 +79,18 @@ This implementation includes:
 
 ---
 
-## 📁 Project Structure
+## Project Structure
 
 ```
 meshcore_rpi_lora/
 ├── .gitattributes
 ├── .gitignore
 ├── .vscode/
+│   └── settings.json
+├── .continue/
+│   └── rules/
+│       ├── 01-system-constraints.md
+│       └── 02-execution-protocol.md
 ├── AGENTS.md
 ├── LICENSE
 ├── NOTICE
@@ -96,19 +101,16 @@ meshcore_rpi_lora/
 │   ├── __init__.py
 │   ├── cli/
 │   │   └── check_hardware.py
-│   ├── drivers/
-│   │   ├── __init__.py
-│   │   └── lora_detection.py
-│   └── meshcore/
-├── .continue/
-│   ├── config.json
-│   └── settings.json
+│   └── drivers/
+│       ├── __init__.py
+│       ├── lora_detection.py
+│       └── lora_module.py
 └── README.md
 ```
 
 ---
 
-## 📜 Documentation
+## Documentation
 
 - **API Documentation**: MeshCore API endpoints, CLI commands, and web interface operations
 - **Hardware Setup Guide**: Pin diagrams, SPI configuration, and module detection
@@ -116,7 +118,7 @@ meshcore_rpi_lora/
 
 ---
 
-## 🧪 Testing & Validation
+## Testing & Validation
 
 - **Unit Tests**:
   - Radio driver functions
@@ -133,7 +135,7 @@ meshcore_rpi_lora/
 
 ---
 
-## 📌 Project Milestones
+## Project Milestones
 
 1. [ ] Hardware driver implementation
 2. [ ] MeshCore protocol implementation
@@ -143,7 +145,7 @@ meshcore_rpi_lora/
 
 ---
 
-## 📌 References
+## References
 
 - [MeshCore Website](https://meshcore.co.uk/)
 - [RFM95W/RFM98W Datasheet](https://github.com/SeeedDocument/RFM95-98_LoRa_Module/blob/master/RFM95_96_97_98_DataSheet.pdf)
