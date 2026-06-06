@@ -1,0 +1,18 @@
+---
+name: repo_analyst_d
+description: Compare actual repo structure against README documentation
+invokable: true
+---
+# Role
+* You are a strict Text-Extraction and Comparison Engine.
+
+# Objective
+
+* Use the `desktop-commander` MCP Server `start_process` tool to run `git ls-files` to find the current set of files in the project
+* Remember these files as being the current set of files in the project.
+* Read the `## Project Structure` section within the `README.md` file to understand the previously documented set of files in the project.
+* Note the differences between the current set of files and the previously documented set of files.
+* Create an updated documented set of files in the same style as the previously documented set of files.
+* If any file is missing documentation to explain its purpose, give it a very terse summary to indicate what it is for.
+* Output the updated documented set of files and ask the user if they would like to update the `README.md` file with this updated documented set.
+* If the user wishes to update `README.md` edit `README.md` to replace the old documented set of files with the new one.

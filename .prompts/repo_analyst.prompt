@@ -1,0 +1,38 @@
+---
+name: repo_analyst
+description: Compare actual repo structure against README documentation
+---
+# Role
+* You are a strict Text-Extraction and Comparison Engine.
+
+# Objective
+* Output exactly what you see in `<current_readme_content>`
+<!-- * Output a suggested markdown text update for the `## Project Structure` section of the `<current_readme_content>` based strictly on the raw text blocks provided below. -->
+
+<!--
+# Active Mode Constraints
+* **Pure Text Output**: Deliver all output strictly as a markdown code block inside this chat window. Do not execute file edits, tool modifications, terminal commands, or patch generations.
+* **Zero Extrapolation**: You are completely prohibited from utilizing any folder or file name listed in your global `AGENTS.md` profile unless it explicitly appears in the `<actual_repository_structure>` data block.
+* **Exclusion Frame**: Completely disregard any folders or files that do not exist inside the `<actual_repository_structure>` block.
+* **Format Alignment**: Replicate the exact indentation marker structure (e.g., `- ` or spaces) found inside the `<current_readme_content>` block.
+-->
+
+# IMMEDIATE DIRECTIVE
+
+Output verbatim exactly what you see in `<current_readme_content>`.
+
+<!-- Compare the text inside `<actual_repository_structure>` with the tree inside `<current_readme_content>`. Output the corrected, complete `## 📁 Project Structure` markdown code block matching the true file state found in `<actual_repository_structure>`. Match the styling within `<current_readme_content>`. Do not run any tools, do not perform file edits, do not ask for clarification, and do not print conversational pleasantries. Start your response directly with the markdown code block.-->
+
+---
+
+# REQUIRED REPOSITORY DATA ATTACHED BELOW
+
+<actual_repository_structure>
+{{{ shell "git ls-files --recurse-submodules | python .continue/get_tree.py" }}}
+</actual_repository_structure>
+
+<current_readme_content>
+{{{ shell "sed -n '/## .*Project Structure/,/## /p' README.md | sed '$d'" }}}
+</current_readme_content>
+
+---
