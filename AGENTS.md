@@ -1,6 +1,6 @@
 # MeshCore Pi4 LoRa Implementation Profile
 
-## 1. Project Context Reference (Read-Only)
+## 1. Project Context Reference
 - **Goal**: Build MeshCore Client/Repeater on RPi 4 with Uputronics LoRa Hat.
 - **Stack**: Python 3.9+, FastAPI, SPI Drivers, `pytest`.
 - **Install Target**: Official PyPI package is `meshcore` (GitHub: `meshcore_py` by fdlamotte).

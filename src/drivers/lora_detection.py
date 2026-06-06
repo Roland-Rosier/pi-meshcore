@@ -9,12 +9,62 @@
 # see the License for the specific language governing permissions and
 # limitations under the License.
 
-from typing import List, Dict
+from dataclasses import dataclass
+from typing import List, Dict, Optional, Literal
+
 from src.drivers.lora_module import LoRaModule
+
+
+@dataclass
+class LoRaModuleConfig:
+    """Configuration describing expected LoRa modules on CE lines.
+
+    This class allows a user to describe what they expect to be attached
+    to each CE line on the SPI bus. The LoRaModuleDetector can then
+    validate this configuration against actual hardware detection results.
+    """
+
+    ce0_expected_module_type: Optional[Literal["rfm95w", "rfm98w", "multi_band", "none"]] = None
+    ce1_expected_module_type: Optional[Literal["rfm95w", "rfm98w", "multi_band", "none"]] = None
+
+    def __post_init__(self) -> None:
+        """Validate that at least one CE line has a non-None expectation."""
+        if self.ce0_expected_module_type is None and self.ce1_expected_module_type is None:
+            raise ValueError("At least one CE line must have an expected module type specified.")
+
+
+@dataclass
+class ValidationResult:
+    """Result of validating a configuration against detected hardware."""
+
+    ce_pin: int
+    passed: bool
+    message: str
+    expected_type: Optional[str]
+    detected_type: Optional[str]
+
 
 class LoRaModuleDetector:
     """Class to detect LoRa modules connected via SPI using LoRaModule class."""
     
+    # Mapping from config module type to detected module type strings
+    _MODULE_TYPE_MAP: Dict[str, List[str]] = {
+        "rfm95w": [
+            "RFM95W (High-Band 868MHz / Semtech SX1276)",
+            "Multi-band - Likely RFM95W (High-Band 868MHz and/or Low-Band 433Mhz / Semtech SX1276)",
+        ],
+        "rfm98w": [
+            "RFM98W (Low-Band 433Mhz / Semtech SX1278)",
+            "Multi-band - Likely RFM95W (High-Band 868MHz and/or Low-Band 433Mhz / Semtech SX1276)",
+        ],
+        "multi_band": [
+            "Multi-band - Likely RFM95W (High-Band 868MHz and/or Low-Band 433Mhz / Semtech SX1276)",
+        ],
+        "none": [
+            "Unknown / Communication Error",
+        ],
+    }
+
     def __init__(self, ce_pins: List[int] = [0, 1]):
         """
         Initialize LoRaModule instances for CE pins.
