@@ -1,11 +1,14 @@
 # Copyright 2026 Roland Rosier
+#
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
 # You may obtain a copy of the License at
-# http://www.apache.org/licenses/LICENSE-2.0
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
 # unless required by applicable law or agreed to in writing, software
-# distributed under the License is distributed on an "as is" basis,
-# without warranties or conditions of any kind, either express or implied.
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 # see the License for the specific language governing permissions and
 # limitations under the License.
 
@@ -24,8 +27,8 @@ class LoRaModuleConfig:
     validate this configuration against actual hardware detection results.
     """
 
-    ce0_expected_module_type: Optional[Literal["rfm95w", "rfm98w", "multi_band", "none"]] = None
-    ce1_expected_module_type: Optional[Literal["rfm95w", "rfm98w", "multi_band", "none"]] = None
+    ce0_expected_module_type: Optional[Literal["rfm95w", "rfm98w", "none"]] = None
+    ce1_expected_module_type: Optional[Literal["rfm95w", "rfm98w", "none"]] = None
 
     def __post_init__(self) -> None:
         """Validate that at least one CE line has a non-None expectation."""
@@ -57,9 +60,6 @@ class LoRaModuleDetector:
             "RFM98W (Low-Band 433Mhz / Semtech SX1278)",
             "Multi-band - Likely RFM95W (High-Band 868MHz and/or Low-Band 433Mhz / Semtech SX1276)",
         ],
-        "multi_band": [
-            "Multi-band - Likely RFM95W (High-Band 868MHz and/or Low-Band 433Mhz / Semtech SX1276)",
-        ],
         "none": [
             "Unknown / Communication Error",
         ],
@@ -86,4 +86,57 @@ class LoRaModuleDetector:
             }
             results.append(result)
         
+        return results
+
+    def validate_config(self, config: LoRaModuleConfig) -> List[ValidationResult]:
+        """Validate the given configuration against the currently detected hardware.
+
+        :param config: The user-spected configuration.
+        :return: A list of ValidationResult objects for each CE pin.
+        """
+        results = []
+
+        # Map CE pin index to config field
+        ce_pin_to_config = {
+            0: config.ce0_expected_module_type,
+            1: config.ce1_expected_module_type,
+        }
+
+        for i, module in enumerate(self.modules):
+            ce_pin = module.ce_pin
+            expected_type = ce_pin_to_config.get(ce_pin)
+
+            # If no expectation for this CE pin, skip validation
+            if expected_type is None:
+                continue
+
+            detected_type = module.module_type
+
+            # Check if the detected type is in the list of valid types for the expected type
+            valid_detected_types = self._MODULE_TYPE_MAP.get(expected_type, [])
+
+            # Special case for 'none': also accept if communication failed entirely
+            # The module might still report 'Unknown' but communication_success is False
+            passed = False
+            if expected_type == "none":
+                # If we expect 'none', we want to ensure no valid module is detected
+                # 'Unknown / Communication Error' is the expected detected type for 'none'
+                passed = detected_type in valid_detected_types
+            else:
+                passed = detected_type in valid_detected_types
+
+            message = f"Expected: {expected_type}, Detected: {detected_type}"
+            if passed:
+                message += " (Match)"
+            else:
+                message += " (Mismatch)"
+
+            results.append(ValidationResult(
+                ce_pin=ce_pin,
+                passed=passed,
+                message=message,
+                expected_type=expected_type,
+                detected_type=detected_type
+            ))
+
         return results
