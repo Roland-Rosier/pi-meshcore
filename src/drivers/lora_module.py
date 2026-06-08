@@ -243,6 +243,7 @@ class LoRaModule:
         """
         # Use the existing verification function to write and verify the frequency
         (verify_success, req_msb, req_mid, req_lsb, _, _, _) = self._write_and_verify_frequency_for_khz(frequency_khz)
+        # print(f"Tested ({verify_success}) unique value initial retention for frequency of {frequency_khz} kHz with register values (0x{req_msb:02X} 0x{req_mid:02X} 0x{req_lsb:02X})")
         
         # Save the requested values as instance variables
         self.unique_msb = req_msb

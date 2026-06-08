@@ -73,12 +73,19 @@ class LoRaModuleDetector:
         """
         self.modules = [LoRaModule(ce_pin) for ce_pin in ce_pins]
     
-    def detect_modules(self) -> List[Dict]:
-        """Detect LoRa modules connected to the CE pins using LoRaModule instances."""
-        results = []
+    def detect_modules(self, config: Optional[LoRaModuleConfig] = None) -> List[Dict]:
+        """Detect LoRa modules connected to the CE pins using LoRaModule instances.
+        
+        If both CE0 and CE1 are detected, performs extended verification to determine
+        if they are the same physical module.
+        
+        :return: List of detection results with additional verification status when applicable
+        """
+        # First, run standard detection
+        results: List[Dict] = []
         
         for module in self.modules:
-            result = {
+            result: Dict = {
                 "ce_pin": module.ce_pin,
                 "module_type": module.module_type,
                 "Silicon Revision": f"0x{module.silicon_revision:02X}" if module.silicon_revision is not None else "None detected",
@@ -86,6 +93,57 @@ class LoRaModuleDetector:
             }
             results.append(result)
         
+        # Check if both CE0 and CE1 have modules attached before running extended detection
+        ce0_result: Optional[Dict] = None
+        ce1_result: Optional[Dict] = None
+        
+        for result in results:
+            if result["ce_pin"] == 0:
+                ce0_result = result
+            elif result["ce_pin"] == 1:
+                ce1_result = result
+        
+        # Only run extended detection if both CE pins have detected modules
+        if ce0_result is not None and ce1_result is not None:
+            # Check if this module is RFM95W or RFM98W (to determine frequency)
+            ce0_is_rfm95w = False
+            ce1_is_rfm95w = False
+            
+            if ce0_result["module_type"] == "RFM95W (High-Band 868MHz / Semtech SX1276)":
+                ce0_is_rfm95w = True
+            elif "Multi-band" in ce0_result["module_type"]:
+                # For multi-band, assume RFM95W for CE0 as default
+                ce0_is_rfm95w = True
+                
+            if ce1_result["module_type"] == "RFM95W (High-Band 868MHz / Semtech SX1276)":
+                ce1_is_rfm95w = True
+            elif "Multi-band" in ce1_result["module_type"]:
+                # For multi-band, assume RFM98W for CE1 as default
+                pass  # ce1_is_rfm95w remains False
+            
+            # Calculate frequencies based on module types
+            freq_ce0: int = 960000 if ce0_is_rfm95w else 480000
+            freq_ce1: int = 862000 if ce1_is_rfm95w else 410000
+            
+            # Verify unique values were written correctly
+            ce0_module: Optional[LoRaModule] = None
+            ce1_module: Optional[LoRaModule] = None
+            
+            for module in self.modules:
+                if module.ce_pin == 0:
+                    ce0_module = module
+                elif module.ce_pin == 1:
+                    ce1_module = module
+            
+            # Initialize results with pre-verification status
+            for result in results:
+                result["is_single_module_dual_spi"] = False
+                result["unique_value_written"] = False
+                result["unique_value_verified"] = False
+
+            if ce0_module is not None and ce1_module is not None:
+                results = self._extended_detect_modules(results, config)
+            
         return results
 
     def calculate_unique_frequency(self, ce_pin: int, detected_type: str, config: Optional[LoRaModuleConfig] = None) -> int:
@@ -146,21 +204,20 @@ class LoRaModuleDetector:
             # This should not happen if detection is working, but just in case
             return 433000
 
-    def extended_detect_modules(self, config: Optional[LoRaModuleConfig] = None) -> List[Dict]:
+    def _extended_detect_modules(self, raw_results: List[Dict], config: Optional[LoRaModuleConfig] = None) -> List[Dict]:
         """
         Extended detection that verifies if CE0 and CE1 are the same physical module.
+        This is a private method that takes pre-computed detection results as input.
         
+        :param raw_results: Pre-computed detection results from detect_modules
         :param config: Optional user configuration
         :return: List of detection results with additional verification status
         """
-        # First, run standard detection
-        results = self.detect_modules()
-        
         # Check if both CE0 and CE1 have modules attached
-        ce0_result = None
-        ce1_result = None
+        ce0_result: Optional[Dict] = None
+        ce1_result: Optional[Dict] = None
         
-        for result in results:
+        for result in raw_results:
             if result["ce_pin"] == 0:
                 ce0_result = result
             elif result["ce_pin"] == 1:
@@ -169,13 +226,13 @@ class LoRaModuleDetector:
         # If either is missing, no need for dual verification
         if ce0_result is None or ce1_result is None:
             # Add a flag indicating no dual verification was needed
-            for result in results:
+            for result in raw_results:
                 result["is_single_module_dual_spi"] = False
-            return results
+            return raw_results
         
         # Both modules are detected. Perform unique value retention test.
-        ce0_module = None
-        ce1_module = None
+        ce0_module: Optional[LoRaModule] = None
+        ce1_module: Optional[LoRaModule] = None
         
         for module in self.modules:
             if module.ce_pin == 0:
@@ -184,29 +241,37 @@ class LoRaModuleDetector:
                 ce1_module = module
         
         if ce0_module is None or ce1_module is None:
-            for result in results:
+            for result in raw_results:
                 result["is_single_module_dual_spi"] = False
-            return results
+            return raw_results
         
         # Step 1: Write unique value to CE0
-        freq_ce0 = self.calculate_unique_frequency(0, ce0_result["module_type"], config)
-        ce0_written = ce0_module.test_unique_value_retention(freq_ce0)
+        freq_ce0: int = self.calculate_unique_frequency(0, ce0_result["module_type"], config)
+        ce0_written: bool = ce0_module.test_unique_value_retention(freq_ce0)
         
         # Step 2: Write unique value to CE1
-        freq_ce1 = self.calculate_unique_frequency(1, ce1_result["module_type"], config)
-        ce1_written = ce1_module.test_unique_value_retention(freq_ce1)
+        freq_ce1: int = self.calculate_unique_frequency(1, ce1_result["module_type"], config)
+        ce1_written: bool = ce1_module.test_unique_value_retention(freq_ce1)
+        
+        # If unique values were not written successfully, invalidate those results
+        if not ce0_written or not ce1_written:
+            for result in raw_results:
+                result["is_single_module_dual_spi"] = False
+                result["unique_value_written"] = False
+                result["unique_value_verified"] = False
+            return raw_results
         
         # Step 3: Verify CE0
-        ce0_verified = ce0_module.verify_unique_value_retention()
+        ce0_verified: bool = ce0_module.verify_unique_value_retention()
         
         # Step 4: Verify CE1
-        ce1_verified = ce1_module.verify_unique_value_retention()
+        ce1_verified: bool = ce1_module.verify_unique_value_retention()
         
         # Determine if they are the same module
-        is_single_module = not (ce0_verified and ce1_verified)
+        is_single_module: bool = not (ce0_verified and ce1_verified)
         
-        # Update results
-        for result in results:
+        # Update results with verification status
+        for result in raw_results:
             if result["ce_pin"] == 0:
                 result["is_single_module_dual_spi"] = is_single_module
                 result["unique_value_written"] = ce0_written
@@ -216,7 +281,7 @@ class LoRaModuleDetector:
                 result["unique_value_written"] = ce1_written
                 result["unique_value_verified"] = ce1_verified
         
-        return results
+        return raw_results
 
     def validate_config(self, config: LoRaModuleConfig) -> List[ValidationResult]:
         """Validate the given configuration against the currently detected hardware.
