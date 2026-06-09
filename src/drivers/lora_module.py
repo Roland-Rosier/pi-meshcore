@@ -12,7 +12,7 @@
 # see the License for the specific language governing permissions and
 # limitations under the License.
 
-from typing import List, Optional, Dict, Tuple
+from typing import Any, Callable, List, Optional, Tuple
 import spidev
 import time
 
@@ -24,14 +24,18 @@ BIT_LF_MODE_ON = 0x08
 class LoRaModule:
     """Class to represent and interact with a LoRa module."""
     
-    def __init__(self, ce_pin: int):
+    def __init__(self, ce_pin: int, spi_factory: Optional[Callable[[], Any]] = None):
         """
         Initialize a LoRa module with its own SPI device.
         
         :param ce_pin: CE pin number (0 or 1)
+        :param spi_factory: Optional factory function to create the SPI device for testing
         """
         self.ce_pin = ce_pin
-        self.spi_device = spidev.SpiDev()
+        if spi_factory is not None:
+            self.spi_device = spi_factory()
+        else:
+            self.spi_device = spidev.SpiDev()
         self.silicon_revision = None
         self.communication_success = False
         self.supports_high_frequency = False
@@ -276,4 +280,3 @@ class LoRaModule:
         return (current_msb == self.unique_msb and 
                 current_mid == self.unique_mid and 
                 current_lsb == self.unique_lsb)
-    
