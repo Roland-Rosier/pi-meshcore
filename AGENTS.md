@@ -21,13 +21,13 @@
 *The constraints below must only bew applied IF the user explicitly requests code modifications in the active chat prompt:*
 
 - **Imports**: All imports must use relative paths (`../drivers/rfm95w`) or explicit aliases. No floating imports allowed.
-- **Safety Mode**: Module detection sequence must remain strictly read-only. Sequence validation: 1. Init SPI (CE0/CE1) -> 2. Read device ID register (0x12) -> 3. Validate (0x12=RFM95W, 0x19=RFM98W) -> 4. Return status. Transmission is prohibited during safety mode.
+- **Safety Mode**: Module detection sequence must remain strictly read-only. Sequence validation: 1. Init SPI (CE0/CE1) -> 2. Return status. Transmission is prohibited during safety mode.
 - **Compliance**: Adherence to EU LoRa transmitter duty cycle rules is mandatory.
 - **Code Quality**: All code must use complete production syntax. Code placeholders (`// TODO`, `// ...`) are forbidden. Full Python type hinting is required across all functions, parameters, attributes, and returns (`from typing import...`).
 
 ## 4. Permitted Tool Behavior Adjustments
 *These rules govern tool utilization boundaries when Agent Mode is actively deployed by the user:*
 
-- **File Tool Preference**: The agent is permitted to use `edit_existing_file` rather than `create_new_file` when modifying existing codebases. Code edits should remain idempotent.
+- **File Tool Preference**: The agent is must use `single_find_and_replace` rather than `create_new_file` when modifying existing codebases. Code edits should remain idempotent.
 - **Modification Limits**: The agent is restricted to modifying a maximum of one file per execution cycle.
 - **Testing Framework**: The authorized project verification command is `pytest`

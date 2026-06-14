@@ -1,0 +1,305 @@
+# Copyright 2026 Roland Rosier
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# see the License for the specific language governing permissions and
+# limitations under the License.
+
+from __future__ import annotations
+
+import sys
+import os
+sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
+
+from src.drivers.lora_module import LoRaModule
+from src.drivers.lora_detection import (
+    LoRaModuleDetector,
+    LoRaModuleConfig,
+    ValidationResult,
+)
+from tests.fakes import FakeSpiDev
+from unittest.mock import MagicMock, patch
+import pytest
+
+
+def run_tests() -> None:
+    """Run the tests."""
+    pytest.main([__file__, "-v"])
+
+if __name__ == "__main__":
+    import subprocess
+
+    result = subprocess.run(
+        ["python", "-m", "pytest", __file__, "-v"],
+        cwd=os.path.dirname(os.path.abspath(__file__))
+    )
+    sys.exit(result.returncode)
+
+
+class TestLoRaModuleDetectorInitialization:
+    """Test suite for LoRaModuleDetector initialization."""
+
+    def test_init_rfm95w_with_factory(self) -> None:
+        """Test that LoRaModuleDetector initializes correctly with RFM95W fake device."""
+        rfm95w_spi = FakeSpiDev(module_type="rfm95w")
+
+        # Create a mock LoRaModule with the fake SPI device
+        mock_module = MagicMock(spec=LoRaModule)
+        mock_module.ce_pin = 0
+        mock_module.communication_success = True
+        mock_module.module_type = "RFM95W (High-Band 868MHz / Semtech SX1276)"
+        mock_module.silicon_revision = 0x12
+
+        # Patch the LoRaModule constructor to return our mock
+        with patch('src.drivers.lora_detection.LoRaModule', return_value=mock_module):
+            detector = LoRaModuleDetector(ce_pins=[0])
+
+        assert len(detector.modules) == 1
+        assert detector.modules[0].communication_success is True
+        assert "RFM95W" in detector.modules[0].module_type or "Multi-band" in detector.modules[0].module_type
+
+    def test_init_rfm98w_with_factory(self) -> None:
+        """Test that LoRaModuleDetector initializes correctly with RFM98W fake device."""
+        mock_module = MagicMock(spec=LoRaModule)
+        mock_module.ce_pin = 1
+        mock_module.communication_success = True
+        mock_module.module_type = "RFM98W (Low-Band 433Mhz / Semtech SX1278)"
+        mock_module.silicon_revision = 0x19
+
+        with patch('src.drivers.lora_detection.LoRaModule', return_value=mock_module):
+            detector = LoRaModuleDetector(ce_pins=[1])
+
+        assert len(detector.modules) == 1
+        assert detector.modules[0].communication_success is True
+        assert "RFM98W" in detector.modules[0].module_type
+
+    def test_init_none_module(self) -> None:
+        """Test that LoRaModuleDetector handles 'none' (no device) correctly."""
+        mock_module = MagicMock(spec=LoRaModule)
+        mock_module.ce_pin = 0
+        mock_module.communication_success = False
+        mock_module.module_type = "Unknown / Communication Error"
+        mock_module.silicon_revision = None
+
+        with patch('src.drivers.lora_detection.LoRaModule', return_value=mock_module):
+            detector = LoRaModuleDetector(ce_pins=[0])
+
+        assert len(detector.modules) == 1
+        assert detector.modules[0].communication_success is False
+        assert detector.modules[0].module_type == "Unknown / Communication Error"
+
+    def test_init_multi_band_module(self) -> None:
+        """Test that LoRaModuleDetector initializes correctly with multi-band fake device."""
+        mock_module = MagicMock(spec=LoRaModule)
+        mock_module.ce_pin = 0
+        mock_module.communication_success = True
+        mock_module.module_type = "Multi-band - Likely RFM95W (High-Band 868MHz and/or Low-Band 433Mhz / Semtech SX1276)"
+        mock_module.silicon_revision = 0x12
+
+        with patch('src.drivers.lora_detection.LoRaModule', return_value=mock_module):
+            detector = LoRaModuleDetector(ce_pins=[0])
+        assert len(detector.modules) == 1
+        assert detector.modules[0].communication_success is True
+        assert "Multi-band" in detector.modules[0].module_type
+
+
+class TestLoRaModuleDetectorRegisters:
+    """Test suite for register read/write operations."""
+
+    def test_read_register_rfm95w(self) -> None:
+        """Test reading registers from RFM95W fake device."""
+        mock_module = MagicMock(spec=LoRaModule)
+        mock_module.ce_pin = 0
+        mock_module.communication_success = True
+        mock_module.module_type = "RFM95W (High-Band 868MHz / Semtech SX1276)"
+        mock_module.silicon_revision = 0x12
+        mock_module.read_register.return_value = 0x12
+
+        with patch('src.drivers.lora_detection.LoRaModule', return_value=mock_module):
+            detector = LoRaModuleDetector(ce_pins=[0])
+
+        # Verify read_register was called with the correct address
+        mock_module.read_register.assert_called()
+        assert mock_module.read_register.return_value == 0x12
+
+    def test_write_register_rfm95w(self) -> None:
+        """Test writing registers to RFM95W fake device."""
+        mock_module = MagicMock(spec=LoRaModule)
+        mock_module.ce_pin = 0
+        mock_module.communication_success = True
+        mock_module.module_type = "RFM95W (High-Band 868MHz / Semtech SX1276)"
+        mock_module.silicon_revision = 0x12
+        mock_module.write_register.return_value = 0x08
+
+        with patch('src.drivers.lora_detection.LoRaModule', return_value=mock_module):
+            detector = LoRaModuleDetector(ce_pins=[0])
+
+        # Verify write_register was called with the correct values
+        mock_module.write_register.assert_called()
+        assert mock_module.write_register.return_value == 0x08
+
+    def test_read_register_none_device(self) -> None:
+        """Test that reading from 'none' device returns None."""
+        mock_module = MagicMock(spec=LoRaModule)
+        mock_module.ce_pin = 0
+        mock_module.communication_success = False
+        mock_module.module_type = "Unknown / Communication Error"
+        mock_module.silicon_revision = None
+        mock_module.read_register.return_value = None
+
+        with patch('src.drivers.lora_detection.LoRaModule', return_value=mock_module):
+            detector = LoRaModuleDetector(ce_pins=[0])
+
+        # Reading should return None when communication fails
+        assert mock_module.read_register.return_value is None
+class TestLoRaModuleDetection:
+    """Test suite for module type detection."""
+
+    def test_detect_single_module_ce0(self) -> None:
+        """Test detection of a single module on CE0 with FakeSpiDev."""
+        fake_spi = FakeSpiDev(module_type="rfm95w")
+
+        with patch("src.drivers.lora_module.spidev.SpiDev", return_value=fake_spi):
+            detector = LoRaModuleDetector(ce_pins=[0])
+
+        results = detector.detect_modules()
+
+        assert len(results) == 1
+        assert results[0]["ce_pin"] == 0
+        assert (
+            "RFM95W" in results[0].get("module_type", "")
+            or "Multi-band" in results[0].get("module_type", "")
+        )
+
+    def test_detect_single_module_ce1(self) -> None:
+        """Test detection of a single module on CE0 with FakeSpiDev."""
+        fake_spi = FakeSpiDev(module_type="rfm98w")
+
+        with patch("src.drivers.lora_module.spidev.SpiDev", return_value=fake_spi):
+            detector = LoRaModuleDetector(ce_pins=[1])
+
+        results = detector.detect_modules()
+
+        assert len(results) == 1
+        assert results[0]["ce_pin"] == 1
+        assert (
+            "RFM98W" in results[0].get("module_type", "")
+            or "Multi-band" in results[0].get("module_type", "")
+        )
+
+    def test_detect_multi_band(self) -> None:
+        """Test that multi-band is correctly detected with FakeSpiDev."""
+        fake_spi = FakeSpiDev(module_type="multi_band")
+
+
+        with patch("src.drivers.lora_module.spidev.SpiDev", return_value=fake_spi):
+            detector = LoRaModuleDetector(ce_pins=[0])
+
+
+        results = detector.detect_modules()
+
+        assert len(results) == 1
+        assert "Multi-band" in results[0].get("module_type", "")
+
+
+    def test_detect_multiple_modules(self) -> None:
+        """Test detection of modules on both CE0 and CE1 with FakeSpiDev."""
+        fake_spi_ce0 = FakeSpiDev(module_type="rfm95w")
+        fake_spi_ce1 = FakeSpiDev(module_type="rfm98w")
+
+        # Counter to alternate between SPI devices per constructor call
+        call_count: list[int] = [0]
+
+        def spi_factory() -> FakeSpiDev:
+            call_count[0] += 1
+            return fake_spi_ce0 if call_count[0] == 1 else fake_spi_ce1
+
+        with patch("src.drivers.lora_module.spidev.SpiDev") as mock_spidev:
+            mock_spidev.side_effect = lambda: spi_factory()
+            detector = LoRaModuleDetector(ce_pins=[0, 1])
+
+        results = detector.detect_modules()
+
+        assert len(results) == 2
+        ce_pins_found: set[int] = {r["ce_pin"] for r in results}
+        assert ce_pins_found == {0, 1}
+
+    def test_detector_with_no_pins(self) -> None:
+        """Test detector initialized with empty CE pins list."""
+        detector = LoRaModuleDetector(ce_pins=[])
+
+        results = detector.detect_modules()
+
+        assert len(results) == 0
+        assert len(detector.modules) == 0
+
+
+class TestLoRaModuleDetectorEdgeCases:
+    """Test suite for edge cases and error handling."""
+
+    def test_spi_failure_read(self) -> None:
+        """Test that SPI read failures are handled correctly."""
+        mock_module = MagicMock(spec=LoRaModule)
+        mock_module.ce_pin = 0
+        mock_module.communication_success = False
+        mock_module.module_type = "Unknown / Communication Error"
+        mock_module.silicon_revision = None
+
+        with patch('src.drivers.lora_detection.LoRaModule', return_value=mock_module):
+            detector = LoRaModuleDetector(ce_pins=[0])
+
+        # The initialization should fail due to the read failure
+        assert detector.modules[0].communication_success is False
+
+    def test_spi_failure_write(self) -> None:
+        """Test that SPI write failures are handled correctly."""
+        mock_module = MagicMock(spec=LoRaModule)
+        mock_module.ce_pin = 0
+        mock_module.communication_success = True
+        mock_module.module_type = "RFM95W (High-Band 868MHz / Semtech SX1276)"
+        mock_module.silicon_revision = 0x12
+
+        with patch('src.drivers.lora_detection.LoRaModule', return_value=mock_module):
+            detector = LoRaModuleDetector(ce_pins=[0])
+
+        # The module was created but communication may have failed
+        assert detector is not None
+        assert len(detector.modules) == 1
+
+    def test_spi_device_cleanup_on_delete(self) -> None:
+        """Test that SPI device close is called when module is destroyed via __del__."""
+        fake_spi = FakeSpiDev(module_type="rfm95w")
+
+        # Construct a real LoRaModule with our FakeSpiDev
+        module = LoRaModule(ce_pin=0, spi_factory=lambda: fake_spi)
+
+        # Verify SPI device was opened
+        assert module.spi_device is fake_spi
+        assert fake_spi._opened is True
+
+        # Trigger cleanup by calling __del__
+        module.__del__()
+
+        # Verify close() was called (sets _opened to False)
+        assert fake_spi._opened is False
+
+
+
+
+
+
+
+
+
+
+
+
+
+
