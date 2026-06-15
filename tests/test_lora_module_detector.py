@@ -291,6 +291,86 @@ class TestLoRaModuleDetectorEdgeCases:
         assert fake_spi._opened is False
 
 
+class TestLoRaModuleDetectorValidation:
+    """Test suite for validate_config() method coverage."""
+
+    def test_validate_config_match_rfm95w(self) -> None:
+        """Test validation when detected module matches expected type."""
+        fake_spi = FakeSpiDev(module_type="rfm95w")
+
+        with patch("src.drivers.lora_module.spidev.SpiDev", return_value=fake_spi):
+            detector = LoRaModuleDetector(ce_pins=[0])
+
+        config = LoRaModuleConfig(
+            ce0_expected_module_type="rfm95w",
+            ce1_expected_module_type=None,
+        )
+        results = detector.validate_config(config)
+
+        assert len(results) == 1
+        assert results[0].passed is True
+        assert "Match" in results[0].message
+
+    def test_validate_config_mismatch(self) -> None:
+        """Test validation when detected module does NOT match expected type."""
+        fake_spi = FakeSpiDev(module_type="none")
+
+        with patch("src.drivers.lora_module.spidev.SpiDev", return_value=fake_spi):
+            detector = LoRaModuleDetector(ce_pins=[0])
+
+        config = LoRaModuleConfig(
+            ce0_expected_module_type="rfm95w",
+            ce1_expected_module_type=None,
+        )
+        results = detector.validate_config(config)
+
+        assert len(results) == 1
+        assert results[0].passed is False
+        assert "Mismatch" in results[0].message
+
+    def test_validate_config_none_expectation(self) -> None:
+        """Test validation when expected module type is None (no expectation)."""
+        fake_spi = FakeSpiDev(module_type="rfm95w")
+
+        with patch("src.drivers.lora_module.spidev.SpiDev", return_value=fake_spi):
+            detector = LoRaModuleDetector(ce_pins=[0])
+
+        config = LoRaModuleConfig(
+            ce0_expected_module_type=None,
+            ce1_expected_module_type="rfm95w",
+        )
+        results = detector.validate_config(config)
+
+        # CE0's expectation is None so it gets skipped; the detector has no CE1 module
+        # so no ValidationResult objects are produced at all.
+        assert len(results) == 0
+
+    def test_validate_config_dual_ce(self) -> None:
+        """Test validation with both CE pins configured."""
+        call_count: list[int] = [0]
+
+        def spi_factory() -> FakeSpiDev:
+            call_count[0] += 1
+            return (
+                FakeSpiDev(module_type="rfm95w")
+                if call_count[0] == 1
+                else FakeSpiDev(module_type="rfm98w")
+            )
+
+        with patch("src.drivers.lora_module.spidev.SpiDev") as mock_spidev:
+            mock_spidev.side_effect = lambda: spi_factory()
+            detector = LoRaModuleDetector(ce_pins=[0, 1])
+
+        config = LoRaModuleConfig(
+            ce0_expected_module_type="rfm95w",
+            ce1_expected_module_type="rfm98w",
+        )
+        results = detector.validate_config(config)
+
+        assert len(results) == 2
+        assert all(r.passed for r in results)
+
+
 
 
 
