@@ -16,7 +16,6 @@ from __future__ import annotations
 
 import sys
 import os
-sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
 
 from src.drivers.lora_module import LoRaModule
 from src.drivers.lora_detection import (
@@ -27,20 +26,6 @@ from src.drivers.lora_detection import (
 from tests.fakes import FakeSpiDev
 from unittest.mock import MagicMock, patch
 import pytest
-
-
-def run_tests() -> None:
-    """Run the tests."""
-    pytest.main([__file__, "-v"])
-
-if __name__ == "__main__":
-    import subprocess
-
-    result = subprocess.run(
-        ["python", "-m", "pytest", __file__, "-v"],
-        cwd=os.path.dirname(os.path.abspath(__file__))
-    )
-    sys.exit(result.returncode)
 
 
 class TestLoRaModuleDetectorInitialization:
@@ -510,6 +495,16 @@ class TestLoRaModuleDetectorExtendedDetection:
         # With single pin, extended detection should not run (no dual-SPI flag set)
         assert "is_single_module_dual_spi" not in results[0] or \
                results[0].get("is_single_module_dual_spi") is False
+
+
+if __name__ == "__main__":
+    """Run tests using pytest."""
+    print("=" * 60)
+    print("Running LoRa Module Detector Tests")
+    print("=" * 60)
+
+    exit_code = pytest.main([__file__, "-v"])
+    sys.exit(exit_code)
 
 
 
