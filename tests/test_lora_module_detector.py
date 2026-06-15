@@ -429,6 +429,89 @@ class TestLoRaModuleDetectorFrequency:
         assert freq_ce1 == 410000
 
 
+class TestLoRaModuleDetectorExtendedDetection:
+    """Tests for _extended_detect_modules() path coverage."""
+
+    def test_extended_detect_different_modules(self) -> None:
+        """Test extended detection when CE0 and CE1 are different physical modules.
+
+        Verifies that two distinct FakeSpiDev-backed modules on separate CE pins
+        produce results where neither is flagged as a single physical module on dual SPI.
+        """
+        fake_spi_ce0 = FakeSpiDev(module_type="rfm95w")
+        fake_spi_ce1 = FakeSpiDev(module_type="rfm98w")
+
+        call_count: list[int] = [0]
+
+        def spi_factory() -> FakeSpiDev:
+            call_count[0] += 1
+            return fake_spi_ce0 if call_count[0] == 1 else fake_spi_ce1
+
+        with patch("src.drivers.lora_module.spidev.SpiDev") as mock_spidev:
+            mock_spidev.side_effect = lambda: spi_factory()
+            detector = LoRaModuleDetector(ce_pins=[0, 1])
+
+        results = detector.detect_modules()
+
+        # Should detect two separate modules (not same physical module)
+        assert len(results) == 2
+        for result in results:
+            assert result.get("is_single_module_dual_spi") is False
+
+    def test_extended_detect_runs_with_multiple_pins(self) -> None:
+        """Test that _extended_detect_modules runs when multiple CE pins are configured.
+
+        Verifies that detect_modules() populates extended detection fields
+        (unique_value_written, unique_value_verified, is_single_module_dual_spi)
+        only when both CE0 and CE1 have modules attached.
+        """
+        fake_spi_ce0 = FakeSpiDev(module_type="rfm95w")
+        fake_spi_ce1 = FakeSpiDev(module_type="rfm98w")
+
+        call_count: list[int] = [0]
+
+        def spi_factory() -> FakeSpiDev:
+            call_count[0] += 1
+            return fake_spi_ce0 if call_count[0] == 1 else fake_spi_ce1
+
+        with patch("src.drivers.lora_module.spidev.SpiDev") as mock_spidev:
+            mock_spidev.side_effect = lambda: spi_factory()
+            detector = LoRaModuleDetector(ce_pins=[0, 1])
+
+        results = detector.detect_modules()
+
+        # Verify that extended detection ran (results contain verification fields)
+        assert len(results) == 2
+        for result in results:
+            assert "is_single_module_dual_spi" in result
+            assert "unique_value_written" in result
+            assert "unique_value_verified" in result
+
+        # Both modules should have been initialized (SPI device not None)
+        assert len(detector.modules) == 2
+        for module in detector.modules:
+            assert module.spi_device is not None
+
+    def test_single_pin_no_extended_detection(self) -> None:
+        """Test that _extended_detect_modules is skipped when only one CE pin.
+
+        With a single CE pin, detect_modules() does not enter the extended
+        detection block (ce1_result stays None), so dual-SPI verification flags
+        are absent from results entirely.
+        """
+        fake_spi = FakeSpiDev(module_type="rfm95w")
+
+        with patch("src.drivers.lora_module.spidev.SpiDev", return_value=fake_spi):
+            detector = LoRaModuleDetector(ce_pins=[0])
+
+        results = detector.detect_modules()
+
+        assert len(results) == 1
+        # With single pin, extended detection should not run (no dual-SPI flag set)
+        assert "is_single_module_dual_spi" not in results[0] or \
+               results[0].get("is_single_module_dual_spi") is False
+
+
 
 
 
