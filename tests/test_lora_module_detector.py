@@ -362,6 +362,32 @@ class TestLoRaModuleDetectorFrequency:
 
         assert freq == 410000  # kHz for 433 MHz band
 
+    def test_calculate_unique_frequency_rfm95w_ce1(self) -> None:
+        """Test unique frequency calculation for RFM95W on CE1."""
+        fake_spi = FakeSpiDev(module_type="rfm95w")
+
+        with patch("src.drivers.lora_module.spidev.SpiDev", return_value=fake_spi):
+            detector = LoRaModuleDetector(ce_pins=[1])
+
+        freq: int = detector.calculate_unique_frequency(
+            1, "RFM95W (High-Band 868MHz / Semtech SX1276)", None
+        )
+
+        assert freq == 862000  # kHz for RFM95W on CE1
+
+    def test_calculate_unique_frequency_rfm98w_ce0(self) -> None:
+        """Test unique frequency calculation for RFM98W on CE0."""
+        fake_spi = FakeSpiDev(module_type="rfm98w")
+
+        with patch("src.drivers.lora_module.spidev.SpiDev", return_value=fake_spi):
+            detector = LoRaModuleDetector(ce_pins=[0])
+
+        freq: int = detector.calculate_unique_frequency(
+            0, "RFM98W (Low-Band 433Mhz / Semtech SX1278)", None
+        )
+
+        assert freq == 480000  # kHz for RFM98W on CE0
+
     def test_calculate_unique_frequency_multi_band_ce0(self) -> None:
         """Test unique frequency calculation when module type is ambiguous (CE0)."""
         fake_spi = FakeSpiDev(module_type="multi_band")
