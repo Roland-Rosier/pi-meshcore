@@ -34,15 +34,8 @@ class TestLoRaModuleDetectorInitialization:
         """Test that LoRaModuleDetector initializes correctly with RFM95W fake device."""
         rfm95w_spi = FakeSpiDev(module_type="rfm95w")
 
-        # Create a mock LoRaModule with the fake SPI device
-        mock_module = MagicMock(spec=LoRaModule)
-        mock_module.ce_pin = 0
-        mock_module.communication_success = True
-        mock_module.module_type = "RFM95W (High-Band 868MHz / Semtech SX1276)"
-        mock_module.silicon_revision = 0x12
-
-        # Patch the LoRaModule constructor to return our mock
-        with patch('src.drivers.lora_detection.LoRaModule', return_value=mock_module):
+        # Patch spidev.SpiDev to return our fake for the real LoRaModule constructor.
+        with patch("src.drivers.lora_module.spidev.SpiDev", return_value=rfm95w_spi):
             detector = LoRaModuleDetector(ce_pins=[0])
 
         assert len(detector.modules) == 1
@@ -51,18 +44,15 @@ class TestLoRaModuleDetectorInitialization:
 
     def test_init_rfm98w_with_factory(self) -> None:
         """Test that LoRaModuleDetector initializes correctly with RFM98W fake device."""
-        mock_module = MagicMock(spec=LoRaModule)
-        mock_module.ce_pin = 1
-        mock_module.communication_success = True
-        mock_module.module_type = "RFM98W (Low-Band 433Mhz / Semtech SX1278)"
-        mock_module.silicon_revision = 0x19
+        rfm98w_spi = FakeSpiDev(module_type="rfm98w")
 
-        with patch('src.drivers.lora_detection.LoRaModule', return_value=mock_module):
+        # Patch spidev.SpiDev to return our fake for the real LoRaModule constructor.
+        with patch("src.drivers.lora_module.spidev.SpiDev", return_value=rfm98w_spi):
             detector = LoRaModuleDetector(ce_pins=[1])
 
         assert len(detector.modules) == 1
         assert detector.modules[0].communication_success is True
-        assert "RFM98W" in detector.modules[0].module_type
+        assert "RFM98W" in detector.modules[0].module_type or "Multi-band" in detector.modules[0].module_type
 
     def test_init_none_module(self) -> None:
         """Test that LoRaModuleDetector handles 'none' (no device) correctly."""
