@@ -15,7 +15,6 @@
 from __future__ import annotations
 
 import sys
-import os
 
 from src.drivers.lora_module import LoRaModule
 from src.drivers.lora_detection import (
