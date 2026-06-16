@@ -98,36 +98,24 @@ class TestLoRaModuleDetectorRegisters:
     """Test suite for register read/write operations."""
 
     def test_read_register_rfm95w(self) -> None:
-        """Test reading registers from RFM95W fake device."""
-        mock_module = MagicMock(spec=LoRaModule)
-        mock_module.ce_pin = 0
-        mock_module.communication_success = True
-        mock_module.module_type = "RFM95W (High-Band 868MHz / Semtech SX1276)"
-        mock_module.silicon_revision = 0x12
-        mock_module.read_register.return_value = 0x12
+        """Test that LoRaModule reads register 0x12 during initialization."""
+        fake_spi = FakeSpiDev(module_type="rfm95w")
+        module = LoRaModule(ce_pin=0, spi_factory=lambda: fake_spi)
 
-        with patch('src.drivers.lora_detection.LoRaModule', return_value=mock_module):
-            detector = LoRaModuleDetector(ce_pins=[0])
-
-        # Verify read_register was called with the correct address
-        mock_module.read_register.assert_called()
-        assert mock_module.read_register.return_value == 0x12
+        # The real _initialize() calls read_register(0x12).
+        # Verify the result is stored (silicon_revision set from register 0x42).
+        assert module.communication_success is True
+        assert module.silicon_revision == 0x12  # FakeSpiDev returns this for address 0x42
 
     def test_write_register_rfm95w(self) -> None:
-        """Test writing registers to RFM95W fake device."""
-        mock_module = MagicMock(spec=LoRaModule)
-        mock_module.ce_pin = 0
-        mock_module.communication_success = True
-        mock_module.module_type = "RFM95W (High-Band 868MHz / Semtech SX1276)"
-        mock_module.silicon_revision = 0x12
-        mock_module.write_register.return_value = 0x08
+        """Test that LoRaModule write_register works correctly."""
+        fake_spi = FakeSpiDev(module_type="rfm95w")
+        module = LoRaModule(ce_pin=0, spi_factory=lambda: fake_spi)
 
-        with patch('src.drivers.lora_detection.LoRaModule', return_value=mock_module):
-            detector = LoRaModuleDetector(ce_pins=[0])
-
-        # Verify write_register was called with the correct values
-        mock_module.write_register.assert_called()
-        assert mock_module.write_register.return_value == 0x08
+        # Write a value to a register and verify via FakeSpiDev's get_register.
+        result = module.write_register(0x12, 0xFF)
+        assert result == 0xFF  # xfer2 echoes the written byte back
+        assert fake_spi.get_register(0x12) == 0xFF
 
     def test_read_register_none_device(self) -> None:
         """Test that reading from 'none' device returns None."""
