@@ -332,6 +332,54 @@ class TestLoRaModuleDetectorValidation:
         assert len(results) == 2
         assert all(r.passed for r in results)
 
+    def test_validate_config_rfm98w_expected_rfm95w_detected(self) -> None:
+        """Test validation when RFM98W is expected but RFM95W is detected."""
+        fake_spi = FakeSpiDev(module_type="rfm95w")
+
+        with patch("src.drivers.lora_module.spidev.SpiDev", return_value=fake_spi):
+            detector = LoRaModuleDetector(ce_pins=[0])
+
+        config = LoRaModuleConfig(
+            ce0_expected_module_type="rfm98w",
+            ce1_expected_module_type=None,
+        )
+        results = detector.validate_config(config)
+
+        assert len(results) == 1
+        assert results[0].passed is False
+        assert "Mismatch" in results[0].message
+
+    def test_validate_config_partial_failure_dual_ce(self) -> None:
+        """Test validation when CE0 matches but CE1 does not."""
+        call_count: list[int] = [0]
+
+        def spi_factory() -> FakeSpiDev:
+            call_count[0] += 1
+            return (
+                FakeSpiDev(module_type="rfm95w")   # CE0: correct
+                if call_count[0] == 1
+                else FakeSpiDev(module_type="rfm95w")  # CE1: wrong (expected rfm98w)
+            )
+
+        with patch("src.drivers.lora_module.spidev.SpiDev") as mock_spidev:
+            mock_spidev.side_effect = lambda: spi_factory()
+            detector = LoRaModuleDetector(ce_pins=[0, 1])
+
+        config = LoRaModuleConfig(
+            ce0_expected_module_type="rfm95w",
+            ce1_expected_module_type="rfm98w",
+        )
+        results = detector.validate_config(config)
+
+        assert len(results) == 2
+        assert results[0].passed is True   # CE0 matches
+        assert results[1].passed is False  # CE1 mismatches
+
+    def test_config_requires_at_least_one_expectation(self) -> None:
+        """Test that LoRaModuleConfig raises ValueError when both expectations are None."""
+        with pytest.raises(ValueError, match="At least one CE line"):
+            LoRaModuleConfig(ce0_expected_module_type=None, ce1_expected_module_type=None)
+
 
 class TestLoRaModuleDetectorFrequency:
     """Tests for calculate_unique_frequency() method coverage."""
@@ -498,6 +546,33 @@ class TestLoRaModuleDetectorExtendedDetection:
         # With single pin, extended detection should not run (no dual-SPI flag set)
         assert "is_single_module_dual_spi" not in results[0] or \
                results[0].get("is_single_module_dual_spi") is False
+
+    def test_extended_detect_unique_write_failure(self) -> None:
+        """Test extended detection when unique value write fails on CE0."""
+        fake_spi_ce0 = FakeSpiDev(module_type="rfm95w")
+        fake_spi_ce1 = FakeSpiDev(module_type="rfm98w")
+
+        call_count: list[int] = [0]
+
+        def spi_factory() -> FakeSpiDev:
+            call_count[0] += 1
+            if call_count[0] == 1:
+                # CE0: make frequency write fail by setting registers to unsupported values
+                fake_spi_ce0.set_register(0x06, 0xFF)
+                return fake_spi_ce0
+            else:
+                return fake_spi_ce1
+
+        with patch("src.drivers.lora_module.spidev.SpiDev") as mock_spidev:
+            mock_spidev.side_effect = lambda: spi_factory()
+            detector = LoRaModuleDetector(ce_pins=[0, 1])
+
+        results = detector.detect_modules()
+
+        assert len(results) == 2
+        for result in results:
+            assert result["unique_value_written"] is False
+            assert result["is_single_module_dual_spi"] is False
 
 
 if __name__ == "__main__":
