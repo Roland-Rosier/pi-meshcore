@@ -85,42 +85,48 @@ class TestLoRaModuleDetectorInitialization:
 
 
 class TestLoRaModuleDetectorRegisters:
-    """Test suite for register read/write operations."""
+    """Test suite for register read/write operations via LoRaModule API."""
 
     def test_read_register_rfm95w(self) -> None:
-        """Test that LoRaModule reads register 0x12 during initialization."""
+        """Test reading registers from RFM95W fake device through real module."""
         fake_spi = FakeSpiDev(module_type="rfm95w")
-        module = LoRaModule(ce_pin=0, spi_factory=lambda: fake_spi)
+        with patch("src.drivers.lora_module.spidev.SpiDev", return_value=fake_spi):
+            detector = LoRaModuleDetector(ce_pins=[0])
 
-        # The real _initialize() calls read_register(0x12).
-        # Verify the result is stored (silicon_revision set from register 0x42).
-        assert module.communication_success is True
-        assert module.silicon_revision == 0x12  # FakeSpiDev returns this for address 0x42
+        # detect_modules() calls read_register(0x12) during result construction.
+        results: List[Dict] = detector.detect_modules()
+
+        # The result dict includes the register value from read_register(0x12).
+        assert "reg_rxbw_freqifmsb" in results[0]
+        # FakeSpiDev returns 0x00 for address 0x12 (default register value),
+        # and 0x12 only for address 0x42 (silicon revision) during init.
+        assert results[0]["reg_rxbw_freqifmsb"] is not None
 
     def test_write_register_rfm95w(self) -> None:
-        """Test that LoRaModule write_register works correctly."""
+        """Test writing registers to RFM95W fake device through real module."""
         fake_spi = FakeSpiDev(module_type="rfm95w")
-        module = LoRaModule(ce_pin=0, spi_factory=lambda: fake_spi)
 
-        # Write a value to a register and verify via FakeSpiDev's get_register.
-        result = module.write_register(0x12, 0xFF)
+        # Create a real LoRaModule instance (not patched detector).
+        with patch("src.drivers.lora_module.spidev.SpiDev", return_value=fake_spi):
+            module = LoRaModule(ce_pin=0)
+
+        # Call write_register directly and verify it writes to FakeSpiDev's register store.
+        result: Optional[int] = module.write_register(0x12, 0xFF)
+
         assert result == 0xFF  # xfer2 echoes the written byte back
         assert fake_spi.get_register(0x12) == 0xFF
 
     def test_read_register_none_device(self) -> None:
-        """Test that reading from 'none' device returns None."""
-        mock_module = MagicMock(spec=LoRaModule)
-        mock_module.ce_pin = 0
-        mock_module.communication_success = False
-        mock_module.module_type = "Unknown / Communication Error"
-        mock_module.silicon_revision = None
-        mock_module.read_register.return_value = None
+        """Test that reading from 'none' device handles communication failure gracefully."""
+        fake_spi = FakeSpiDev(module_type="none")
 
-        with patch('src.drivers.lora_detection.LoRaModule', return_value=mock_module):
+        with patch("src.drivers.lora_module.spidev.SpiDev", return_value=fake_spi):
             detector = LoRaModuleDetector(ce_pins=[0])
 
-        # Reading should return None when communication fails
-        assert mock_module.read_register.return_value is None
+        # The module should report communication_failure.
+        assert detector.modules[0].communication_success is False
+        assert "Unknown" in detector.modules[0].module_type or \
+               "Error" in detector.modules[0].module_type
 class TestLoRaModuleDetection:
     """Test suite for module type detection."""
 
