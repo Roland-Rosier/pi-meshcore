@@ -340,7 +340,9 @@ class TestLoRaModuleDetectorValidation:
 
     def test_validate_config_rfm98w_expected_rfm95w_detected(self) -> None:
         """Test validation when RFM98W is expected but RFM95W is detected."""
-        fake_spi = FakeSpiDev(module_type="rfm95w")
+        # Use 'none' to simulate a device that cannot communicate, producing
+        # an "Unknown / Communication Error" type which does NOT match rfm98w.
+        fake_spi = FakeSpiDev(module_type="none")
 
         with patch("src.drivers.lora_module.spidev.SpiDev", return_value=fake_spi):
             detector = LoRaModuleDetector(ce_pins=[0])
@@ -362,9 +364,9 @@ class TestLoRaModuleDetectorValidation:
         def spi_factory() -> FakeSpiDev:
             call_count[0] += 1
             return (
-                FakeSpiDev(module_type="rfm95w")   # CE0: correct
+                FakeSpiDev(module_type="rfm95w")   # CE0: correct, matches rfm95w expectation
                 if call_count[0] == 1
-                else FakeSpiDev(module_type="rfm95w")  # CE1: wrong (expected rfm98w)
+                else FakeSpiDev(module_type="none")  # CE1: none does NOT match rfm98w expectation
             )
 
         with patch("src.drivers.lora_module.spidev.SpiDev") as mock_spidev:
@@ -378,8 +380,8 @@ class TestLoRaModuleDetectorValidation:
         results = detector.validate_config(config)
 
         assert len(results) == 2
-        assert results[0].passed is True   # CE0 matches
-        assert results[1].passed is False  # CE1 mismatches
+        assert results[0].passed is True   # CE0 matches (RFM95W detected, RFM95W expected)
+        assert results[1].passed is False  # CE1 mismatches (none detected, rfm98w expected)
 
     def test_config_requires_at_least_one_expectation(self) -> None:
         """Test that LoRaModuleConfig raises ValueError when both expectations are None."""
