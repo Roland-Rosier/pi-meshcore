@@ -11,3 +11,12 @@
 # WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 # see the License for the specific language governing permissions and
 # limitations under the License.
+
+"""Pytest configuration for the MeshCore LoRa project."""
+
+import sys
+from pathlib import Path
+
+# Add the project root to the Python path
+sys.path.insert(0, str(Path(__file__).parent.parent))
+

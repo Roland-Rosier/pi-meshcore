@@ -1,15 +1,18 @@
 # Copyright 2026 Roland Rosier
+#
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
 # You may obtain a copy of the License at
-# http://www.apache.org/licenses/LICENSE-2.0
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
 # unless required by applicable law or agreed to in writing, software
-# distributed under the License is distributed on an "as is" basis,
-# without warranties or conditions of any kind, either express or implied.
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 # see the License for the specific language governing permissions and
 # limitations under the License.
 
-from typing import List, Optional, Dict, Tuple
+from typing import Any, Callable, List, Optional, Tuple
 import spidev
 import time
 
@@ -21,14 +24,18 @@ BIT_LF_MODE_ON = 0x08
 class LoRaModule:
     """Class to represent and interact with a LoRa module."""
     
-    def __init__(self, ce_pin: int):
+    def __init__(self, ce_pin: int, spi_factory: Optional[Callable[[], Any]] = None):
         """
         Initialize a LoRa module with its own SPI device.
         
         :param ce_pin: CE pin number (0 or 1)
+        :param spi_factory: Optional factory function to create the SPI device for testing
         """
         self.ce_pin = ce_pin
-        self.spi_device = spidev.SpiDev()
+        if spi_factory is not None:
+            self.spi_device = spi_factory()
+        else:
+            self.spi_device = spidev.SpiDev()
         self.silicon_revision = None
         self.communication_success = False
         self.supports_high_frequency = False
@@ -83,6 +90,7 @@ class LoRaModule:
         """
         try:
             # Read register (bit 7 is clear for read)
+            # Note that with xfer2, CS is held between blocks in transfer
             response = self.spi_device.xfer2([reg_addr & 0x7F, 0x00])
             time.sleep(0.01)
             return response[1]
@@ -100,6 +108,7 @@ class LoRaModule:
         """
         try:
             # Write register (bit 7 is set for write)
+            # Note that with xfer2, CS is held between blocks in transfer
             response = self.spi_device.xfer2([reg_addr | 0x80, value])
             time.sleep(0.01)
             return response[1]
@@ -117,7 +126,7 @@ class LoRaModule:
         print(f"Calculated registers for frequency of {a_freq_in_khz} kHz with register values (0x{msb:02X} 0x{mid:02X} 0x{lsb:02X})")
         return (msb, mid, lsb)
 
-    def _read_frequency_registers(self) -> Tuple[int, int, int]:
+    def _read_frequency_registers(self) -> Tuple[int|None, int|None, int|None]:
         """Read the frequency registers."""
         msb = self.read_register(0x06)
         mid = self.read_register(0x07)
@@ -125,31 +134,45 @@ class LoRaModule:
         time.sleep(0.01)
         return (msb, mid, lsb)
 
-    def _write_frequency_registers(self, a_msb: int, a_mid: int, a_lsb: int) -> None:
+    def _write_frequency_registers(self, a_msb: int, a_mid: int, a_lsb: int) -> Tuple[int|None, int|None, int|None, int|None]:
         """Write the frequency registers."""
+        response_mode = None
+        response_msb = None
+        response_mid = None
+        response_lsb = None
         # 1. Put the chip into Sleep Mode to allow frequency register changes
-        self.write_register(REG_OP_MODE, MODE_SLEEP)
-        time.sleep(0.01)
-        self.write_register(0x06, a_msb)
-        self.write_register(0x07, a_mid)
-        self.write_register(0x08, a_lsb)
-        time.sleep(0.01)
+        response_mode = self.write_register(REG_OP_MODE, MODE_SLEEP)
+        if response_mode is not None:
+            response_msb = self.write_register(0x06, a_msb)
+        if response_msb is not None:
+            response_mid = self.write_register(0x07, a_mid)
+        if response_mid is not None:
+            response_lsb = self.write_register(0x08, a_lsb)
+        return (response_mode, response_msb, response_mid, response_lsb)
 
-    def _write_frequency_for_khz(self, a_freq_in_khz: int) -> Tuple[int, int, int]:
+    def _write_frequency_for_khz(self, a_freq_in_khz: int) -> Tuple[int|None, int|None, int|None, int|None]:
         """Write a target frequency to the module."""
         (msb, mid, lsb) = self._calc_freq_registers_for_khz(a_freq_in_khz)
-        self._write_frequency_registers(msb, mid, lsb)
-        return (msb, mid, lsb)
+        (w_mode, w_msb, w_mid, w_lsb) = self._write_frequency_registers(msb, mid, lsb)
+        r_msb = msb if w_msb is not None else None
+        r_mid = mid if w_mid is not None else None
+        r_lsb = lsb if w_lsb is not None else None
+        return (w_mode, r_msb, r_mid, r_lsb)
 
-    def _write_and_verify_frequency_for_khz(self, a_freq_in_khz: int) -> Tuple[bool, int, int, int, int, int, int]:
+    def _write_and_verify_frequency_for_khz(self, a_freq_in_khz: int) -> Tuple[bool, int|None, int|None, int|None, int|None, int|None, int|None]:
         """Write and verify a frequency."""
         verify_success = False
-        (req_msb, req_mid, req_lsb) = self._write_frequency_for_khz(a_freq_in_khz)
+        msb = None
+        mid = None
+        lsb = None
+        (new_mode, req_msb, req_mid, req_lsb) = self._write_frequency_for_khz(a_freq_in_khz)
         time.sleep(0.01)  # Allow time for register update
-        (msb, mid, lsb) = self._read_frequency_registers()
-        time.sleep(0.01)  # Allow time for register stabilization
-        if msb == req_msb and mid == req_mid and lsb == req_lsb:
-            verify_success = True
+        if all(ele is not None for ele in (new_mode, req_msb, req_mid, req_lsb)):
+            (msb, mid, lsb) = self._read_frequency_registers()
+            time.sleep(0.01)  # Allow time for register stabilization
+            if all(ele is not None for ele in (msb, mid, lsb)):
+                if msb == req_msb and mid == req_mid and lsb == req_lsb:
+                    verify_success = True
         return (verify_success, req_msb, req_mid, req_lsb, msb, mid, lsb)
 
     def _check_frequency_support(self) -> None:
@@ -240,6 +263,7 @@ class LoRaModule:
         """
         # Use the existing verification function to write and verify the frequency
         (verify_success, req_msb, req_mid, req_lsb, _, _, _) = self._write_and_verify_frequency_for_khz(frequency_khz)
+        # print(f"Tested ({verify_success}) unique value initial retention for frequency of {frequency_khz} kHz with register values (0x{req_msb:02X} 0x{req_mid:02X} 0x{req_lsb:02X})")
         
         # Save the requested values as instance variables
         self.unique_msb = req_msb
@@ -267,9 +291,11 @@ class LoRaModule:
         
         # Read current frequency registers
         (current_msb, current_mid, current_lsb) = self._read_frequency_registers()
-        
-        # Compare with stored values
-        return (current_msb == self.unique_msb and 
-                current_mid == self.unique_mid and 
-                current_lsb == self.unique_lsb)
-    
+
+        if all(ele is not None for ele in (current_msb, current_mid, current_lsb)):
+            # Compare with stored values
+            return (current_msb == self.unique_msb and 
+                    current_mid == self.unique_mid and 
+                    current_lsb == self.unique_lsb)
+        else:
+            return False

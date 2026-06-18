@@ -83,29 +83,46 @@ This implementation includes:
 
 ```
 meshcore_rpi_lora/
-├── .gitattributes
-├── .gitignore
-├── .vscode/
-│   └── settings.json
-├── .continue/
+├── .continue/                        # Continue.dev agent configuration
+│   ├── get_tree.py                   # Tree structure retrieval script for agent workflows
+│   ├── mcpServers/
+│   │   └── desktop-commander-mcp.yaml  # MCP server config for Desktop Commander integration
 │   └── rules/
-│       ├── 01-system-constraints.md
-│       └── 02-execution-protocol.md
-├── AGENTS.md
-├── LICENSE
-├── NOTICE
-├── Prompts.txt
-├── SECURITY.md
-├── requirements.txt
-├── src/
-│   ├── __init__.py
+│       ├── 01-system-constraints.md    # Global system constraints and safety modes
+│       ├── 02-execution-protocol.md    # Phase-based execution protocol guidelines
+│       ├── 03-use-desktop-commander-mcp.md  # Desktop Commander MCP tool usage rules
+│       └── 04-use-native-edit-tools.md    # Native file editing tool (single_find_and_replace) rules
+├── .gitattributes                    # Git attribute definitions for line endings, filters
+├── .gitignore                        # Files and directories excluded from version control
+├── .prompts/                         # Reusable agent prompt templates
+│   ├── repo_analyst.prompt           # Repository analysis task prompt template
+│   └── repo_analyst_d.prompt         # Deep repository analysis variant prompt
+├── .vscode/
+│   └── settings.json                 # VS Code workspace settings and configurations
+├── AGENTS.md                         # AI agent configuration and behavior definitions
+├── LICENSE                           # Open-source license terms for the project
+├── NOTICE                            # Attribution and third-party notice file
+├── Prompts.txt                       # General prompt reference documentation
+├── README.md                         # Project overview, architecture, and setup guide
+├── SECURITY.md                       # Security policy and vulnerability reporting guidelines
+├── requirements.txt                  # Python dependency list (FastAPI, meshcore, pytest, etc.)
+├── src/                              # Main source code
+│   ├── __init__.py                   # Makes src a Python package
 │   ├── cli/
-│   │   └── check_hardware.py
+│   │   └── check_hardware.py         # CLI tool for LoRa hardware detection and status checks
 │   └── drivers/
-│       ├── __init__.py
-│       ├── lora_detection.py
-│       └── lora_module.py
-└── README.md
+│       ├── __init__.py               # Makes drivers a Python package
+│       ├── lora_detection.py          # LoRa module auto-detection logic (RFM95W/RFM98W)
+│       └── lora_module.py             # RFM95W/RFM98W radio driver implementation (SX1276/SX1278)
+├── tests/                            # Test suite
+│   ├── __init__.py                   # Makes tests a Python package
+│   ├── conftest.py                   # pytest fixtures and shared test configuration
+│   ├── fakes.py                      # Fake/mock implementations for driver testing
+│   ├── test_fakes.py                 # Unit tests for fake/mock objects
+│   ├── test_lora_module.py           # Unit tests for LoRa radio module operations
+│   ├── test_lora_module_detection.py # Tests for hardware detection logic
+│   └── test_lora_module_detector.py  # Tests for the detector subsystem component
+└── meshcore_rpi_lora/                # Project root (top-level directory reference)
 ```
 
 ---

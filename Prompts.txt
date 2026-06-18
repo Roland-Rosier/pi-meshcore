@@ -45,3 +45,130 @@ In both modes, it will have the following interfaces:
 
  Please do not implement any code at this time. The ai.md file is the only file in scope.
 
+======
+
+Context:
+
+You are a Software Architect with Electronics and Radio experience.
+
+You are developing a system which can use LoRa modules attached to a Raspberry PI to scan the radio frequencies to look for radio transmissions.
+
+
+
+The Raspberry PI has up to two LoRa modules attached to the CE0 and, optionally, the CE1 lines of the SPI0 module.
+
+
+
+Any attached module may be a RFM95W (High Frequency) or RFM98W (Low Frequency) module.
+
+
+
+It is not possible for software to check what capabilities they have, but it is possible for software to check:
+
+* Whether a module is attached to a specific SPI CE line.
+
+* Whether that module can try to output high frequency.
+
+* Whether that module can try to output low frequency.
+
+* Whether that module can try to output both high and low frequencies.
+
+
+
+The User will pass a configuration into the program and software is needed to determinine if that configuration is feasible and accept or reject that configuration accordingly.
+
+
+
+For example, a configuration may say that there is a module attached to CE1, but we determine that there is no module attached to CE1 and therefore reject that configuration.
+
+
+
+Or, a configuration may say that there is an RFM95W (High Frequency)  module attached to CE0 and we determine that:
+
+a) There is a module attached to CE0 and
+
+b) It is capable of multi-band (which includes high-frequency) output.
+
+
+
+Therefore we accept this configuration.
+
+
+
+Task:
+
+* Please create a class which captures these capabilities in a way that allows a user to describe what they think is attached to a CE line on an SPI bus and also that allows the src/drivers/lora_detection.py file to test the configuration and accept or reject it.
+
+* Please provide sufficient parameters to the "detect-modules" task in src/cli/check_hardware.py to allow the user to optionally create such a configuration and have the src/drivers/lora_detection.py class validate or reject that user-created configuration.
+
+Constraints:
+
+* All the hardware detection logic which is possible is already present in src/drivers/lora_module.py. Do not add any more.
+
+* It has already been determined that none of the registers within the devices will reliably provide any different responses, so do not try to think of any additional ways that they can.
+
+
+
+Context:
+
+You are a Software Architect with Electronics and Radio experience.
+
+You are developing a system which can use LoRa modules attached to a Raspberry PI to scan the radio frequencies to look for radio transmissions.
+
+
+
+The Raspberry PI has up to two LoRa modules attached to the CE0 and, optionally, the CE1 lines of the SPI0 module.
+
+
+
+Any attached module may be a RFM95W (High Frequency) or RFM98W (Low Frequency) module.
+
+
+
+It is not possible for software to check what capabilities they have, but it is possible for software to check:
+
+* Whether a module is attached to a specific SPI CE line.
+
+* Whether that module can try to output high frequency.
+
+* Whether that module can try to output low frequency.
+
+* Whether that module can try to output both high and low frequencies.
+
+
+
+The User will pass a configuration into the program and software is needed to determinine if that configuration is feasible and accept or reject that configuration accordingly.
+
+
+
+For example, a configuration may say that there is a module attached to CE1, but we determine that there is no module attached to CE1 and therefore reject that configuration.
+
+
+
+Or, a configuration may say that there is an RFM95W (High Frequency)  module attached to CE0 and we determine that:
+
+a) There is a module attached to CE0 and
+
+b) It is capable of multi-band (which includes high-frequency) output.
+
+
+
+Therefore we accept this configuration.
+
+
+
+Task:
+
+* Read the src/drivers/lora_detection.py, src/drivers/lora_module.py and src/cli/check_hardware.py files so that you know what is in them.
+
+* Please create a class which captures these capabilities in a way that allows a user to describe what they think is attached to a CE line on an SPI bus and also that allows the src/drivers/lora_detection.py file to test the configuration and accept or reject it.
+
+* Please provide sufficient parameters to the "detect-modules" task in src/cli/check_hardware.py to allow the user to optionally create such a configuration and have the src/drivers/lora_detection.py class validate or reject that user-created configuration.
+
+
+
+Constraints:
+
+* All the hardware detection logic which is possible is already present in src/drivers/lora_module.py. Do not add any more.
+
+* It has already been determined that none of the registers within the devices will reliably provide any different responses, so do not try to think of any additional ways that they can.
