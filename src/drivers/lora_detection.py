@@ -122,8 +122,8 @@ class LoRaModuleDetector:
                 pass  # ce1_is_rfm95w remains False
             
             # Calculate frequencies based on module types
-            freq_ce0: int = 960000 if ce0_is_rfm95w else 480000
-            freq_ce1: int = 862000 if ce1_is_rfm95w else 410000
+            # freq_ce0: int = 960000 if ce0_is_rfm95w else 480000
+            # freq_ce1: int = 862000 if ce1_is_rfm95w else 410000
             
             # Verify unique values were written correctly
             ce0_module: Optional[LoRaModule] = None
@@ -142,6 +142,7 @@ class LoRaModuleDetector:
                 result["unique_value_verified"] = False
 
             if ce0_module is not None and ce1_module is not None:
+                # print(f'Calling _extended_detect_modules')
                 results = self._extended_detect_modules(results, config)
             
         return results
