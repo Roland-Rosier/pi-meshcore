@@ -1,0 +1,83 @@
+name: "Local Config"
+version: "1.0.0"
+schema: "v1"
+models:
+  - name: "Qwen3.6-35B-A3B-GGUF:UD-Q4_K_M (Precise coding / Remote)"
+    # Note: Ollama doesn't seem to allow tool calling through its own provider, and seems to only allow it through the openai provider
+    # provider: "ollama"
+    provider: "openai"
+    #model: "hf.co/unsloth/Qwen3.6-35B-A3B-GGUF:UD-Q4_K_M"
+    #model: "hf.co/unsloth/Qwen3.6-35B-A3B-MTP-GGUF:UD-Q4_K_M"
+    #model: "qwen3.6-35b-a3b-mtp-patched-gguf:UD-Q4_K_M"
+    #model: "qwen3.6:35b"
+    # It looks as though using LM Studio with:
+    #   K and V Cache quantization of Q4_0:
+    #   Gets just over 10 tokens/second but wrecks the tool calling ability.
+    #   - Try Q8_0
+    #   This drops the tokens to under 1 token/second (at least initially)
+    #   - Try setting the V cache to Q4_0 leaving K cache at Q8_0
+    model: "qwen3.6-35ba3b-mtp"
+    apiBase: "http://<IP_ADDR>:1234/v1"
+    useLegacyCompletionsEndpoint: false
+    apiKey: "lmstudio"
+    capabilities:
+      - "tool_use"
+    toolCallStrategy: "auto"
+    defaultCompletionOptions:
+      # contextLength: 16384  # Tells continue how much text it can send
+      # contextLength: 32768  # Tells continue how much text it can send
+      # contextLength: 65536  # Tells continue how much text it can send
+      contextLength: 131072 # Tells continue how much text it can send
+      temperature: 0.6   # Default from HF Qwen documentation
+      topP: 0.95         # Default from HF Qwen documentation
+      topK: 20           # Default from HF Qwen documentation
+      # Need to set a "repetition_penalty" of 1.0 (default is 1.1 or more)
+      # But: this is not supported by the OpenAI API
+      # So, instead of sending "repetition_penalty", send the equivalent
+      # suppported by LMStudio over the OpenAI API
+      # - frequency_penalty and presence_penalty
+      #
+      # repetition_penalty: 1.0
+      frequency_penalty: 0.0
+      presence_penalty: 0.0
+      # maxTokens: 4096
+      # maxTokens: 8192
+      # maxTokens: 16384
+      maxTokens: 32768
+      stop:
+        - "<|im_end|>"
+        # - "<|im_noword|>"       # Added: Qwen's native internal stop token
+    requestOptions:
+      extraBody:
+        options:
+          # num_ctx: 32768
+          # num_ctx: 65536
+          num_ctx: 131072
+      
+# This section overrides the model's standard developer prompt when called
+# slashCommands:
+#   - name: audit
+#     description: "Read-only evaluation of the README file against codebase context"
+#     systemPrompt: |
+#       You are a strict, read-only Technical Documentation Analyst. 
+#       Completely ignore your standard instructions regarding tool use, file modifications, file creations, and XML structures.
+#       You are prohibited from modifying or creating files.
+#       Evaluate the requested files and output your suggestions strictly as plain markdown text directly in this chat window.
+#   - name: repo_analyst
+#     description: Compare actual repo structure against README documentation
+#     prompt: file://.prompts/repo_analyst.prompt
+
+rules:
+  - name: strict-tool-calls
+    rule: |
+      You have access to the `single_find_and_replace` tool. When using it, you must provide exactly four keys: filepath, old_string, new_string, and replace_all. 
+      
+      CRITICAL: The `replace_all` key MUST be a raw JSON boolean literal (true or false). Never wrap it in quotation marks (e.g., do NOT use "true" or "false"). It must be a primitive data type.
+
+      Example formatting:
+      {
+        "filepath": "utils/orders.py",
+        "old_string": "def calculate_total(price, quantity):\n    return price * quantity",
+        "new_string": "def calculate_total(price, quantity):\n    subtotal = price * quantity\n    tax = subtotal * 0.10\n    return subtotal + tax",
+        "replace_all": false
+      }
