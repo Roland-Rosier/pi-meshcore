@@ -12,10 +12,14 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
+from __future__ import annotations
 import sys
 import os
-import argparse
-from typing import List
+
+from enum import Enum
+
+import typer
+
 
 # Add project root to Python path if not already present
 current_dir = os.path.abspath(os.path.dirname(__file__))
@@ -27,52 +31,75 @@ if project_root not in sys.path:
 
 from src.drivers.lora_detection import LoRaModuleDetector
 
-def main() -> None:
-    """Main function to check hardware modules."""
-    if len(sys.argv) < 2:
-        print("Usage: check-hardware [command]")
-        print("Available commands:")
-        print("  detect-modules - Check for LoRa modules")
-        return
 
-    if sys.argv[1] == "detect-modules":
-        # Parse only the optional arguments, excluding the command itself
-        parser = argparse.ArgumentParser(description="Check LoRa hardware")
-        parser.add_argument("--ce0", choices=["rfm95w", "rfm98w", "none"], default=None, help="Expected module type on CE0")
-        parser.add_argument("--ce1", choices=["rfm95w", "rfm98w", "none"], default=None, help="Expected module type on CE1")
-        args = parser.parse_args(sys.argv[2:])
+class ModuleType(str, Enum):
+    """Allowed LoRa module types for CE slot validation."""
+    RFM95W = "rfm95w"
+    RFM98W = "rfm98w"
+    NONE = "none"
 
-        # Create detector instance
-        detector = LoRaModuleDetector(ce_pins=[0, 1])
-        
-        # Get and display results
-        results = detector.detect_modules()
 
-        print("\nHardware Detection Results:")
-        for result in results:
-            print(f"  ✅ {result}")
+app = typer.Typer(
+    name="check-hardware",
+    help="Check LoRa hardware modules on the MeshCore Pi4 Hat.",
+)
 
-        # Validate configuration if provided
-        if args.ce0 is not None or args.ce1 is not None:
-            from src.drivers.lora_detection import LoRaModuleConfig
-            config = LoRaModuleConfig(
-                ce0_expected_module_type=args.ce0,
-                ce1_expected_module_type=args.ce1
-            )
-            validation_results = detector.validate_config(config)
 
-            print("\nConfiguration Validation Results:")
-            all_passed = True
-            for vr in validation_results:
-                status = "✅ PASS" if vr.passed else "❌ FAIL"
-                print(f"  {status} CE{vr.ce_pin}: {vr.message}")
-                if not vr.passed:
-                    all_passed = False
+@app.command("detect-modules")
+def detect_modules(
+    ce0: ModuleType | None = typer.Option(
+        None,
+        "--ce0",
+        help="Expected module type on CE0 slot (rfm95w, rfm98w, or none).",
+    ),
+    ce1: ModuleType | None = typer.Option(
+        None,
+        "--ce1",
+        help="Expected module type on CE1 slot (rfm95w, rfm98w, or none).",
+    ),
+) -> None:
+    """Scan hardware and optionally validate against an expected configuration."""
 
-            if all_passed:
-                print("\n✅ Configuration is valid.")
-            else:
-                print("\n❌ Configuration is invalid.")
-                sys.exit(1)
+    detector = LoRaModuleDetector(ce_pins=[0, 1])
+
+    results = detector.detect_modules()
+
+    print("\nHardware Detection Results:")
+    for result in results:
+        print(f"  ✅ {result}")
+
+    if ce0 is not None or ce1 is not None:
+        from src.drivers.lora_detection import LoRaModuleConfig, ValidationReport
+
+        config = LoRaModuleConfig(
+            ce0_expected_module_type=ce0.value if ce0 else None,
+            ce1_expected_module_type=ce1.value if ce1 else None,
+        )
+        validation_results: list[ValidationReport] = detector.validate_config(config)  # type: ignore[name-defined]
+
+        print("\nConfiguration Validation Results:")
+        all_passed = True
+        for vr in validation_results:
+            status = "✅ PASS" if vr.passed else "❌ FAIL"
+            print(f"  {status} CE{vr.ce_pin}: {vr.message}")
+            if not vr.passed:
+                all_passed = False
+
+        if all_passed:
+            print("\n✅ Configuration is valid.")
+        else:
+            raise typer.Exit(code=1)
+
+
+@app.callback(invoke_without_command=True)
+def main_callback(ctx: typer.Context) -> None:
+    """MeshCore hardware check utility — show help when invoked without subcommand."""
+    if ctx.invoked_subcommand is None:
+        typer.echo("Usage: check-hardware [command]")
+        typer.echo("Available commands:")
+        typer.echo("  detect-modules   Check for LoRa modules")
+        raise typer.Exit(code=0)
+
+
 if __name__ == "__main__":
-    main()
+    app()

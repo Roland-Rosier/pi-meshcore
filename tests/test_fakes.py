@@ -17,7 +17,7 @@
 import pytest
 from typing import Dict, List
 
-from fakes import FakeSpiDev
+from tests.fakes import FakeSpiDev
 
 
 class TestFakeSpiDevInitialization:
