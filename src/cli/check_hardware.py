@@ -69,7 +69,7 @@ def detect_modules(
         print(f"  ✅ {result}")
 
     if ce0 is not None or ce1 is not None:
-        from src.drivers.lora_detection import LoRaModuleConfig, ValidationReport
+        from src.drivers.lora_detection import LoRaModuleConfig, ValidationResult
 
         config = LoRaModuleConfig(
             ce0_expected_module_type=ce0.value if ce0 else None,
