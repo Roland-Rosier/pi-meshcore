@@ -177,7 +177,7 @@ class TestDetectModulesNoValidation:
           - Output contains "Hardware Detection Results:".
           - At least one line starts with "✅".
         """
-        runner = CliRunner(mix_stderr=False)
+        runner = CliRunner()
         mock_detector = _build_mock_detector(
             ce_pins=[0, 1],
             module_type_strings=[
@@ -212,7 +212,7 @@ class TestDetectModulesMatchingConfig:
           - Exit code is 0.
           - Output contains "Configuration is valid.".
         """
-        runner = CliRunner(mix_stderr=False)
+        runner = CliRunner()
         mock_detector = _build_mock_detector(
             ce_pins=[0, 1],
             module_type_strings=[
@@ -260,7 +260,7 @@ class TestDetectModulesMismatchingConfig:
           - Output contains "❌ FAIL".
           - Output contains the word "Mismatch".
         """
-        runner = CliRunner(mix_stderr=False)
+        runner = CliRunner()
         mock_detector = _build_mock_detector(
             ce_pins=[0, 1],
             module_type_strings=[
@@ -308,7 +308,7 @@ class TestDetectModulesDualCeValidation:
           - Exit code is 0.
           - Output contains "Configuration is valid.".
         """
-        runner = CliRunner(mix_stderr=False)
+        runner = CliRunner()
         mock_detector = _build_mock_detector(
             ce_pins=[0, 1],
             module_type_strings=[
@@ -365,7 +365,7 @@ class TestNoSubcommandShowsHelp:
           - Exit code is 0.
           - Output lists ``detect-modules`` as an available command.
         """
-        runner = CliRunner(mix_stderr=False)
+        runner = CliRunner()
 
         # No arguments at all — triggers the callback's invoke_without_command path.
         result = runner.invoke(cli_app, [])
@@ -392,7 +392,7 @@ class TestDetectModulesWithNoneExpectation:
           - Exit code is non-zero (detected hardware does not match "none" expectation).
           - Output contains "❌ FAIL".
         """
-        runner = CliRunner(mix_stderr=False)
+        runner = CliRunner()
         mock_detector = _build_mock_detector(
             ce_pins=[0, 1],
             module_type_strings=[
@@ -438,7 +438,7 @@ class TestCliEdgeCases:
         The ``ModuleType`` enum only allows "rfm95w", "rfm98w", and "none".
         Passing anything else is a Typer-level validation error, not our code's.
         """
-        runner = CliRunner(mix_stderr=False)
+        runner = CliRunner()
         result = runner.invoke(cli_app, ["detect-modules", "--ce0", "invalid_type"])
 
         assert result.exit_code != 0
@@ -447,7 +447,7 @@ class TestCliEdgeCases:
 
     def test_detect_modules_ce_only_single_pin(self) -> None:
         """Run ``detect-modules --ce0 rfm95w`` with only CE1 hardware present."""
-        runner = CliRunner(mix_stderr=False)
+        runner = CliRunner()
         mock_detector = _build_mock_detector(
             ce_pins=[1],  # Only CE1 exists in this detector
             module_type_strings=["RFM98W (Low-Band 433Mhz / Semtech SX1278)"],
@@ -478,7 +478,7 @@ class TestCliEdgeCases:
 
     def test_output_format_contains_silicon_revision(self) -> None:
         """Verify that Silicon Revision appears in detection output."""
-        runner = CliRunner(mix_stderr=False)
+        runner = CliRunner()
         mock_detector = _build_mock_detector(
             ce_pins=[0],
             module_type_strings=["RFM95W (High-Band 868MHz / Semtech SX1276)"],
@@ -499,5 +499,7 @@ if __name__ == "__main__":
 
     exit_code = pytest.main([__file__, "-v"])
     _sys.exit(exit_code)
+
+
 
 
