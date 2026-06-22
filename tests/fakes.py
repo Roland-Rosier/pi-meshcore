@@ -212,7 +212,7 @@ class FakeSpiDev:
                         
                 result.append(cmd_byte)
                 result.append(reg_value)
-                i += 1
+                i += 2
                 
         return result
 

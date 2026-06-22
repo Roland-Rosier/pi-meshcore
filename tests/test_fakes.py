@@ -230,6 +230,8 @@ class TestFakeSpiDevReset:
         fake.enable_failure_read()
         fake.enable_failure_write()
         fake.reset()
+        # Reset reinitializes the device state; re-open before testing xfer2.
+        fake.open(0, 0)
         # After reset, no exception should be raised
         result = fake.xfer2([0x42, 0x00])
         assert len(result) == 2
@@ -246,27 +248,27 @@ class TestFakeSpiDevUtilities:
 
     def test_factory_function(self) -> None:
         """Test the factory function for creating FakeSpiDev instances."""
-        from fakes import create_fake_spi_dev
+        from tests.fakes import create_fake_spi_dev
         fake = create_fake_spi_dev("rfm95w")
         assert isinstance(fake, FakeSpiDev)
 
     def test_patch_spidev_with_fake(self) -> None:
         """Test patching spidev with fake device."""
-        from fakes import patch_spidev_with_fake
+        from tests.fakes import patch_spidev_with_fake
         fake = FakeSpiDev(module_type="rfm95w")
         mock = patch_spidev_with_fake(fake)
         assert mock.return_value == fake
 
     def test_verify_frequency_in_range(self) -> None:
         """Test frequency range verification utility."""
-        from fakes import verify_frequency_in_range
+        from tests.fakes import verify_frequency_in_range
         fake = FakeSpiDev(module_type="multi_band")
         result = verify_frequency_in_range(fake, 868000)
         assert result is True
 
     def test_simulate_lf_mode_test(self) -> None:
         """Test LF mode simulation utility."""
-        from fakes import simulate_lf_mode_test
+        from tests.fakes import simulate_lf_mode_test
         fake = FakeSpiDev(module_type="rfm95w")
         result = simulate_lf_mode_test(fake)
         assert isinstance(result, bool)
