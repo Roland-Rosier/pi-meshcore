@@ -261,3 +261,83 @@ class TestLoRaModuleEdgeCases:
         assert rfm95w_factory._opened is False
 
 
+class TestLoRaModuleStandaloneDetection:
+    """Tests for _determine_module_type() branch coverage — C1, C2, C3.
+
+    These tests verify that LoRaModule correctly identifies standalone RFM95W
+    (high-band only), standalone RFM98W (low-band only), and all four
+    multi-band sub-branches when both frequencies are supported but LF mode
+    retention flags vary.
+    """
+
+    def test_detect_standalone_rfm95w_no_low_band(
+        self, rfm95w_factory: FakeSpiDev
+    ) -> None:
+        """C1: Standalone RFM95W — high frequency only, no low-band support."""
+        module = LoRaModule(ce_pin=0, spi_factory=lambda: rfm95w_factory)
+
+        # Force low frequency support to False (simulating hardware limitation).
+        module.supports_low_frequency = False
+
+        # Re-run classification with the modified flags.
+        module._determine_module_type()
+
+        assert module.module_type == "RFM95W (High-Band 868MHz / Semtech SX1276)"
+
+    def test_detect_standalone_rfm98w_no_high_band(
+        self, rfm98w_factory: FakeSpiDev
+    ) -> None:
+        """C2: Standalone RFM98W — low frequency only, no high-band support."""
+        module = LoRaModule(ce_pin=1, spi_factory=lambda: rfm98w_factory)
+
+        # Force high frequency support to False (simulating hardware limitation).
+        module.supports_high_frequency = False
+
+        # Re-run classification with the modified flags.
+        module._determine_module_type()
+
+        assert module.module_type == "RFM98W (Low-Band 433Mhz / Semtech SX1278)"
+
+    def test_multi_band_lf_not_success_only(
+        self, fake_spi_multi_band: FakeSpiDev
+    ) -> None:
+        """C3-A2: Multi-band with LF retained only when unset (not set)."""
+        module = LoRaModule(ce_pin=0, spi_factory=lambda: fake_spi_multi_band)
+
+        # Both frequencies supported (multi_band fixture). Force LF flags.
+        module.lf_mode_success = False  # Not retained on set
+        module.lf_mode_not_success = True  # Retained on unset
+
+        module._determine_module_type()
+
+        assert "RFM95W" in module.module_type
+
+    def test_multi_band_lf_success_only(
+        self, fake_spi_multi_band: FakeSpiDev
+    ) -> None:
+        """C3-A3: Multi-band with LF retained only when set (not unset)."""
+        module = LoRaModule(ce_pin=0, spi_factory=lambda: fake_spi_multi_band)
+
+        # Both frequencies supported (multi_band fixture). Force LF flags.
+        module.lf_mode_success = True  # Retained on set
+        module.lf_mode_not_success = False  # Not retained on unset
+
+        module._determine_module_type()
+
+        assert "RFM98W" in module.module_type
+
+    def test_multi_band_neither_lf_flag(
+        self, fake_spi_multi_band: FakeSpiDev
+    ) -> None:
+        """C3-A4: Multi-band with neither LF flag set → Unknown/Error."""
+        module = LoRaModule(ce_pin=0, spi_factory=lambda: fake_spi_multi_band)
+
+        # Both frequencies supported (multi_band fixture). Force both LF flags False.
+        module.lf_mode_success = False
+        module.lf_mode_not_success = False
+
+        module._determine_module_type()
+
+        assert "Unknown" in module.module_type or "Communication Error" in module.module_type
+
+

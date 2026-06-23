@@ -246,7 +246,6 @@ class FakeSpiDev:
         self._default_registers()
         self._fail_next_read = False
         self._fail_next_write = False
-        self._opened = False
 
     def calculate_frequency_from_registers(self, msb: int, mid: int, lsb: int) -> int:
         """Calculate frequency in kHz from register values.

@@ -745,6 +745,105 @@ class TestLoRaModuleDetectorUnexpectedPins:
         assert results[0]["ce_pin"] == 2
 
 
+class TestLoRaModuleDetectorExtendedDetectionPaths:
+    """Tests for critical _extended_detect_modules() paths — C4, C5, C6."""
+
+    def test_extended_both_writes_fail(self) -> None:
+        """C4: Both CE0 and CE1 unique value writes fail → all flags False.
+
+        Simulates a complete write failure on both SPI devices during extended
+        detection. The cascading-None pattern in _write_frequency_registers means
+        the first failed write causes all subsequent writes to be skipped, so
+        enabling one failure_write per device is sufficient.
+        """
+        fake_spi_ce0 = FakeSpiDev(module_type="rfm95w")
+        fake_spi_ce1 = FakeSpiDev(module_type="rfm98w")
+
+        call_count: list[int] = [0]
+
+        def spi_factory() -> FakeSpiDev:
+            call_count[0] += 1
+            return fake_spi_ce0 if call_count[0] == 1 else fake_spi_ce1
+
+        with patch("src.drivers.lora_module.spidev.SpiDev") as mock_spidev:
+            mock_spidev.side_effect = lambda: spi_factory()
+            detector = LoRaModuleDetector(ce_pins=[0, 1])
+
+        # Enable write failure on both devices after construction (before detect_modules).
+        fake_spi_ce0.enable_failure_write()
+        fake_spi_ce1.enable_failure_write()
+
+        results = detector.detect_modules()
+
+        assert len(results) == 2
+        for result in results:
+            assert result["unique_value_written"] is False
+            assert result["is_single_module_dual_spi"] is False
+
+    def test_extended_both_verify_false_same_physical_module(self) -> None:
+        """C5: Both verifications fail → single physical module on dual SPI.
+
+        Simulates the case where unique values were written successfully to both
+        CE0 and CE1, but neither retention check passes (e.g., registers lost
+        power). The code computes is_single_module = not (False and False) = True.
+        """
+        fake_spi_ce0 = FakeSpiDev(module_type="rfm95w")
+        fake_spi_ce1 = FakeSpiDev(module_type="rfm98w")
+
+        call_count: list[int] = [0]
+
+        def spi_factory() -> FakeSpiDev:
+            call_count[0] += 1
+            return fake_spi_ce0 if call_count[0] == 1 else fake_spi_ce1
+
+        with patch("src.drivers.lora_module.spidev.SpiDev") as mock_spidev:
+            mock_spidev.side_effect = lambda: spi_factory()
+            detector = LoRaModuleDetector(ce_pins=[0, 1])
+
+        # Patch verify_unique_value_retention on both modules to return False.
+        with patch.object(detector.modules[0], "verify_unique_value_retention", return_value=False):
+            with patch.object(detector.modules[1], "verify_unique_value_retention", return_value=False):
+                results = detector.detect_modules()
+
+        assert len(results) == 2
+        for result in results:
+            assert result["is_single_module_dual_spi"] is True
+            assert result["unique_value_verified"] is False
+
+    def test_extended_mixed_verification(self) -> None:
+        """C6: CE0 verifies, CE1 doesn't → single physical module.
+
+        Simulates asymmetric verification: one module retains its unique value
+        while the other does not. The code computes is_single_module = not (True and False) = True.
+        """
+        fake_spi_ce0 = FakeSpiDev(module_type="rfm95w")
+        fake_spi_ce1 = FakeSpiDev(module_type="rfm98w")
+
+        call_count: list[int] = [0]
+
+        def spi_factory() -> FakeSpiDev:
+            call_count[0] += 1
+            return fake_spi_ce0 if call_count[0] == 1 else fake_spi_ce1
+
+        with patch("src.drivers.lora_module.spidev.SpiDev") as mock_spidev:
+            mock_spidev.side_effect = lambda: spi_factory()
+            detector = LoRaModuleDetector(ce_pins=[0, 1])
+
+        # CE0 verifies (True), CE1 does not verify (False).
+        with patch.object(detector.modules[0], "verify_unique_value_retention", return_value=True):
+            with patch.object(detector.modules[1], "verify_unique_value_retention", return_value=False):
+                results = detector.detect_modules()
+
+        assert len(results) == 2
+        for result in results:
+            assert result["is_single_module_dual_spi"] is True
+        # Per-module verification flags should reflect individual outcomes.
+        ce0_result = next(r for r in results if r["ce_pin"] == 0)
+        ce1_result = next(r for r in results if r["ce_pin"] == 1)
+        assert ce0_result["unique_value_verified"] is True
+        assert ce1_result["unique_value_verified"] is False
+
+
 if __name__ == "__main__":
     """Run tests using pytest."""
     print("=" * 60)
