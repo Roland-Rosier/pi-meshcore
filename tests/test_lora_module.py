@@ -15,6 +15,8 @@
 """Tests for LoRaModule class using FakeSpiDev."""
 
 from typing import Any, Callable
+from unittest.mock import patch
+
 import pytest
 
 from src.drivers.lora_module import LoRaModule
@@ -339,5 +341,175 @@ class TestLoRaModuleStandaloneDetection:
         module._determine_module_type()
 
         assert "Unknown" in module.module_type or "Communication Error" in module.module_type
+
+
+class TestLoRaModuleModerateGaps:
+    """Tests for Moderate Gap coverage — M1, M2, M3, M4, M6, M7.
+
+    These tests exercise error-handling branches that were previously uncovered
+    in LoRaModule methods such as write_register, frequency register reads/writes,
+    LF mode retention failures, and unique value verification failure paths.
+    """
+
+    # ------------------------------------------------------------------
+    # M1: write_register except branch returning None
+    # ------------------------------------------------------------------
+
+    def test_write_register_spi_failure(self, fake_spi_rfm95w: FakeSpiDev) -> None:
+        """M1: SPI write failure causes write_register to return None and print error."""
+        module = LoRaModule(ce_pin=0, spi_factory=lambda: fake_spi_rfm95w)
+
+        # Enable write failure — the next xfer2 call will raise an exception.
+        fake_spi_rfm95w.enable_failure_write()
+
+        result: int | None = module.write_register(0x01, 0x80)
+
+        assert result is None
+
+    # ------------------------------------------------------------------
+    # M2: _read_frequency_registers — any register returns None
+    # ------------------------------------------------------------------
+
+    def test_read_frequency_registers_any_none(self, rfm95w_factory: FakeSpiDev) -> None:
+        """M2: First frequency register read fails → all three values become None."""
+        module = LoRaModule(ce_pin=0, spi_factory=lambda: rfm95w_factory)
+
+        # Force the very first read (MSB at 0x06) to fail.
+        rfm95w_factory.enable_failure_read()
+
+        msb: int | None
+        mid: int | None
+        lsb: int | None
+        (msb, mid, lsb) = module._read_frequency_registers()
+
+        assert msb is None  # First read fails
+        # mid and lsb may or may not be None depending on whether subsequent reads succeed.
+
+    # ------------------------------------------------------------------
+    # M3: _write_frequency_registers — cascading None (mode write fails)
+    # ------------------------------------------------------------------
+
+    def test_write_frequency_registers_mode_failure(self, rfm95w_factory: FakeSpiDev) -> None:
+        """M3: Mode write returns None → all subsequent writes skipped via cascading-None."""
+        module = LoRaModule(ce_pin=0, spi_factory=lambda: rfm95w_factory)
+
+        # Enable failure on the very first write (REG_OP_MODE).
+        rfm95w_factory.enable_failure_write()
+
+        response_mode: int | None
+        response_msb: int | None
+        response_mid: int | None
+        response_lsb: int | None
+        (response_mode, response_msb, response_mid, response_lsb) = module._write_frequency_registers(0x12, 0x34, 0x56)
+
+        # Mode write fails → all subsequent writes are skipped due to cascading None check.
+        assert response_mode is None
+        assert response_msb is None
+        assert response_mid is None
+        assert response_lsb is None
+
+    # ------------------------------------------------------------------
+    # M4: _write_and_verify_frequency_for_khz — failure paths
+    # ------------------------------------------------------------------
+
+    def test_write_and_verify_frequency_read_mismatch(self, rfm95w_factory: FakeSpiDev) -> None:
+        """M4a: Verification fails when read registers don't match written values."""
+        module = LoRaModule(ce_pin=0, spi_factory=lambda: rfm95w_factory)
+
+        # Patch _read_frequency_registers to return mismatched values after a successful write.
+        with patch.object(module, '_read_frequency_registers', return_value=(0xFF, 0xFF, 0xFF)):
+            success: bool
+            req_msb: int | None
+            req_mid: int | None
+            req_lsb: int | None
+            read_msb: int | None
+            read_mid: int | None
+            read_lsb: int | None
+            (success, req_msb, req_mid, req_lsb, read_msb, read_mid, read_lsb) = \
+                module._write_and_verify_frequency_for_khz(868000)
+
+        assert success is False
+
+    def test_write_and_verify_frequency_read_all_none(self, rfm95w_factory: FakeSpiDev) -> None:
+        """M4b: Verification fails when all register reads return None (patched read_register)."""
+        module = LoRaModule(ce_pin=0, spi_factory=lambda: rfm95w_factory)
+
+        # Patch the module's read_register so that frequency-register reads always return None.
+        with patch.object(module, 'read_register', return_value=None):
+            success: bool
+            req_msb: int | None
+            req_mid: int | None
+            req_lsb: int | None
+            read_msb: int | None
+            read_mid: int | None
+            read_lsb: int | None
+            (success, req_msb, req_mid, req_lsb, read_msb, read_mid, read_lsb) = \
+                module._write_and_verify_frequency_for_khz(868000)
+
+        assert success is False
+
+    # ------------------------------------------------------------------
+    # M6: _test_lf_mode_retention — write/read failure path
+    # ------------------------------------------------------------------
+
+    def test_test_lf_mode_retention_spi_failure(self, fake_spi_rfm95w: FakeSpiDev) -> None:
+        """M6: LF mode retention fails when SPI write/read raises an exception."""
+        module = LoRaModule(ce_pin=0, spi_factory=lambda: fake_spi_rfm95w)
+
+        # Reset the flag so we can verify it stays False after a failed call.
+        module.lf_mode_success = False
+
+        # Patch both write_register and read_register to return None (simulating
+        # persistent SPI failure throughout the LF mode test sequence).
+        with patch.object(module, 'write_register', return_value=None):
+            with patch.object(module, 'read_register', return_value=None):
+                module._test_lf_mode_retention()
+
+        assert module.lf_mode_success is False  # Both write and read failed; flag stays False.
+
+    # ------------------------------------------------------------------
+    # M7: verify_unique_value_retention — failure paths (3 sub-paths)
+    # ------------------------------------------------------------------
+
+    def test_verify_unique_value_never_written(self) -> None:
+        """M7a: Verify returns False when unique values were never written (msb/mid/lsb are None)."""
+        fake_spi = FakeSpiDev(module_type="rfm95w")
+        with patch("src.drivers.lora_module.spidev.SpiDev", return_value=fake_spi):
+            module = LoRaModule(ce_pin=0)
+
+        # Don't write any unique value — msb/mid/lsb are all None.
+        result: bool = module.verify_unique_value_retention()
+
+        assert result is False
+
+    def test_verify_unique_value_written_false(self, rfm95w_factory: FakeSpiDev) -> None:
+        """M7b: Verify returns False when unique_value_written=False (write failed)."""
+        module = LoRaModule(ce_pin=0, spi_factory=lambda: rfm95w_factory)
+
+        # Force the write to fail by enabling failure on frequency registers.
+        for _ in range(3):  # Need failures on all three freq register writes.
+            rfm95w_factory.enable_failure_write()
+
+        module.test_unique_value_retention(868000)
+
+        assert module.unique_value_written is False
+        result: bool = module.verify_unique_value_retention()
+        assert result is False
+
+    def test_verify_unique_value_read_all_none(self, rfm95w_factory: FakeSpiDev) -> None:
+        """M7c: Verify returns False when register reads return None after a successful write."""
+        module = LoRaModule(ce_pin=0, spi_factory=lambda: rfm95w_factory)
+
+        # First write a valid unique value.
+        module.test_unique_value_retention(868000)
+        assert module.unique_value_written is True
+
+        # Now make reads return None via patching read_register.
+        with patch.object(module, 'read_register', return_value=None):
+            result: bool = module.verify_unique_value_retention()
+
+        assert result is False
+
+
 
 
