@@ -71,7 +71,9 @@ rules:
   - name: strict-tool-calls
     rule: |
       You have access to the `single_find_and_replace` tool. When using it, you must provide exactly four keys: filepath, old_string, new_string, and replace_all. 
-      
+
+      CRITICAL: The `filepath` MUST be a relative path from the workspace root (e.g., "src/main.py"). NEVER use absolute system paths (e.g., "/home/user/...").
+
       CRITICAL: The `replace_all` key MUST be a raw JSON boolean literal (true or false). Never wrap it in quotation marks (e.g., do NOT use "true" or "false"). It must be a primitive data type.
 
       Example formatting:

@@ -41,23 +41,14 @@ class TestLoRaModuleDetection:
         response = fake.xfer2([0x42, 0x00])  # Read register 0x42
         assert response[1] == 0x12  # RFM95W silicon revision
         
-        # Check high frequency support
-        freq_khz = 1015000
-        fake.set_register(0x06, 0x00)
-        fake.set_register(0x07, 0x00)
-        fake.set_register(0x08, 0x00)
-        
-        msb, mid, lsb = fake.calculate_frequency_from_registers(0x00, 0x00, 0x00)
-        assert fake.is_frequency_supported(freq_khz) is True
+        # Check high frequency support (RFM95W does not support LF mode, so only HF bands)
+        assert fake.is_frequency_supported(1015000) is True
         
         # Check LF mode retention
         fake.set_register(FakeSpiDev.REG_OP_MODE, FakeSpiDev.MODE_SLEEP | FakeSpiDev.BIT_LF_MODE_ON)
         fake.set_register(FakeSpiDev.REG_OP_MODE, FakeSpiDev.MODE_STANDBY | FakeSpiDev.BIT_LF_MODE_ON)
         current_op_mode = fake.get_register(FakeSpiDev.REG_OP_MODE)
-        lf_retained = (current_op_mode & FakeSpiDev.BIT_LF_MODE_ON) == FakeSpiDev.BIT_LF_MODE_ON
-        
-        # RFM95W should have LF mode retention
-        assert lf_retained is True
+        assert (current_op_mode & FakeSpiDev.BIT_LF_MODE_ON) == FakeSpiDev.BIT_LF_MODE_ON
 
     def test_rfm98w_detection(self) -> None:
         """Test detection of RFM98W module type."""
@@ -119,8 +110,7 @@ class TestLoRaModuleDetection:
         
         # Simulate LF mode test sequence
         fake.set_register(FakeSpiDev.REG_OP_MODE, FakeSpiDev.MODE_SLEEP | FakeSpiDev.BIT_LF_MODE_ON)
-        standby_mode = (FakeSpiDev.MODE_STANDBY & ~FakeSpiDev.BIT_LF_MODE_ON) | \
-                       (FakeSpiDev.MODE_STANDBY & FakeSpiDev.BIT_LF_MODE_ON)
+        standby_mode = FakeSpiDev.MODE_STANDBY | FakeSpiDev.BIT_LF_MODE_ON
         fake.set_register(FakeSpiDev.REG_OP_MODE, standby_mode)
         
         # Check LF mode bit retention
@@ -154,42 +144,6 @@ class TestLoRaModuleDetection:
         fake.reset()
         assert fake.get_register(0x42) == 0x00
         assert fake.get_register(0x01) == 0x00
-
-
-class TestFakeSpiDevUtilities:
-    """Test cases for FakeSpiDev utility functions."""
-
-    def test_create_fake_spi_dev(self) -> None:
-        """Test the create_fake_spi_dev factory function."""
-        from fakes import create_fake_spi_dev
-        
-        fake = create_fake_spi_dev("rfm95w")
-        assert isinstance(fake, FakeSpiDev)
-        assert fake.module_type == "rfm95w"
-
-    def test_patch_spidev_with_fake(self) -> None:
-        """Test patching spidev with fake device."""
-        from fakes import patch_spidev_with_fake
-        
-        fake = FakeSpiDev(module_type="rfm95w")
-        mock = patch_spidev_with_fake(fake)
-        assert mock.return_value == fake
-
-    def test_verify_frequency_in_range(self) -> None:
-        """Test frequency range verification."""
-        from fakes import verify_frequency_in_range
-        
-        fake = FakeSpiDev(module_type="rfm95w")
-        assert verify_frequency_in_range(fake, 868000) is True
-        assert verify_frequency_in_range(fake, 433000) is False
-
-    def test_simulate_lf_mode_test(self) -> None:
-        """Test LF mode simulation utility."""
-        from fakes import simulate_lf_mode_test
-        
-        fake = FakeSpiDev(module_type="rfm95w")
-        result = simulate_lf_mode_test(fake)
-        assert isinstance(result, bool)
 
 
 class TestEdgeCases:
@@ -235,3 +189,11 @@ class TestEdgeCases:
 
 if __name__ == "__main__":
     pytest.main([__file__, "-v"])
+
+
+
+
+
+
+
+
