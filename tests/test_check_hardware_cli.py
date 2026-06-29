@@ -445,8 +445,15 @@ class TestCliEdgeCases:
         # Typer prints usage + an error message for invalid option values.
         assert ("Invalid value" in result.output or "error" in result.output.lower())
 
-    def test_detect_modules_ce_only_single_pin(self) -> None:
-        """Run ``detect-modules --ce0 rfm95w`` with only CE1 hardware present."""
+    def test_output_format_single_pin_mismatch(self) -> None:
+        """Verify full output format for single-pin mismatch scenario.
+
+        A single-pin detector (CE1 only) with a CE0 expectation set will produce
+        a validation mismatch — the CLI should report "FAIL" with ``CE0:`` in the
+        output and return a non-zero exit code.  This covers the minor gap m2:
+        previously the test only asserted that no crash occurred, without checking
+        any output content or exit code semantics.
+        """
         runner = CliRunner()
         mock_detector = _build_mock_detector(
             ce_pins=[1],  # Only CE1 exists in this detector
@@ -456,10 +463,9 @@ class TestCliEdgeCases:
 
         from src.drivers.lora_detection import ValidationResult
 
-        # CE0 expectation is set but the detector has no CE0 module → skip.
         mock_detector.validate_config.return_value = [
             ValidationResult(
-                ce_pin=1,
+                ce_pin=0,
                 passed=False,
                 message="Expected: rfm95w, Detected: RFM98W (Low-Band 433Mhz / Semtech SX1278) (Mismatch)",
                 expected_type="rfm95w",
@@ -470,11 +476,16 @@ class TestCliEdgeCases:
         with patch(_DETECTOR_PATCH_PATH, return_value=mock_detector):
             result = runner.invoke(cli_app, ["detect-modules", "--ce0", "rfm95w"])
 
-        # With only CE1 detected and a CE0 expectation set, the validation will
-        # skip CE0 (no module) but validate CE1 against the ce0 expectation.
-        # The actual behavior depends on LoRaModuleConfig mapping; here we just
-        # verify the CLI does not crash.
-        assert result is not None
+        assert result.exit_code != 0, (
+            f"Expected non-zero exit code for mismatch but got {result.exit_code}. "
+            f"Output: {result.output}"
+        )
+        assert "\u274c FAIL" in result.output or "FAIL" in result.output, (
+            f"Expected 'FAIL' in output but got: {result.output}"
+        )
+        assert "CE0:" in result.output, (
+            f"Expected 'CE0:' label in validation output but got: {result.output}"
+        )
 
     def test_output_format_contains_silicon_revision(self) -> None:
         """Verify that Silicon Revision appears in detection output."""
