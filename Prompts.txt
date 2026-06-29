@@ -172,3 +172,240 @@ Constraints:
 * All the hardware detection logic which is possible is already present in src/drivers/lora_module.py. Do not add any more.
 
 * It has already been determined that none of the registers within the devices will reliably provide any different responses, so do not try to think of any additional ways that they can.
+
+
+------
+
+Context:
+
+You are a Software Architect with Electronics and Radio experience.
+
+You are developing a system which can use LoRa modules attached to a Raspberry PI to scan the radio frequencies to look for radio transmissions.
+
+The Raspberry PI has up to two LoRa modules attached to the CE0 and, optionally, the CE1 lines of the SPI0 module.
+
+Any attached module may be a RFM95W (High Frequency) or RFM98W (Low Frequency) module.
+
+It is not possible for software to check what capabilities they have, but it is possible for software to check:
+
+* Whether a module is attached to a specific SPI CE line.
+
+* Whether that module can try to output high frequency.
+
+* Whether that module can try to output low frequency.
+
+* Whether that module can try to output both high and low frequencies.
+
+
+
+The hardware detection logic in src/drivers/lora_module.py and src/drivers/lora_detection.py can currently detect that modules are attached to CE0 and/or CE1, but what it cannot do is detect, when there are modules attached to both CE0 and CE1, if the same module is attached to both CE0 and CE1 simultaneously.
+
+
+
+So, if (and only if) there are modules detected as being attached to both CE0 and CE1, additional logic needs to be written to write a unique value to the same registers in each module and then, once both modules have had the values written, read each unique value back in the same order that it was written to verify that the unique value had been retained. If the unique value had not been retained, it indicates that the CE0 and CE1 lines could be attached to the same module and the results should be updated to state this issue and any user-passed configuration should be invalidated.
+
+
+
+The registers chosen to capture the unique values should be the frequency selection registers written to via the test_unique_value_retention method in src/drivers/lora_module.py.
+
+
+
+The retention of the unique value should be tested via the verify_unique_value_retention method in src/drivers/lora_module.py.
+
+
+
+Task:
+
+* Read the src/drivers/lora_detection.py, src/drivers/lora_module.py and src/cli/check_hardware.py files so that you know what is in them.
+* Write a method which calculates the unique frequency to use for each module, according toi the logic stated.
+
+* Write and extended_detect_modules method in src/drivers/lora_detection.py which calls both the detect_modules and validate_config methods and then, if modules are validated to be present on CE0 and CE1, performs the additional verification by:
+
+1. Using the test_unique_value_retention method in src/drivers/lora_module.py to write the appropriate unique value to the module on CE0
+
+2. Using the test_unique_value_retention method in src/drivers/lora_module.py to write the appropriate unique value to the module on CE1
+
+3. Using the verify_unique_value_retention method in src/drivers/lora_module.py to verify that the appropriate unique value has been retained in the module on CE0
+
+4. Using the verify_unique_value_retention method in src/drivers/lora_module.py to verify that the appropriate unique value has been retained in the module on CE0
+
+* Updating the results stored in src/drivers/lora_detection.py so that if the unique value is not retained, they are invalidated, but if the unique value is retained, that is noted in the results.
+
+
+
+Constraints:
+
+* All the hardware detection logic which is possible is already present in src/drivers/lora_module.py. Do not add any more.
+
+* It has already been determined that none of the registers within the devices will reliably provide any different responses, so do not try to think of any additional ways that they can.
+
+-------
+
+Context:
+
+* You are a Software Architect with Electronics and Radio experience.
+
+* You are developing a system which can use LoRa modules attached to a Raspberry PI to scan the radio frequencies to look for radio transmissions.
+
+* The Raspberry PI has up to two LoRa modules attached to the CE0 and, optionally, the CE1 lines of the SPI0 module.
+
+* Any attached module may be a RFM95W (High Frequency) or RFM98W (Low Frequency) module.
+
+* It is not possible for software to check what capabilities they have, but it is possible for software to check:
+
+  * Whether a module is attached to a specific SPI CE line.
+
+  * Whether that module can try to output high frequency.
+
+  * Whether that module can try to output low frequency.
+
+  * Whether that module can try to output both high and low frequencies.
+
+* The hardware detection logic in src/drivers/lora_module.py and src/drivers/lora_detection.py can currently detect that modules are attached to CE0 and/or CE1, but what it cannot do is detect, when there are modules attached to both CE0 and CE1, if the same module is attached to both CE0 and CE1 simultaneously.
+
+* In the `tests` directory is the beginning of a test framework to create a `FakeSpiDev` device to substitute for `SpiDev` in the `LoRaModule` class in `src/drivers/lora_module.py`
+
+* You need to complete the test framework comprising the `FakeSpiDev` and then use it to test the functionality in `src/cli/check_hardware.py`
+
+Task:
+
+* Read the src/drivers/lora_detection.py, src/drivers/lora_module.py and src/cli/check_hardware.py files so that you know what is in them.
+
+* Read the partially-completed framework in `tests`
+
+* Figure out if the fake SPI device `FakeSpiDev` needs completing and, if so figure out how to complete it.
+
+* Figure out how to use dependency injection to inject that `FakeSpiDev` into the `LoRaModule` class.
+
+* Create tests to use the dependecy-injectred `FakeSpiDev` to test the functionality in `src/cli/check_hardware.py`
+
+Constraints:
+
+* All the hardware detection logic which is possible is already present in src/drivers/lora_module.py. Do not add any more.
+
+* It has already been determined that none of the registers within the devices will reliably provide any different responses, so do not try to think of any additional ways that they can.
+
+* There is no "module_type" or "Device ID" register in register 0x12, that is actually a ChannelFilterBwControl register in LoRa mode, and has nothing to do with the module type.
+
+
+----
+Context:
+* You are a Software Architect with Electronics and Radio experience.
+* You are developing a system which can use LoRa modules attached to a Raspberry PI to scan the radio frequencies to look for radio transmissions.
+* The Raspberry PI has up to two LoRa modules attached to the CE0 and, optionally, the CE1 lines of the SPI0 module.
+* Any attached module may be a RFM95W (High Frequency) or RFM98W (Low Frequency) module.
+* It is not possible for software to check what capabilities they have, but it is possible for software to check:
+  * Whether a module is attached to a specific SPI CE line.
+  * Whether that module can try to output high frequency.
+  * Whether that module can try to output low frequency.
+  * Whether that module can try to output both high and low frequencies.
+* The hardware detection logic in `src/drivers/lora_module.py` and `src/drivers/lora_detection.py` can currently detect that modules are attached to CE0 and/or CE1, but what it cannot do is detect, when there are modules attached to both CE0 and CE1, if the same module is attached to both CE0 and CE1 simultaneously.
+* In `src/cli/check_hardware.py` there is a CLI interface to check the hardware.
+* In the `tests` directory is the beginning of a test framework to create a `FakeSpiDev` device to substitute for `SpiDev` in the `LoRaModule` class in `src/drivers/lora_module.py`
+* You need to complete the test framework comprising the `FakeSpiDev` and then use it to test the functionality in `src/cli/check_hardware.py`
+* The `LoRaModule` class in `src/drivers/lora_module.py` already has the ability to pass iin a 'spi_factory" to enable the test `FakeSpiDev` to be injected and substituted for the real `SpiDev`.
+
+Task:
+* Read the src/drivers/lora_detection.py, src/drivers/lora_module.py and src/cli/check_hardware.py files so that you know what is in them.
+* Read the partially-completed framework in `tests`
+* Figure out if the fake SPI device `FakeSpiDev` needs completing and, if so figure out how to complete it.
+* Create tests to use the existing ability to dependency-inject `FakeSpiDev` into `LoRaModule` to test the functionality in `src/cli/check_hardware.py`
+
+Constraints:
+* All the hardware detection logic which is possible is already present in src/drivers/lora_module.py. Do not add any more.
+* It has already been determined that none of the registers within the devices will reliably provide any different responses, so do not try to think of any additional ways that they can.
+* There is no "module_type" or "Device ID" register in register 0x12, that is actually a ChannelFilterBwControl register in LoRa mode, and has nothing to do with the module type.
+
+-----
+
+Context:
+* You are a senior software test engineer with radio, electronics and software architecture experience.
+* The file "tests/test_lora_module_detector.py" contains a set of tests.
+* When run, some of the tests fail and you need to figure out if these failures indicate problems with the tests or problems with the software being tested.
+* You also need to figure out if the tests
+  a) Have complete and sufficient coverage, and
+  b) Are doing everything that they are supposed to do. For example, the method `test_init_rfm95wq_with_factory` creates a FakeSpiDev instance called rfm95w_spi, but does not appear to use that instance. Test `test_init_rfm98w_with_factory` does not create a FakeSpiDev instance at all. The `TestLoRaModuleDetectorFrequency` also doesn't test what frequency a RFM98W on ce0 calculates, nor what an RFM95W on ce1 calculates.
+
+Task
+* Read existing tests and software modules.
+* Figure out why the tests in the `tests/test_lora_module_detector.py`fail.
+* If they fail because of issues in the tests, create a plan to fix those issues. If they fail because of issues in the software, describe the issues and create a plan to fix the software.
+* Figure out if the test coverage is sufficient and complete and, if not, create a plan to extend the tests so that their coverage is sufficient and complete.
+* Figure out if the existing tests are doing everything that they are supposed to do, including (but not exclusively) understanding why the method `test_init_rfm95wq_with_factory` creates a FakeSpiDev instance called rfm95w_spi, but does not appear to use that instance, why test `test_init_rfm98w_with_factory` does not create a FakeSpiDev instance at all and why the `TestLoRaModuleDetectorFrequency` also doesn't test what frequency a RFM98W on ce0 calculates, nor what an RFM95W on ce1 calculates. Create a plan to fix any issues determined.
+* Write all plan contents into a document called `2026_06_15_plan_fix_lorsa_module_detector.md`
+
+
+Constraints:
+* Perform no other tasks
+* Restrict all edits to the plan document.
+
+Note: The current state of the tests is:
+cd /home/rpiuser/TestMeshcore && pytest tests/test_lora_module_detector.py -v --tb=short 2>&1
+===================================================================== test session starts ======================================================================
+platform linux -- Python 3.13.5, pytest-9.0.3, pluggy-1.6.0 -- /home/rpiuser/TestMeshcore/venv313/bin/python3.13
+cachedir: .pytest_cache
+rootdir: /home/rpiuser/TestMeshcore
+collected 26 items                                                                                                                                             
+
+tests/test_lora_module_detector.py::TestLoRaModuleDetectorInitialization::test_init_rfm95w_with_factory PASSED                                           [  3%]
+tests/test_lora_module_detector.py::TestLoRaModuleDetectorInitialization::test_init_rfm98w_with_factory PASSED                                           [  7%]
+tests/test_lora_module_detector.py::TestLoRaModuleDetectorInitialization::test_init_none_module PASSED                                                   [ 11%]
+tests/test_lora_module_detector.py::TestLoRaModuleDetectorInitialization::test_init_multi_band_module PASSED                                             [ 15%]
+tests/test_lora_module_detector.py::TestLoRaModuleDetectorRegisters::test_read_register_rfm95w FAILED                                                    [ 19%]
+tests/test_lora_module_detector.py::TestLoRaModuleDetectorRegisters::test_write_register_rfm95w FAILED                                                   [ 23%]
+tests/test_lora_module_detector.py::TestLoRaModuleDetectorRegisters::test_read_register_none_device PASSED                                               [ 26%]
+tests/test_lora_module_detector.py::TestLoRaModuleDetection::test_detect_single_module_ce0 PASSED                                                        [ 30%]
+tests/test_lora_module_detector.py::TestLoRaModuleDetection::test_detect_single_module_ce1 PASSED                                                        [ 34%]
+tests/test_lora_module_detector.py::TestLoRaModuleDetection::test_detect_multi_band PASSED                                                               [ 38%]
+tests/test_lora_module_detector.py::TestLoRaModuleDetection::test_detect_multiple_modules PASSED                                                         [ 42%]
+tests/test_lora_module_detector.py::TestLoRaModuleDetection::test_detector_with_no_pins PASSED                                                           [ 46%]
+tests/test_lora_module_detector.py::TestLoRaModuleDetectorEdgeCases::test_spi_failure_read PASSED                                                        [ 50%]
+tests/test_lora_module_detector.py::TestLoRaModuleDetectorEdgeCases::test_spi_failure_write PASSED                                                       [ 53%]
+tests/test_lora_module_detector.py::TestLoRaModuleDetectorEdgeCases::test_spi_device_cleanup_on_delete PASSED                                            [ 57%]
+tests/test_lora_module_detector.py::TestLoRaModuleDetectorValidation::test_validate_config_match_rfm95w PASSED                                           [ 61%]
+tests/test_lora_module_detector.py::TestLoRaModuleDetectorValidation::test_validate_config_mismatch PASSED                                               [ 65%]
+tests/test_lora_module_detector.py::TestLoRaModuleDetectorValidation::test_validate_config_none_expectation PASSED                                       [ 69%]
+tests/test_lora_module_detector.py::TestLoRaModuleDetectorValidation::test_validate_config_dual_ce PASSED                                                [ 73%]
+tests/test_lora_module_detector.py::TestLoRaModuleDetectorFrequency::test_calculate_unique_frequency_rfm95w_ce0 PASSED                                   [ 76%]
+tests/test_lora_module_detector.py::TestLoRaModuleDetectorFrequency::test_calculate_unique_frequency_rfm98w_ce1 PASSED                                   [ 80%]
+tests/test_lora_module_detector.py::TestLoRaModuleDetectorFrequency::test_calculate_unique_frequency_multi_band_ce0 PASSED                               [ 84%]
+tests/test_lora_module_detector.py::TestLoRaModuleDetectorFrequency::test_calculate_unique_frequency_multi_band_ce1 PASSED                               [ 88%]
+tests/test_lora_module_detector.py::TestLoRaModuleDetectorExtendedDetection::test_extended_detect_different_modules PASSED                               [ 92%]
+tests/test_lora_module_detector.py::TestLoRaModuleDetectorExtendedDetection::test_extended_detect_runs_with_multiple_pins PASSED                         [ 96%]
+tests/test_lora_module_detector.py::TestLoRaModuleDetectorExtendedDetection::test_single_pin_no_extended_detection PASSED                                [100%]
+
+=========================================================================== FAILURES ===========================================================================
+__________________________________________________ TestLoRaModuleDetectorRegisters.test_read_register_rfm95w ___________________________________________________
+tests/test_lora_module_detector.py:114: in test_read_register_rfm95w
+    mock_module.read_register.assert_called()
+/usr/lib/python3.13/unittest/mock.py:948: in assert_called
+    raise AssertionError(msg)
+E   AssertionError: Expected 'read_register' to have been called.
+__________________________________________________ TestLoRaModuleDetectorRegisters.test_write_register_rfm95w __________________________________________________
+tests/test_lora_module_detector.py:130: in test_write_register_rfm95w
+    mock_module.write_register.assert_called()
+/usr/lib/python3.13/unittest/mock.py:948: in assert_called
+    raise AssertionError(msg)
+E   AssertionError: Expected 'write_register' to have been called.
+=================================================================== short test summary info ====================================================================
+FAILED tests/test_lora_module_detector.py::TestLoRaModuleDetectorRegisters::test_read_register_rfm95w - AssertionError: Expected 'read_register' to have been called.
+FAILED tests/test_lora_module_detector.py::TestLoRaModuleDetectorRegisters::test_write_register_rfm95w - AssertionError: Expected 'write_register' to have been called.
+================================================================ 2 failed, 24 passed in 10.06s =================================================================
+
+-----
+
+Context:
+* You are a  senior software engineer with electronics and radio experience.
+* A Software Architect has provided you with a plan of changes needed to the test structure within a project.
+* That plan is in `2026_06_19_plan_fix_tests.md`
+* You need to read the plan and complete one of the planned actions.
+
+Task
+* Read the `2026_06_19_plan_fix_tests.md` plan.
+* Inside "## 5. Remediation Plan — Phased Approach", implement "### PHASE 1: CLI Tests for `check_hardware.py` (Priority: CRITICAL)", reading any other files needed to perform that tast.
+* Some implementation has already been created in `tests/test_check_hardware_cli.py`, but that fails. Analyse the failure and correct any issues in that implementation.
+
+Constraints:
+* Perform no other tasks
+* Restrict all edits to the `test` directory (or its subdirectories)
+
