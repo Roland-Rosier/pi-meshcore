@@ -1,0 +1,28 @@
+[tool.pytest.ini_options]
+addopts = "--cov=src --cov=tests --cov-report=term-missing --cov-report=html --strict-markers"
+testpaths = ["tests"]
+markers = [
+    "slow: marks tests as slow (deselect with '-m \"not slow\"')",
+    "integration: marks tests as integration tests",
+]
+
+[tool.coverage.run]
+source = ["src", "tests"]
+omit = [
+    "*/test_*.py",       # Exclude test files from coverage measurement
+    "*/__init__.py",     # Exclude __init__ files
+]
+
+[tool.coverage.report]
+show_missing = true
+fail_under = 90          # CI should fail if coverage drops below 90%
+exclude_lines = [
+    "pragma: no cover",
+    "def __repr__",
+    "raise NotImplementedError",
+    "if TYPE_CHECKING:",
+    "if __name__ == .__main__.:",
+]
+
+[tool.coverage.html]
+directory = "htmlcov"

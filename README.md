@@ -146,6 +146,14 @@ meshcore_rpi_lora/
   - LoRa network simulations
   - Multi-node communication tests
 
+- **Coverage Reporting** (requires `pytest-cov>=4.1.0` and `coverage[toml]>=7.0` in `requirements.txt`):
+  - Run all tests with coverage report to terminal + HTML:
+    ```bash
+    python -m pytest --cov=src --cov=tests --cov-report=term-missing --cov-report=html
+    ```
+  - View the interactive HTML report at `htmlcov/index.html` after running.
+  - Configuration is defined in `pyproject.toml` under `[tool.coverage.*]`.
+
 - **Validation Tools**:
   - `npm run lint` (TypeScript/Python linter)
   - `npm run test` (Unit/integration tests)
