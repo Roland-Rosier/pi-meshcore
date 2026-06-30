@@ -35,6 +35,62 @@ This implementation includes:
 
 ---
 
+## Getting Started
+
+### Prerequisites
+
+- Python 3.9+ installed on your system
+- [uv](https://github.com/astral-sh/uv) package manager (install via `curl -LsSf https://astral.sh/uv/install.sh | sh`) or `sudo pipx install uv --global`
+- Raspberry Pi OS with SPI and GPIO enabled (`raspi-config` → Interface Options)
+
+### Installation
+
+```bash
+# Clone the repository
+git clone <repository-url> && cd pi-lora
+
+# Create virtual environment and install all dependencies
+uv sync
+```
+
+This installs both runtime (spidev, gpiod, typer) and development (pytest, mypy, coverage) dependencies.
+
+### Running Tests
+
+```bash
+# Run all tests with coverage reporting
+uv run pytest
+
+# Generate HTML coverage report
+uv run pytest --cov=src --cov-report=html
+
+# View the report in your browser:
+open htmlcov/index.html   # macOS
+xdg-open htmlcov/index.html  # Linux
+```
+
+### Type Checking
+
+```bash
+# Run mypy static analysis on source code
+uv run mypy src/
+```
+
+### Adding Dependencies
+
+```bash
+# Add a runtime dependency
+uv add <package-name>
+
+# Add a development dependency
+uv add --group dev <package-name>
+
+# Remove a dependency
+uv remove <package-name>
+```
+
+---
+
 ## Software Architecture
 
 ### Core Components

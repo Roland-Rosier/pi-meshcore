@@ -1,3 +1,127 @@
+# =============================================================================
+# pi-lora — MeshCore Raspberry Pi 4 LoRa Implementation
+# Copyright (c) 2026 Roland Rosier. All rights reserved.
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+# =============================================================================
+
+[build-system]
+requires = ["uv_build>=0.11.25,<0.12"]
+build-backend = "uv_build"
+
+[tool.uv.build-backend]
+module-name = "cli"
+
+# -----------------------------------------------------------------------------
+# Project metadata
+# -----------------------------------------------------------------------------
+[project]
+name = "pi-lora"
+version = "0.0.1"
+description = "MeshCore Client/Repeater on Raspberry Pi 4 with Uputronics LoRa Hat"
+readme = "README.md"
+license = { text = "Apache-2.0" }
+requires-python = ">=3.10"
+
+authors = [
+    { name = "Roland Rosier", email = "" },
+]
+
+classifiers = [
+    "Development Status :: 3 - Alpha",
+    "Environment :: Hardware :: Raspberry Pi",
+    "Intended Audience :: Developers",
+    "License :: OSI Approved :: Apache Software License",
+    "Operating System :: POSIX :: Linux",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Programming Language :: Python :: 3.13",
+    "Topic :: Communications :: Ham Radio",
+    "Topic :: System :: Hardware",
+]
+
+# -----------------------------------------------------------------------------
+# Runtime dependencies (installed with `uv sync` / `pip install .`)
+# -----------------------------------------------------------------------------
+dependencies = [
+    # Core hardware drivers — required for RPi + LoRa Hat operation
+    "spidev>=3.8",
+    "gpiod>=2.4",
+
+    # CLI framework (Typer, with Click/Rich/Shellingame extras)
+    "typer[all]>=0.19",
+
+    # --- Optional: MeshCore protocol library ---
+    # Uncomment the line below if you need MeshCore client/repeater functionality.
+    # This package is optional because it may not be ultimately needed, and some
+    # users may only want to scan frequencies without the full MeshCore stack.
+    # "meshcore>=2.3",
+
+    # --- Optional: Web interface (FastAPI + uvicorn) ---
+    # Uncomment both lines below if you plan to use the web dashboard.
+    # "fastapi>=0.115",
+    # "uvicorn>=0.34",
+]
+
+# -----------------------------------------------------------------------------
+# Optional dependency groups
+# -----------------------------------------------------------------------------
+[project.optional-dependencies]
+# Full MeshCore stack (client + repeater protocol implementation)
+meshcore = [
+    "meshcore>=2.3",
+]
+
+# Web interface (FastAPI API server and dashboard)
+web = [
+    "fastapi>=0.115",
+    "uvicorn>=0.34",
+]
+
+# All optional features combined
+all = [
+    "meshcore>=2.3",
+    "fastapi>=0.115",
+    "uvicorn>=0.34",
+]
+
+# -----------------------------------------------------------------------------
+# Development dependencies (installed with `uv sync --group dev`)
+# -----------------------------------------------------------------------------
+[dependency-groups]
+dev = [
+    # Static type checking
+    "mypy>=1.8",
+
+    # Testing and coverage
+    "pytest-cov>=4.1",
+    "coverage[toml]>=7.0",
+]
+
+# -----------------------------------------------------------------------------
+# No CLI entry points yet — real CLI not developed
+# (Will be added when src/cli/ is ready)
+# [project.scripts]
+# pi-lora-check = "src.cli.check_hardware:main"
+
+# No ASGI application module yet — web interface not implemented
+
+
+# =============================================================================
+# Tool configurations (pytest, coverage, mypy)
+# =============================================================================
+
 [tool.pytest.ini_options]
 addopts = "--cov=src --cov=tests --cov-report=term-missing --cov-report=html --strict-markers"
 testpaths = ["tests"]
@@ -26,3 +150,24 @@ exclude_lines = [
 
 [tool.coverage.html]
 directory = "htmlcov"
+
+# -----------------------------------------------------------------------------
+# mypy configuration (dev-only)
+# -----------------------------------------------------------------------------
+[tool.mypy]
+python_version = "3.10"
+strict = true
+warn_return_any = true
+warn_unused_configs = true
+disallow_untyped_defs = true
+disallow_incomplete_defs = true
+check_untyped_defs = true
+disallow_untyped_decorators = true
+no_implicit_optional = true
+warn_redundant_casts = true
+warn_unused_ignores = true
+warn_unreachable = true
+
+[[tool.mypy.overrides]]
+module = ["meshcore.*", "gpiod"]
+ignore_missing_imports = true
