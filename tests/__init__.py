@@ -15,8 +15,15 @@
 """Pytest configuration for the MeshCore LoRa project."""
 
 import sys
+import os
 from pathlib import Path
 
 # Add the project root to the Python path
-sys.path.insert(0, str(Path(__file__).parent.parent))
+#sys.path.insert(0, str(Path(__file__).parent.parent))
+current_dir = os.path.abspath(os.path.dirname(__file__))
+# project_root = os.path.abspath(os.path.join(current_dir, '..'))
+project_root = os.path.abspath(os.path.join(current_dir, '..', 'src'))
 
+if project_root not in sys.path:
+    sys.path.append(project_root)
+    print(f"✅ Added project root to sys.path: {project_root}")

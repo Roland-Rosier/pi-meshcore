@@ -21,7 +21,14 @@ from typing import Dict
 
 # Add the project root to path
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), 'src'))
+# sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), 'src'))
+current_dir = os.path.abspath(os.path.dirname(__file__))
+# project_root = os.path.abspath(os.path.join(current_dir, '..'))
+project_root = os.path.abspath(os.path.join(current_dir, '..', 'src'))
+
+if project_root not in sys.path:
+    sys.path.append(project_root)
+    print(f"✅ Added project root to sys.path: {project_root}")
 
 import pytest
 from fakes import FakeSpiDev

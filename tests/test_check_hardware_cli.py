@@ -30,7 +30,8 @@ import pytest
 import typer
 from typer.testing import CliRunner
 
-from src.cli.check_hardware import app as cli_app
+# from src.cli.check_hardware import app as cli_app
+from cli.check_hardware import app as cli_app
 from tests.fakes import FakeSpiDev
 
 
@@ -223,7 +224,8 @@ class TestDetectModulesMatchingConfig:
         )
 
         # The validate_config method must return a single ValidationResult for CE0.
-        from src.drivers.lora_detection import ValidationResult
+        # from src.drivers.lora_detection import ValidationResult
+        from drivers.lora_detection import ValidationResult
 
         mock_detector.validate_config.return_value = [
             ValidationResult(
@@ -270,7 +272,8 @@ class TestDetectModulesMismatchingConfig:
             communication_successes=[True, True],
         )
 
-        from src.drivers.lora_detection import ValidationResult
+        # from src.drivers.lora_detection import ValidationResult
+        from drivers.lora_detection import ValidationResult
 
         mock_detector.validate_config.return_value = [
             ValidationResult(
@@ -318,7 +321,8 @@ class TestDetectModulesDualCeValidation:
             communication_successes=[True, True],
         )
 
-        from src.drivers.lora_detection import ValidationResult
+        # from src.drivers.lora_detection import ValidationResult
+        from drivers.lora_detection import ValidationResult
 
         mock_detector.validate_config.return_value = [
             ValidationResult(
@@ -402,7 +406,8 @@ class TestDetectModulesWithNoneExpectation:
             communication_successes=[True, True],
         )
 
-        from src.drivers.lora_detection import ValidationResult
+        # from src.drivers.lora_detection import ValidationResult
+        from drivers.lora_detection import ValidationResult
 
         # Expecting 'none' but detecting RFM98W → mismatch.
         mock_detector.validate_config.return_value = [
@@ -461,7 +466,8 @@ class TestCliEdgeCases:
             communication_successes=[True],
         )
 
-        from src.drivers.lora_detection import ValidationResult
+        # from src.drivers.lora_detection import ValidationResult
+        from drivers.lora_detection import ValidationResult
 
         mock_detector.validate_config.return_value = [
             ValidationResult(

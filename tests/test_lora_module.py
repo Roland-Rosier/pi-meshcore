@@ -19,7 +19,8 @@ from unittest.mock import patch
 
 import pytest
 
-from src.drivers.lora_module import LoRaModule
+# from src.drivers.lora_module import LoRaModule
+from drivers.lora_module import LoRaModule
 from tests.fakes import FakeSpiDev
 
 
