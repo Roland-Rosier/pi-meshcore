@@ -165,16 +165,14 @@ uv remove <package-name>
 │       └── config_lmstudio.yaml      # LM Studio configuration for Continue.dev agent workflows
 ├── pyproject.toml                    # Python project metadata, pytest & coverage configuration
 ├── requirements.txt                  # Python dependency list (FastAPI, meshcore, pytest, etc.)
+├── uv.lock                           # Lock file pinning exact dependency versions for reproducible builds
 ├── src/                              # Main source code
-│   ├── __init__.py                   # Makes src a Python package
 │   ├── cli/
 │   │   └── check_hardware.py         # CLI tool for LoRa hardware detection and status checks
 │   └── drivers/
-│       ├── __init__.py               # Makes drivers a Python package
 │       ├── lora_detection.py          # LoRa module auto-detection logic (RFM95W/RFM98W)
 │       └── lora_module.py             # RFM95W/RFM98W radio driver implementation (SX1276/SX1278)
 └── tests/                            # Test suite
-    ├── __init__.py                   # Makes tests a Python package
     ├── conftest.py                   # pytest fixtures and shared test configuration
     ├── fakes.py                      # Fake/mock implementations for driver testing
     ├── test_check_hardware_cli.py    # Unit tests for CLI hardware check tool
