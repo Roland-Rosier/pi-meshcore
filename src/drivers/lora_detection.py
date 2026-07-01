@@ -17,7 +17,7 @@ import sys
 import os
 
 from dataclasses import dataclass
-from typing import List, Dict, Optional, Literal
+from typing import Any, Dict, List, Optional, Literal
 
 # Add project root to Python path if not already present
 current_dir = os.path.abspath(os.path.dirname(__file__))
@@ -87,7 +87,7 @@ class LoRaModuleDetector:
         """
         self.modules = [LoRaModule(ce_pin) for ce_pin in ce_pins]
     
-    def detect_modules(self, config: Optional[LoRaModuleConfig] = None) -> List[Dict]:
+    def detect_modules(self, config: Optional[LoRaModuleConfig] = None) -> list[dict[str, Any]]:
         """Detect LoRa modules connected to the CE pins using LoRaModule instances.
         
         If both CE0 and CE1 are detected, performs extended verification to determine
@@ -96,10 +96,10 @@ class LoRaModuleDetector:
         :return: List of detection results with additional verification status when applicable
         """
         # First, run standard detection
-        results: List[Dict] = []
+        results: list[dict[str, Any]] = []
         
         for module in self.modules:
-            result: Dict = {
+            result: dict[str, Any] = {
                 "ce_pin": module.ce_pin,
                 "module_type": module.module_type,
                 "Silicon Revision": f"0x{module.silicon_revision:02X}" if module.silicon_revision is not None else "None detected",
@@ -108,8 +108,8 @@ class LoRaModuleDetector:
             results.append(result)
         
         # Check if both CE0 and CE1 have modules attached before running extended detection
-        ce0_result: Optional[Dict] = None
-        ce1_result: Optional[Dict] = None
+        ce0_result: dict[str, Any] | None = None
+        ce1_result: dict[str, Any] | None = None
         
         for result in results:
             if result["ce_pin"] == 0:
@@ -219,7 +219,7 @@ class LoRaModuleDetector:
             # This should not happen if detection is working, but just in case
             return 433000
 
-    def _extended_detect_modules(self, raw_results: List[Dict], config: Optional[LoRaModuleConfig] = None) -> List[Dict]:
+    def _extended_detect_modules(self, raw_results: list[dict[str, Any]], config: Optional[LoRaModuleConfig] = None) -> list[dict[str, Any]]:
         """
         Extended detection that verifies if CE0 and CE1 are the same physical module.
         This is a private method that takes pre-computed detection results as input.
@@ -229,8 +229,8 @@ class LoRaModuleDetector:
         :return: List of detection results with additional verification status
         """
         # Check if both CE0 and CE1 have modules attached
-        ce0_result: Optional[Dict] = None
-        ce1_result: Optional[Dict] = None
+        ce0_result: dict[str, Any] | None = None
+        ce1_result: dict[str, Any] | None = None
         
         for result in raw_results:
             if result["ce_pin"] == 0:

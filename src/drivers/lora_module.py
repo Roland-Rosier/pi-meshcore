@@ -20,6 +20,8 @@ REG_OP_MODE = 0x01
 MODE_SLEEP = 0x00
 MODE_STANDBY = 0x01
 BIT_LF_MODE_ON = 0x08
+HIGH_FREQ_KHZ: int = 1015000
+LOW_FREQ_KHZ: int = 415000
 
 class LoRaModule:
     """Class to represent and interact with a LoRa module."""
@@ -36,14 +38,14 @@ class LoRaModule:
             self.spi_device = spi_factory()
         else:
             self.spi_device = spidev.SpiDev()
-        self.silicon_revision = None
+        self.silicon_revision: int | None = None
         self.communication_success = False
-        self.supports_high_frequency = False
-        self.supports_low_frequency = False
+        self.supports_high_frequency: bool = False
+        self.supports_low_frequency: bool = False
         self.unique_value_written = False
-        self.unique_msb = None
-        self.unique_mid = None
-        self.unique_lsb = None
+        self.unique_msb: int | None = None
+        self.unique_mid: int | None = None
+        self.unique_lsb: int | None = None
         self.lf_mode_success = False
         self.lf_mode_not_success = False
         self.module_type = "Unknown"
@@ -93,7 +95,7 @@ class LoRaModule:
             # Note that with xfer2, CS is held between blocks in transfer
             response = self.spi_device.xfer2([reg_addr & 0x7F, 0x00])
             time.sleep(0.01)
-            return response[1]
+            return int(response[1])
         except Exception as e:
             print(f"SPI read error for CE {self.ce_pin}: {e}")
             return None
@@ -111,7 +113,7 @@ class LoRaModule:
             # Note that with xfer2, CS is held between blocks in transfer
             response = self.spi_device.xfer2([reg_addr | 0x80, value])
             time.sleep(0.01)
-            return response[1]
+            return int(response[1])
         except Exception as e:
             print(f"SPI write error for CE {self.ce_pin}: {e}")
             return None
@@ -178,14 +180,14 @@ class LoRaModule:
     def _check_frequency_support(self) -> None:
         """Check if the module supports high and low frequency settings."""
         # Verify High Frequency (1015- MHz) to see if it supports high frequencies (which *may* indicate RFM95W)
-        high_freq = {"supported": False, "freq_type": "high", "freq_khz": 1015000}
-        (verify_success, _, _, _, _, _, _) = self._write_and_verify_frequency_for_khz(high_freq["freq_khz"])
+        verify_success = False
+        (verify_success, _, _, _, _, _, _) = self._write_and_verify_frequency_for_khz(HIGH_FREQ_KHZ)
         if verify_success:
             self.supports_high_frequency = True
 
         # Verify Low Frequency (415 MHz) for RFM98W validation
-        low_freq = {"supported": False, "freq_type": "low", "freq_khz": 415000}
-        (verify_success, _, _, _, _, _, _) = self._write_and_verify_frequency_for_khz(low_freq["freq_khz"])
+        verify_success = False
+        (verify_success, _, _, _, _, _, _) = self._write_and_verify_frequency_for_khz(LOW_FREQ_KHZ)
         if verify_success:
             self.supports_low_frequency = True
 

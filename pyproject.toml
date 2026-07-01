@@ -172,5 +172,5 @@ explicit_package_bases = true
 mypy_path = "src"
 
 [[tool.mypy.overrides]]
-module = ["meshcore.*", "gpiod"]
+module = ["spidev"]
 ignore_missing_imports = true
