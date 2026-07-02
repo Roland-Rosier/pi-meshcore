@@ -83,7 +83,7 @@ def fake_rfm98w_spi() -> FakeSpiDev:
 # more robust because it does not depend on where LoRaModuleDetector was
 # originally imported from.
 
-_DETECTOR_PATCH_PATH: str = "src.cli.check_hardware.LoRaModuleDetector"
+_DETECTOR_PATCH_PATH: str = "cli.check_hardware.LoRaModuleDetector"
 
 
 def _build_mock_detector(

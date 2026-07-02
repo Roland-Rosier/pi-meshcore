@@ -23,6 +23,7 @@ import pytest
 from drivers.lora_module import LoRaModule
 from tests.fakes import FakeSpiDev
 
+_SPIDEV_PATCH_PATH: str = 'drivers.lora_module.spidev.SpiDev'
 
 class TestLoRaModuleInitialization:
     """Test suite for LoRaModule initialization."""
@@ -475,7 +476,7 @@ class TestLoRaModuleModerateGaps:
     def test_verify_unique_value_never_written(self) -> None:
         """M7a: Verify returns False when unique values were never written (msb/mid/lsb are None)."""
         fake_spi = FakeSpiDev(module_type="rfm95w")
-        with patch("src.drivers.lora_module.spidev.SpiDev", return_value=fake_spi):
+        with patch(_SPIDEV_PATCH_PATH, return_value=fake_spi):
             module = LoRaModule(ce_pin=0)
 
         # Don't write any unique value — msb/mid/lsb are all None.
