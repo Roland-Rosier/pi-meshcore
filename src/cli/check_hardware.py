@@ -71,13 +71,14 @@ def detect_modules(
 
     if ce0 is not None or ce1 is not None:
         # from src.drivers.lora_detection import LoRaModuleConfig, ValidationResult
-        from drivers.lora_detection import LoRaModuleConfig
+        from drivers.lora_detection import LoRaModuleConfig, ValidationResult
 
         config = LoRaModuleConfig(
             ce0_expected_module_type=ce0.value if ce0 else None,
             ce1_expected_module_type=ce1.value if ce1 else None,
         )
-        validation_results: list[ValidationReport] = detector.validate_config(config)  # type: ignore[name-defined]
+
+        validation_results: list[ValidationResult] = detector.validate_config(config)
 
         print("\nConfiguration Validation Results:")
         all_passed = True

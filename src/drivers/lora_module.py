@@ -31,7 +31,7 @@ class LoRaModule:
     def __init__(self, ce_pin: int, spi_factory: Callable[[], Any] | None = None):
         """
         Initialize a LoRa module with its own SPI device.
-        
+
         :param ce_pin: CE pin number (0 or 1)
         :param spi_factory: Optional factory function to create the SPI device for testing
         """
@@ -224,7 +224,7 @@ class LoRaModule:
 
     def _determine_module_type(self) -> None:
         """Determine the module type based on silicon revision and LF mode.
-        
+
         Note: The silicon revision appears to be the same for all modules.
         """
         # if self.silicon_revision == 0x12:
@@ -261,7 +261,7 @@ class LoRaModule:
     def test_unique_value_retention(self, frequency_khz: int) -> bool:
         """
         Test if a unique value can be written and retained.
-        
+
         :param frequency_khz: Frequency in kHz to test
         :return: True if the value was successfully written and retained, False otherwise
         """
@@ -282,7 +282,7 @@ class LoRaModule:
     def verify_unique_value_retention(self) -> bool:
         """
         Verify that the previously written unique values are still present in the frequency registers.
-        
+
         :return: True if the stored values match and the test was successful, False otherwise
         """
         # Check if we have previously written unique values

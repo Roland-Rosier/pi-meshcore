@@ -79,20 +79,22 @@ class LoRaModuleDetector:
         ],
     }
 
-    def __init__(self, ce_pins: list[int] = [0, 1]):
+    def __init__(self, ce_pins: list[int] = None):
         """
         Initialize LoRaModule instances for CE pins.
 
         :param ce_pins: List of CE pins (e.g., [0, 1])
         """
+        if ce_pins is None:
+            ce_pins = [0, 1]
         self.modules = [LoRaModule(ce_pin) for ce_pin in ce_pins]
 
     def detect_modules(self, config: LoRaModuleConfig | None = None) -> list[dict[str, Any]]:
         """Detect LoRa modules connected to the CE pins using LoRaModule instances.
-        
+
         If both CE0 and CE1 are detected, performs extended verification to determine
         if they are the same physical module.
-        
+
         :return: List of detection results with additional verification status when applicable
         """
         # First, run standard detection
@@ -120,17 +122,15 @@ class LoRaModuleDetector:
         # Only run extended detection if both CE pins have detected modules
         if ce0_result is not None and ce1_result is not None:
             # Check if this module is RFM95W or RFM98W (to determine frequency)
-            ce0_is_rfm95w = False
-            ce1_is_rfm95w = False
 
             if ce0_result["module_type"] == "RFM95W (High-Band 868MHz / Semtech SX1276)":
-                ce0_is_rfm95w = True
+                pass
             elif "Multi-band" in ce0_result["module_type"]:
                 # For multi-band, assume RFM95W for CE0 as default
-                ce0_is_rfm95w = True
+                pass
 
             if ce1_result["module_type"] == "RFM95W (High-Band 868MHz / Semtech SX1276)":
-                ce1_is_rfm95w = True
+                pass
             elif "Multi-band" in ce1_result["module_type"]:
                 # For multi-band, assume RFM98W for CE1 as default
                 pass  # ce1_is_rfm95w remains False
@@ -164,7 +164,7 @@ class LoRaModuleDetector:
     def calculate_unique_frequency(self, ce_pin: int, detected_type: str, config: LoRaModuleConfig | None = None) -> int:
         """
         Calculate the unique frequency to use for a module based on detection and configuration.
-        
+
         :param ce_pin: The CE pin number (0 or 1)
         :param detected_type: The detected module type string
         :param config: Optional user configuration
@@ -223,7 +223,7 @@ class LoRaModuleDetector:
         """
         Extended detection that verifies if CE0 and CE1 are the same physical module.
         This is a private method that takes pre-computed detection results as input.
-        
+
         :param raw_results: Pre-computed detection results from detect_modules
         :param config: Optional user configuration
         :return: List of detection results with additional verification status
@@ -312,7 +312,7 @@ class LoRaModuleDetector:
             1: config.ce1_expected_module_type,
         }
 
-        for i, module in enumerate(self.modules):
+        for _i, module in enumerate(self.modules):
             ce_pin = module.ce_pin
             expected_type = ce_pin_to_config.get(ce_pin)
 

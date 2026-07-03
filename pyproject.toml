@@ -222,6 +222,14 @@ ignore = [
 "src/**/__init__.py" = ["E501", "F401"]
 "tests/**/__init__.py" = ["E501", "F401"]
 
+# Files that intentionally append to sys.path for import resolution on RPi, and tests using bare Exception.
+"src/cli/check_hardware.py" = ["E402", "B008"]
+"src/drivers/lora_detection.py" = ["E402"]
+"tests/test_lora_module_detection.py" = ["E402", "B017"]
+
+# Tests that verify simulated SPI failures use bare Exception intentionally.
+"tests/test_fakes.py" = ["B017"]
+
 [tool.ruff.lint.isort]
 known-first-party = ["drivers", "cli", "fakes"]
 force-single-line = false

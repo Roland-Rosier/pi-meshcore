@@ -19,7 +19,7 @@ from unittest.mock import MagicMock
 
 class FakeSpiDev:
     """Simulated SPI device for testing LoRa module detection.
-    
+
     This class mimics the behavior of spidev.SpiDev but allows controlled
     simulation of different module types and error conditions.
     """
@@ -47,7 +47,7 @@ class FakeSpiDev:
 
     def __init__(self, module_type: str = "none", registers: dict[int, int] | None = None) -> None:
         """Initialize the fake SPI device.
-        
+
         :param module_type: Type of module to simulate ("rfm95w", "rfm98w", "multi_band", "none")
         :param registers: Optional initial register values
         """
@@ -90,7 +90,7 @@ class FakeSpiDev:
 
     def open(self, bus: int, device: int) -> None:
         """Simulate opening the SPI device.
-        
+
         :param bus: SPI bus number
         :param device: CE pin number (device select)
         :raises OSError: If simulating a disconnected device
@@ -145,7 +145,7 @@ class FakeSpiDev:
 
     def xfer2(self, data: list[int]) -> list[int]:
         """Simulate SPI transfer.
-        
+
         :param data: Data to transfer (write bytes)
         :return: Received data (read bytes)
         :raises Exception: If simulating an error condition
@@ -217,7 +217,7 @@ class FakeSpiDev:
 
     def set_register(self, reg_addr: int, value: int) -> None:
         """Set a register value directly.
-        
+
         :param reg_addr: Register address
         :param value: Value to set
         """
@@ -225,7 +225,7 @@ class FakeSpiDev:
 
     def get_register(self, reg_addr: int) -> int:
         """Get a register value.
-        
+
         :param reg_addr: Register address
         :return: Current register value
         """
@@ -248,7 +248,7 @@ class FakeSpiDev:
 
     def calculate_frequency_from_registers(self, msb: int, mid: int, lsb: int) -> int:
         """Calculate frequency in kHz from register values.
-        
+
         :param msb: Most significant byte
         :param mid: Middle byte
         :param lsb: Least significant byte
@@ -261,7 +261,7 @@ class FakeSpiDev:
 
     def is_frequency_supported(self, frequency_khz: int) -> bool:
         """Check if a frequency is supported by the simulated module.
-        
+
         :param frequency_khz: Frequency in kHz
         :return: True if frequency is supported
         """
@@ -277,7 +277,7 @@ class FakeSpiDev:
 
     def _verify_frequency_registers(self, msb: int, mid: int, lsb: int) -> bool:
         """Verify if frequency registers contain valid values for this module type.
-        
+
         :param msb: Most significant byte
         :param mid: Middle byte
         :param lsb: Least significant byte
@@ -288,14 +288,14 @@ class FakeSpiDev:
 
     def get_operating_mode(self) -> int:
         """Get the current operating mode.
-        
+
         :return: Current OP_MODE register value
         """
         return self._registers.get(self.REG_OP_MODE, self.MODE_SLEEP)
 
     def is_lf_mode_enabled(self) -> bool:
         """Check if LF mode is enabled.
-        
+
         :return: True if LF mode bit is set
         """
         op_mode: int = self.get_operating_mode()
@@ -305,7 +305,7 @@ class FakeSpiDev:
 def create_fake_spi_dev(module_type: str = "none",
                         registers: dict[int, int] | None = None) -> FakeSpiDev:
     """Create a FakeSpiDev instance with the specified module type.
-    
+
     :param module_type: Type of module to simulate ("rfm95w", "rfm98w", "multi_band", "none")
     :param registers: Optional initial register values
     :return: Configured FakeSpiDev instance
@@ -315,7 +315,7 @@ def create_fake_spi_dev(module_type: str = "none",
 
 def patch_spidev_with_fake(fake_spi: FakeSpiDev) -> MagicMock:
     """Patch spidev.SpiDev with a FakeSpiDev instance for testing.
-    
+
     :param fake_spi: FakeSpiDev instance to use as replacement
     :return: Mock object that returns the fake SPI device
     """
@@ -326,7 +326,7 @@ def patch_spidev_with_fake(fake_spi: FakeSpiDev) -> MagicMock:
 
 def verify_frequency_in_range(fake_spi: FakeSpiDev, frequency_khz: int) -> bool:
     """Verify if a frequency is in the supported range for the module type.
-    
+
     :param fake_spi: FakeSpiDev instance
     :param frequency_khz: Frequency to verify in kHz
     :return: True if frequency is supported
@@ -336,7 +336,7 @@ def verify_frequency_in_range(fake_spi: FakeSpiDev, frequency_khz: int) -> bool:
 
 def simulate_lf_mode_test(fake_spi: FakeSpiDev) -> bool:
     """Simulate LF mode test sequence.
-    
+
     :param fake_spi: FakeSpiDev instance configured as RFM95W or similar
     :return: True if LF mode is successfully set and retained
     """
