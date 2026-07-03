@@ -12,9 +12,11 @@
 # see the License for the specific language governing permissions and
 # limitations under the License.
 
-from typing import Any, Callable, List, Optional, Tuple
-import spidev
 import time
+from collections.abc import Callable
+from typing import Any
+
+import spidev
 
 REG_OP_MODE = 0x01
 MODE_SLEEP = 0x00
@@ -25,8 +27,8 @@ LOW_FREQ_KHZ: int = 415000
 
 class LoRaModule:
     """Class to represent and interact with a LoRa module."""
-    
-    def __init__(self, ce_pin: int, spi_factory: Optional[Callable[[], Any]] = None):
+
+    def __init__(self, ce_pin: int, spi_factory: Callable[[], Any] | None = None):
         """
         Initialize a LoRa module with its own SPI device.
         
@@ -82,8 +84,8 @@ class LoRaModule:
             print(f"SPI device for CE {self.ce_pin} closed.")
         except Exception as e:
             print(f"Error closing SPI device for CE {self.ce_pin}: {e}")
-    
-    def read_register(self, reg_addr: int) -> Optional[int]:
+
+    def read_register(self, reg_addr: int) -> int | None:
         """
         Read a register from the LoRa module.
 
@@ -100,7 +102,7 @@ class LoRaModule:
             print(f"SPI read error for CE {self.ce_pin}: {e}")
             return None
 
-    def write_register(self, reg_addr: int, value: int) -> Optional[int]:
+    def write_register(self, reg_addr: int, value: int) -> int | None:
         """
         Write a register to the LoRa module.
 
@@ -118,7 +120,7 @@ class LoRaModule:
             print(f"SPI write error for CE {self.ce_pin}: {e}")
             return None
 
-    def _calc_freq_registers_for_khz(self, a_freq_in_khz: int) -> Tuple[int, int, int]:
+    def _calc_freq_registers_for_khz(self, a_freq_in_khz: int) -> tuple[int, int, int]:
         """Calculate the register values for a requested frequency."""
         freq_hz_times_100000000 = a_freq_in_khz * 100000000000
         freq_register_value = int(freq_hz_times_100000000 / 6103515625)
@@ -128,7 +130,7 @@ class LoRaModule:
         print(f"Calculated registers for frequency of {a_freq_in_khz} kHz with register values (0x{msb:02X} 0x{mid:02X} 0x{lsb:02X})")
         return (msb, mid, lsb)
 
-    def _read_frequency_registers(self) -> Tuple[int|None, int|None, int|None]:
+    def _read_frequency_registers(self) -> tuple[int|None, int|None, int|None]:
         """Read the frequency registers."""
         msb = self.read_register(0x06)
         mid = self.read_register(0x07)
@@ -136,7 +138,7 @@ class LoRaModule:
         time.sleep(0.01)
         return (msb, mid, lsb)
 
-    def _write_frequency_registers(self, a_msb: int, a_mid: int, a_lsb: int) -> Tuple[int|None, int|None, int|None, int|None]:
+    def _write_frequency_registers(self, a_msb: int, a_mid: int, a_lsb: int) -> tuple[int|None, int|None, int|None, int|None]:
         """Write the frequency registers."""
         response_mode = None
         response_msb = None
@@ -152,7 +154,7 @@ class LoRaModule:
             response_lsb = self.write_register(0x08, a_lsb)
         return (response_mode, response_msb, response_mid, response_lsb)
 
-    def _write_frequency_for_khz(self, a_freq_in_khz: int) -> Tuple[int|None, int|None, int|None, int|None]:
+    def _write_frequency_for_khz(self, a_freq_in_khz: int) -> tuple[int|None, int|None, int|None, int|None]:
         """Write a target frequency to the module."""
         (msb, mid, lsb) = self._calc_freq_registers_for_khz(a_freq_in_khz)
         (w_mode, w_msb, w_mid, w_lsb) = self._write_frequency_registers(msb, mid, lsb)
@@ -161,7 +163,7 @@ class LoRaModule:
         r_lsb = lsb if w_lsb is not None else None
         return (w_mode, r_msb, r_mid, r_lsb)
 
-    def _write_and_verify_frequency_for_khz(self, a_freq_in_khz: int) -> Tuple[bool, int|None, int|None, int|None, int|None, int|None, int|None]:
+    def _write_and_verify_frequency_for_khz(self, a_freq_in_khz: int) -> tuple[bool, int|None, int|None, int|None, int|None, int|None, int|None]:
         """Write and verify a frequency."""
         verify_success = False
         msb = None
@@ -215,7 +217,7 @@ class LoRaModule:
         mod_check = self.read_register(REG_OP_MODE)
         if mod_check is not None:
             self.lf_mode_not_success = ((mod_check & BIT_LF_MODE_ON) != BIT_LF_MODE_ON)
-        
+
         # Put the device back into sleep mode with LF_MODE_ON
         self.write_register(REG_OP_MODE, MODE_SLEEP | BIT_LF_MODE_ON)
         time.sleep(0.01)
@@ -266,17 +268,17 @@ class LoRaModule:
         # Use the existing verification function to write and verify the frequency
         (verify_success, req_msb, req_mid, req_lsb, _, _, _) = self._write_and_verify_frequency_for_khz(frequency_khz)
         # print(f"Tested ({verify_success}) unique value initial retention for frequency of {frequency_khz} kHz with register values (0x{req_msb:02X} 0x{req_mid:02X} 0x{req_lsb:02X})")
-        
+
         # Save the requested values as instance variables
         self.unique_msb = req_msb
         self.unique_mid = req_mid
         self.unique_lsb = req_lsb
-        
+
         # Update the unique_value_written flag based on verification result
         self.unique_value_written = verify_success
-        
+
         return self.unique_value_written
-    
+
     def verify_unique_value_retention(self) -> bool:
         """
         Verify that the previously written unique values are still present in the frequency registers.
@@ -286,18 +288,18 @@ class LoRaModule:
         # Check if we have previously written unique values
         if self.unique_msb is None or self.unique_mid is None or self.unique_lsb is None:
             return False
-        
+
         # Check if the test was previously successful
         if not self.unique_value_written:
             return False
-        
+
         # Read current frequency registers
         (current_msb, current_mid, current_lsb) = self._read_frequency_registers()
 
         if all(ele is not None for ele in (current_msb, current_mid, current_lsb)):
             # Compare with stored values
-            return (current_msb == self.unique_msb and 
-                    current_mid == self.unique_mid and 
+            return (current_msb == self.unique_msb and
+                    current_mid == self.unique_mid and
                     current_lsb == self.unique_lsb)
         else:
             return False

@@ -15,17 +15,16 @@
 from __future__ import annotations
 
 import sys
-
-from src.drivers.lora_module import LoRaModule
-from src.drivers.lora_detection import (
-    LoRaModuleDetector,
-    LoRaModuleConfig,
-    ValidationResult,
-)
-from tests.fakes import FakeSpiDev
 from unittest.mock import MagicMock, patch
-import pytest
 
+import pytest
+from src.drivers.lora_detection import (
+    LoRaModuleConfig,
+    LoRaModuleDetector,
+)
+from src.drivers.lora_module import LoRaModule
+
+from tests.fakes import FakeSpiDev
 
 _SPIDEV_PATCH_PATH: str = 'drivers.lora_module.spidev.SpiDev'
 _LORAMODULE_PATCH_PATH: str = 'src.drivers.lora_detection.LoRaModule'
@@ -102,7 +101,7 @@ class TestLoRaModuleDetectorRegisters:
             detector = LoRaModuleDetector(ce_pins=[0])
 
         # detect_modules() calls read_register(0x12) during result construction.
-        results: List[Dict] = detector.detect_modules()
+        results: list[dict] = detector.detect_modules()
 
         # The result dict includes the register value from read_register(0x12).
         assert "reg_rxbw_freqifmsb" in results[0]
@@ -120,7 +119,7 @@ class TestLoRaModuleDetectorRegisters:
             module = LoRaModule(ce_pin=0)
 
         # Call write_register directly and verify it writes to FakeSpiDev's register store.
-        result: Optional[int] = module.write_register(0x12, 0xFF)
+        result: int | None = module.write_register(0x12, 0xFF)
 
         assert result == 0xFF  # xfer2 echoes the written byte back
         assert fake_spi.get_register(0x12) == 0xFF
@@ -703,7 +702,7 @@ class TestLoRaModuleDetectorExtendedDetection:
         single_results = detector.detect_modules()
 
         assert len(single_results) == 1
-        common_keys: List[str] = [
+        common_keys: list[str] = [
             "ce_pin",
             "module_type",
             "Silicon Revision",
@@ -715,7 +714,7 @@ class TestLoRaModuleDetectorExtendedDetection:
             )
 
         # Extended detection keys should NOT be present with a single pin.
-        extended_keys: List[str] = [
+        extended_keys: list[str] = [
             "is_single_module_dual_spi",
             "unique_value_written",
             "unique_value_verified",
@@ -743,7 +742,7 @@ class TestLoRaModuleDetectorExtendedDetection:
         dual_results = detector_dual.detect_modules()
 
         assert len(dual_results) == 2
-        all_expected_keys: List[str] = common_keys + extended_keys
+        all_expected_keys: list[str] = common_keys + extended_keys
         for result in dual_results:
             for key in all_expected_keys:
                 assert key in result, (
@@ -839,9 +838,11 @@ class TestLoRaModuleDetectorExtendedDetectionPaths:
             detector = LoRaModuleDetector(ce_pins=[0, 1])
 
         # Patch verify_unique_value_retention on both modules to return False.
-        with patch.object(detector.modules[0], "verify_unique_value_retention", return_value=False):
-            with patch.object(detector.modules[1], "verify_unique_value_retention", return_value=False):
-                results = detector.detect_modules()
+        with (
+            patch.object(detector.modules[0], "verify_unique_value_retention", return_value=False),
+            patch.object(detector.modules[1], "verify_unique_value_retention", return_value=False),
+        ):
+            results = detector.detect_modules()
 
         assert len(results) == 2
         for result in results:
@@ -869,9 +870,11 @@ class TestLoRaModuleDetectorExtendedDetectionPaths:
             detector = LoRaModuleDetector(ce_pins=[0, 1])
 
         # CE0 verifies (True), CE1 does not verify (False).
-        with patch.object(detector.modules[0], "verify_unique_value_retention", return_value=True):
-            with patch.object(detector.modules[1], "verify_unique_value_retention", return_value=False):
-                results = detector.detect_modules()
+        with (
+            patch.object(detector.modules[0], "verify_unique_value_retention", return_value=True),
+            patch.object(detector.modules[1], "verify_unique_value_retention", return_value=False),
+        ):
+            results = detector.detect_modules()
 
         assert len(results) == 2
         for result in results:

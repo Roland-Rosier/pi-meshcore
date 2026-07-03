@@ -14,7 +14,8 @@
 
 """Pytest fixtures for LoRa module testing."""
 
-from typing import Generator
+from collections.abc import Generator
+
 import pytest
 
 from tests.fakes import FakeSpiDev

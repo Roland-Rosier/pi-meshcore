@@ -13,13 +13,12 @@
 # limitations under the License.
 
 from __future__ import annotations
-import sys
-import os
 
+import os
+import sys
 from enum import Enum
 
 import typer
-
 
 # Add project root to Python path if not already present
 current_dir = os.path.abspath(os.path.dirname(__file__))
@@ -72,7 +71,7 @@ def detect_modules(
 
     if ce0 is not None or ce1 is not None:
         # from src.drivers.lora_detection import LoRaModuleConfig, ValidationResult
-        from drivers.lora_detection import LoRaModuleConfig, ValidationResult
+        from drivers.lora_detection import LoRaModuleConfig
 
         config = LoRaModuleConfig(
             ce0_expected_module_type=ce0.value if ce0 else None,

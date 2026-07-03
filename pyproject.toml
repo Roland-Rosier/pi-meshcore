@@ -107,6 +107,9 @@ dev = [
     # Testing and coverage
     "pytest-cov>=4.1",
     "coverage[toml]>=7.0",
+
+    # Linting (Rust-based, ~100x faster than flake8)
+    "ruff>=0.9,<0.10",
 ]
 
 # -----------------------------------------------------------------------------
@@ -174,3 +177,57 @@ mypy_path = "src"
 [[tool.mypy.overrides]]
 module = ["spidev"]
 ignore_missing_imports = true
+
+# -----------------------------------------------------------------------------
+# ruff configuration (linting)
+# -----------------------------------------------------------------------------
+[tool.ruff]
+target-version = "py310"
+line-length = 88
+src = ["src", "tests"]
+
+# Exclude generated / non-source directories.
+exclude = [
+    ".git",
+    ".pytest_cache",
+    ".ruff_cache",
+    "__pycache__",
+    "build",
+    "dist",
+    "*.egg-info",
+    "htmlcov",
+    "home/",
+]
+
+[tool.ruff.lint]
+select = [
+    "E",       # pycodestyle errors (E4, E5, E7, E9)
+    "F",       # Pyflakes (unused imports, undefined names, redefinition)
+    "I",       # isort (import sorting)
+    "UP",      # pyupgrade (Python 3.10+ modernization)
+    "B",       # flake8-bugbear (common bugs and design problems)
+    "SIM",     # flake8-simplify (code simplification suggestions)
+    "T20",     # flake8-print (print statement detection)
+    "W",       # pycodestyle warnings (W29, W39) — minimal
+]
+
+ignore = [
+    "E501",    # Line too long — handled by docstrings and type-hint comments
+    "T201",    # print() calls are intentional for hardware status output
+    "SIM108",  # Use if-else instead of try/except/else — existing code style
+]
+
+[tool.ruff.lint.per-file-ignores]
+# __init__.py files contain only license headers (long lines) and no imports.
+"src/**/__init__.py" = ["E501", "F401"]
+"tests/**/__init__.py" = ["E501", "F401"]
+
+[tool.ruff.lint.isort]
+known-first-party = ["drivers", "cli", "fakes"]
+force-single-line = false
+combine-as-imports = true
+order-by-type = true
+relative-imports-order = "closest-to-furthest"
+
+[tool.ruff.lint.pyupgrade]
+keep-runtime-typing = false

@@ -14,10 +14,7 @@
 
 """Tests for LoRaModule class using FakeSpiDev."""
 
-from typing import Any, Callable
 from unittest.mock import patch
-
-import pytest
 
 # from src.drivers.lora_module import LoRaModule
 from drivers.lora_module import LoRaModule

@@ -14,8 +14,8 @@
 
 """Pytest configuration for the MeshCore LoRa project."""
 
-import sys
 import os
+import sys
 from pathlib import Path
 
 # Add the project root to the Python path
