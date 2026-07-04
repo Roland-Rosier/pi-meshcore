@@ -61,12 +61,14 @@ This installs both runtime (spidev, gpiod, typer) and development (pytest, mypy,
 # Run all tests with coverage reporting
 uv run pytest
 
-# Generate HTML coverage report
-uv run pytest --cov=src --cov-report=html
+# Run all tests with coverage report to terminal + HTML
+# Configuration is defined in `pyproject.toml` under `[tool.coverage.*]`.
+uv run pytest --cov=src --cov=tests --cov-report=term-missing --cov-report=html
 
-# View the report in your browser:
+# View the interactive HTML report in your browser at `htmlcov/index.html` after running:
 open htmlcov/index.html   # macOS
 xdg-open htmlcov/index.html  # Linux
+
 ```
 
 ### Type Checking
@@ -161,6 +163,7 @@ uv remove <package-name>
 │       └── 04-use-native-edit-tools.md    # Native file editing tool (single_find_and_replace) rules
 ├── .gitattributes                    # Git attribute definitions for line endings, filters
 ├── .gitignore                        # Files and directories excluded from version control
+├── .pre-commit-config.yaml           # Pre-commit hook configuration for automated linting/formatting checks
 ├── .prompts/                         # Reusable agent prompt templates
 │   ├── repo_analyst.prompt           # Repository analysis task prompt template
 │   └── repo_analyst_d.prompt         # Deep repository analysis variant prompt
@@ -215,30 +218,6 @@ uv remove <package-name>
   - LoRa network simulations
   - Multi-node communication tests
 
-- **Coverage Reporting** (requires `pytest-cov>=4.1.0` and `coverage[toml]>=7.0` in `requirements.txt`):
-  - Run all tests with coverage report to terminal + HTML:
-    ```bash
-    python -m pytest --cov=src --cov=tests --cov-report=term-missing --cov-report=html
-    ```
-  - View the interactive HTML report at `htmlcov/index.html` after running.
-  - Configuration is defined in `pyproject.toml` under `[tool.coverage.*]`.
-
-- **Linting** (using `ruff`):
-  - Run lint check on source code and tests:
-    ```bash
-    uv run ruff check src/ tests/
-    ```
-  - Auto-fix safe violations:
-    ```bash
-    uv run ruff check src/ tests/ --fix
-    ```
-
-- **Type Checking** (using `mypy`):
-  - Run static type analysis on source code:
-    ```bash
-    uv run mypy src/
-    ```
-
 ---
 
 ## Project Milestones
@@ -258,3 +237,7 @@ uv remove <package-name>
 - [SX1276/SX1278 Datasheet](https://semtech.my.salesforce.com/sfc/p/#E0000000JelG/a/2R0000001Rbr/6EfVZUorrpoKFfvaF_Fkpgp5kzjiNyiAbqcpqh9qSjE)
 - [MeshCore Python Library](https://github.com/meshcore-dev/meshcore_py)
 - [Uptronics Datasheet](https://pinout.xyz/pinout/uputronics_lora_expansion_board)
+
+
+
+
