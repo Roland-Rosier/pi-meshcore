@@ -460,9 +460,11 @@ class TestLoRaModuleModerateGaps:
 
         # Patch both write_register and read_register to return None (simulating
         # persistent SPI failure throughout the LF mode test sequence).
-        with patch.object(module, 'write_register', return_value=None):
-            with patch.object(module, 'read_register', return_value=None):
-                module._test_lf_mode_retention()
+        with (
+            patch.object(module, 'write_register', return_value=None),
+            patch.object(module, 'read_register', return_value=None),
+        ):
+            module._test_lf_mode_retention()
 
         assert module.lf_mode_success is False  # Both write and read failed; flag stays False.
 

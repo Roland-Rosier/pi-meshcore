@@ -76,6 +76,18 @@ xdg-open htmlcov/index.html  # Linux
 uv run mypy src/
 ```
 
+### Linting
+
+This project uses [`ruff`](https://docs.astral.sh/ruff/) for fast Python linting, covering style rules (pycodestyle), import sorting (isort), common bug patterns (flake8-bugbear), and more. Configuration lives in `[tool.ruff]` inside `pyproject.toml`.
+
+```bash
+# Quick lint check (CI-compatible)
+uv run ruff check src/ tests/
+
+# Auto-fix safe violations
+uv run ruff check src/ tests/ --fix
+```
+
 ### Adding Dependencies
 
 ```bash
@@ -211,9 +223,21 @@ uv remove <package-name>
   - View the interactive HTML report at `htmlcov/index.html` after running.
   - Configuration is defined in `pyproject.toml` under `[tool.coverage.*]`.
 
-- **Validation Tools**:
-  - `npm run lint` (TypeScript/Python linter)
-  - `npm run test` (Unit/integration tests)
+- **Linting** (using `ruff`):
+  - Run lint check on source code and tests:
+    ```bash
+    uv run ruff check src/ tests/
+    ```
+  - Auto-fix safe violations:
+    ```bash
+    uv run ruff check src/ tests/ --fix
+    ```
+
+- **Type Checking** (using `mypy`):
+  - Run static type analysis on source code:
+    ```bash
+    uv run mypy src/
+    ```
 
 ---
 

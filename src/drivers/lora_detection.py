@@ -79,7 +79,7 @@ class LoRaModuleDetector:
         ],
     }
 
-    def __init__(self, ce_pins: list[int] = None):
+    def __init__(self, ce_pins: list[int] | None = None):
         """
         Initialize LoRaModule instances for CE pins.
 

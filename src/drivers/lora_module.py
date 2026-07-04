@@ -174,9 +174,8 @@ class LoRaModule:
         if all(ele is not None for ele in (new_mode, req_msb, req_mid, req_lsb)):
             (msb, mid, lsb) = self._read_frequency_registers()
             time.sleep(0.01)  # Allow time for register stabilization
-            if all(ele is not None for ele in (msb, mid, lsb)):
-                if msb == req_msb and mid == req_mid and lsb == req_lsb:
-                    verify_success = True
+            if all(ele is not None for ele in (msb, mid, lsb)) and msb == req_msb and mid == req_mid and lsb == req_lsb:
+                verify_success = True
         return (verify_success, req_msb, req_mid, req_lsb, msb, mid, lsb)
 
     def _check_frequency_support(self) -> None:
@@ -303,3 +302,5 @@ class LoRaModule:
                     current_lsb == self.unique_lsb)
         else:
             return False
+
+
