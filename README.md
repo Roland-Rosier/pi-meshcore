@@ -35,6 +35,76 @@ This implementation includes:
 
 ---
 
+## Getting Started
+
+### Prerequisites
+
+- Python 3.9+ installed on your system
+- [uv](https://github.com/astral-sh/uv) package manager (install via `curl -LsSf https://astral.sh/uv/install.sh | sh`) or `sudo pipx install uv --global`
+- Raspberry Pi OS with SPI and GPIO enabled (`raspi-config` → Interface Options)
+
+### Installation
+
+```bash
+# Clone the repository
+git clone <repository-url> && cd pi-lora
+
+# Create virtual environment and install all dependencies
+uv sync
+```
+
+This installs both runtime (spidev, gpiod, typer) and development (pytest, mypy, coverage) dependencies.
+
+### Running Tests
+
+```bash
+# Run all tests with coverage reporting
+uv run pytest
+
+# Run all tests with coverage report to terminal + HTML
+# Configuration is defined in `pyproject.toml` under `[tool.coverage.*]`.
+uv run pytest --cov=src --cov=tests --cov-report=term-missing --cov-report=html
+
+# View the interactive HTML report in your browser at `htmlcov/index.html` after running:
+open htmlcov/index.html   # macOS
+xdg-open htmlcov/index.html  # Linux
+
+```
+
+### Type Checking
+
+```bash
+# Run mypy static analysis on source code
+uv run mypy src/
+```
+
+### Linting
+
+This project uses [`ruff`](https://docs.astral.sh/ruff/) for fast Python linting, covering style rules (pycodestyle), import sorting (isort), common bug patterns (flake8-bugbear), and more. Configuration lives in `[tool.ruff]` inside `pyproject.toml`.
+
+```bash
+# Quick lint check (CI-compatible)
+uv run ruff check src/ tests/
+
+# Auto-fix safe violations
+uv run ruff check src/ tests/ --fix
+```
+
+### Adding Dependencies
+
+```bash
+# Add a runtime dependency
+uv add <package-name>
+
+# Add a development dependency
+uv add --group dev <package-name>
+
+# Remove a dependency
+uv remove <package-name>
+```
+
+---
+
 ## Software Architecture
 
 ### Core Components
@@ -93,6 +163,7 @@ This implementation includes:
 │       └── 04-use-native-edit-tools.md    # Native file editing tool (single_find_and_replace) rules
 ├── .gitattributes                    # Git attribute definitions for line endings, filters
 ├── .gitignore                        # Files and directories excluded from version control
+├── .pre-commit-config.yaml           # Pre-commit hook configuration for automated linting/formatting checks
 ├── .prompts/                         # Reusable agent prompt templates
 │   ├── repo_analyst.prompt           # Repository analysis task prompt template
 │   └── repo_analyst_d.prompt         # Deep repository analysis variant prompt
@@ -109,16 +180,14 @@ This implementation includes:
 │       └── config_lmstudio.yaml      # LM Studio configuration for Continue.dev agent workflows
 ├── pyproject.toml                    # Python project metadata, pytest & coverage configuration
 ├── requirements.txt                  # Python dependency list (FastAPI, meshcore, pytest, etc.)
+├── uv.lock                           # Lock file pinning exact dependency versions for reproducible builds
 ├── src/                              # Main source code
-│   ├── __init__.py                   # Makes src a Python package
 │   ├── cli/
 │   │   └── check_hardware.py         # CLI tool for LoRa hardware detection and status checks
 │   └── drivers/
-│       ├── __init__.py               # Makes drivers a Python package
 │       ├── lora_detection.py          # LoRa module auto-detection logic (RFM95W/RFM98W)
 │       └── lora_module.py             # RFM95W/RFM98W radio driver implementation (SX1276/SX1278)
 └── tests/                            # Test suite
-    ├── __init__.py                   # Makes tests a Python package
     ├── conftest.py                   # pytest fixtures and shared test configuration
     ├── fakes.py                      # Fake/mock implementations for driver testing
     ├── test_check_hardware_cli.py    # Unit tests for CLI hardware check tool
@@ -149,18 +218,6 @@ This implementation includes:
   - LoRa network simulations
   - Multi-node communication tests
 
-- **Coverage Reporting** (requires `pytest-cov>=4.1.0` and `coverage[toml]>=7.0` in `requirements.txt`):
-  - Run all tests with coverage report to terminal + HTML:
-    ```bash
-    python -m pytest --cov=src --cov=tests --cov-report=term-missing --cov-report=html
-    ```
-  - View the interactive HTML report at `htmlcov/index.html` after running.
-  - Configuration is defined in `pyproject.toml` under `[tool.coverage.*]`.
-
-- **Validation Tools**:
-  - `npm run lint` (TypeScript/Python linter)
-  - `npm run test` (Unit/integration tests)
-
 ---
 
 ## Project Milestones
@@ -180,3 +237,7 @@ This implementation includes:
 - [SX1276/SX1278 Datasheet](https://semtech.my.salesforce.com/sfc/p/#E0000000JelG/a/2R0000001Rbr/6EfVZUorrpoKFfvaF_Fkpgp5kzjiNyiAbqcpqh9qSjE)
 - [MeshCore Python Library](https://github.com/meshcore-dev/meshcore_py)
 - [Uptronics Datasheet](https://pinout.xyz/pinout/uputronics_lora_expansion_board)
+
+
+
+

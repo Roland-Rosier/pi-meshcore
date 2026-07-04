@@ -14,8 +14,8 @@
 
 """Unit tests for FakeSpiDev class."""
 
+
 import pytest
-from typing import Dict, List
 
 from tests.fakes import FakeSpiDev
 
@@ -38,7 +38,7 @@ class TestFakeSpiDevInitialization:
 
     def test_custom_registers(self) -> None:
         """Test initialization with custom register values."""
-        custom_regs: Dict[int, int] = {0x01: 0x08, 0x42: 0x12}
+        custom_regs: dict[int, int] = {0x01: 0x08, 0x42: 0x12}
         fake = FakeSpiDev(registers=custom_regs)
         assert fake.get_register(0x01) == 0x08
         assert fake.get_register(0x42) == 0x12
@@ -92,7 +92,7 @@ class TestFakeSpiDevRegisters:
     def test_multiple_registers(self) -> None:
         """Test setting and reading multiple registers."""
         fake = FakeSpiDev()
-        regs: Dict[int, int] = {0x01: 0x08, 0x42: 0x19}
+        regs: dict[int, int] = {0x01: 0x08, 0x42: 0x19}
         for addr, val in regs.items():
             fake.set_register(addr, val)
         assert fake.get_register(0x01) == 0x08

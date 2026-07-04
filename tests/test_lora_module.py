@@ -14,14 +14,13 @@
 
 """Tests for LoRaModule class using FakeSpiDev."""
 
-from typing import Any, Callable
 from unittest.mock import patch
 
-import pytest
-
-from src.drivers.lora_module import LoRaModule
+# from src.drivers.lora_module import LoRaModule
+from drivers.lora_module import LoRaModule
 from tests.fakes import FakeSpiDev
 
+_SPIDEV_PATCH_PATH: str = 'drivers.lora_module.spidev.SpiDev'
 
 class TestLoRaModuleInitialization:
     """Test suite for LoRaModule initialization."""
@@ -461,9 +460,11 @@ class TestLoRaModuleModerateGaps:
 
         # Patch both write_register and read_register to return None (simulating
         # persistent SPI failure throughout the LF mode test sequence).
-        with patch.object(module, 'write_register', return_value=None):
-            with patch.object(module, 'read_register', return_value=None):
-                module._test_lf_mode_retention()
+        with (
+            patch.object(module, 'write_register', return_value=None),
+            patch.object(module, 'read_register', return_value=None),
+        ):
+            module._test_lf_mode_retention()
 
         assert module.lf_mode_success is False  # Both write and read failed; flag stays False.
 
@@ -474,7 +475,7 @@ class TestLoRaModuleModerateGaps:
     def test_verify_unique_value_never_written(self) -> None:
         """M7a: Verify returns False when unique values were never written (msb/mid/lsb are None)."""
         fake_spi = FakeSpiDev(module_type="rfm95w")
-        with patch("src.drivers.lora_module.spidev.SpiDev", return_value=fake_spi):
+        with patch(_SPIDEV_PATCH_PATH, return_value=fake_spi):
             module = LoRaModule(ce_pin=0)
 
         # Don't write any unique value — msb/mid/lsb are all None.

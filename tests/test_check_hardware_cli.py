@@ -21,18 +21,16 @@ every test produces deterministic, hardware-independent results.
 
 from __future__ import annotations
 
-import sys
-from io import StringIO
-from typing import Any, Callable, Dict, List, Optional
+from collections.abc import Callable
+from typing import Any
 from unittest.mock import MagicMock, patch
 
 import pytest
-import typer
 from typer.testing import CliRunner
 
-from src.cli.check_hardware import app as cli_app
+# from src.cli.check_hardware import app as cli_app
+from cli.check_hardware import app as cli_app
 from tests.fakes import FakeSpiDev
-
 
 # ---------------------------------------------------------------------------
 # Helpers — SPI factory that alternates between two FakeSpiDev instances
@@ -82,13 +80,13 @@ def fake_rfm98w_spi() -> FakeSpiDev:
 # more robust because it does not depend on where LoRaModuleDetector was
 # originally imported from.
 
-_DETECTOR_PATCH_PATH: str = "src.cli.check_hardware.LoRaModuleDetector"
+_DETECTOR_PATCH_PATH: str = "cli.check_hardware.LoRaModuleDetector"
 
 
 def _build_mock_detector(
-    ce_pins: List[int],
-    module_type_strings: Optional[List[str]] = None,
-    communication_successes: Optional[List[bool]] = None,
+    ce_pins: list[int],
+    module_type_strings: list[str] | None = None,
+    communication_successes: list[bool] | None = None,
 ) -> MagicMock:
     """Build a LoRaModuleDetector mock with predictable properties.
 
@@ -133,11 +131,11 @@ def _build_mock_detector(
     detector_mock.ce_pins = ce_pins
 
     def _detect_modules(
-        config: Optional[Any] = None,
-    ) -> List[Dict[str, Any]]:
-        results: List[Dict[str, Any]] = []
+        config: Any | None = None,
+    ) -> list[dict[str, Any]]:
+        results: list[dict[str, Any]] = []
         for mod in modules:
-            result: Dict[str, Any] = {
+            result: dict[str, Any] = {
                 "ce_pin": mod.ce_pin,
                 "module_type": mod.module_type,
                 "Silicon Revision": (
@@ -223,7 +221,8 @@ class TestDetectModulesMatchingConfig:
         )
 
         # The validate_config method must return a single ValidationResult for CE0.
-        from src.drivers.lora_detection import ValidationResult
+        # from src.drivers.lora_detection import ValidationResult
+        from drivers.lora_detection import ValidationResult
 
         mock_detector.validate_config.return_value = [
             ValidationResult(
@@ -270,7 +269,8 @@ class TestDetectModulesMismatchingConfig:
             communication_successes=[True, True],
         )
 
-        from src.drivers.lora_detection import ValidationResult
+        # from src.drivers.lora_detection import ValidationResult
+        from drivers.lora_detection import ValidationResult
 
         mock_detector.validate_config.return_value = [
             ValidationResult(
@@ -318,7 +318,8 @@ class TestDetectModulesDualCeValidation:
             communication_successes=[True, True],
         )
 
-        from src.drivers.lora_detection import ValidationResult
+        # from src.drivers.lora_detection import ValidationResult
+        from drivers.lora_detection import ValidationResult
 
         mock_detector.validate_config.return_value = [
             ValidationResult(
@@ -402,7 +403,8 @@ class TestDetectModulesWithNoneExpectation:
             communication_successes=[True, True],
         )
 
-        from src.drivers.lora_detection import ValidationResult
+        # from src.drivers.lora_detection import ValidationResult
+        from drivers.lora_detection import ValidationResult
 
         # Expecting 'none' but detecting RFM98W → mismatch.
         mock_detector.validate_config.return_value = [
@@ -461,7 +463,8 @@ class TestCliEdgeCases:
             communication_successes=[True],
         )
 
-        from src.drivers.lora_detection import ValidationResult
+        # from src.drivers.lora_detection import ValidationResult
+        from drivers.lora_detection import ValidationResult
 
         mock_detector.validate_config.return_value = [
             ValidationResult(

@@ -15,17 +15,19 @@
 from __future__ import annotations
 
 import sys
-
-from src.drivers.lora_module import LoRaModule
-from src.drivers.lora_detection import (
-    LoRaModuleDetector,
-    LoRaModuleConfig,
-    ValidationResult,
-)
-from tests.fakes import FakeSpiDev
 from unittest.mock import MagicMock, patch
-import pytest
 
+import pytest
+from src.drivers.lora_detection import (
+    LoRaModuleConfig,
+    LoRaModuleDetector,
+)
+from src.drivers.lora_module import LoRaModule
+
+from tests.fakes import FakeSpiDev
+
+_SPIDEV_PATCH_PATH: str = 'drivers.lora_module.spidev.SpiDev'
+_LORAMODULE_PATCH_PATH: str = 'src.drivers.lora_detection.LoRaModule'
 
 class TestLoRaModuleDetectorInitialization:
     """Test suite for LoRaModuleDetector initialization."""
@@ -35,7 +37,8 @@ class TestLoRaModuleDetectorInitialization:
         rfm95w_spi = FakeSpiDev(module_type="rfm95w")
 
         # Patch spidev.SpiDev to return our fake for the real LoRaModule constructor.
-        with patch("src.drivers.lora_module.spidev.SpiDev", return_value=rfm95w_spi):
+        # with patch("src.drivers.lora_module.spidev.SpiDev", return_value=rfm95w_spi):
+        with patch(_SPIDEV_PATCH_PATH, return_value=rfm95w_spi):
             detector = LoRaModuleDetector(ce_pins=[0])
 
         assert len(detector.modules) == 1
@@ -47,7 +50,8 @@ class TestLoRaModuleDetectorInitialization:
         rfm98w_spi = FakeSpiDev(module_type="rfm98w")
 
         # Patch spidev.SpiDev to return our fake for the real LoRaModule constructor.
-        with patch("src.drivers.lora_module.spidev.SpiDev", return_value=rfm98w_spi):
+        # with patch("src.drivers.lora_module.spidev.SpiDev", return_value=rfm98w_spi):
+        with patch(_SPIDEV_PATCH_PATH, return_value=rfm98w_spi):
             detector = LoRaModuleDetector(ce_pins=[1])
 
         assert len(detector.modules) == 1
@@ -62,7 +66,8 @@ class TestLoRaModuleDetectorInitialization:
         mock_module.module_type = "Unknown / Communication Error"
         mock_module.silicon_revision = None
 
-        with patch('src.drivers.lora_detection.LoRaModule', return_value=mock_module):
+        # with patch('src.drivers.lora_detection.LoRaModule', return_value=mock_module):
+        with patch(_LORAMODULE_PATCH_PATH, return_value=mock_module):
             detector = LoRaModuleDetector(ce_pins=[0])
 
         assert len(detector.modules) == 1
@@ -77,7 +82,8 @@ class TestLoRaModuleDetectorInitialization:
         mock_module.module_type = "Multi-band - Likely RFM95W (High-Band 868MHz and/or Low-Band 433Mhz / Semtech SX1276)"
         mock_module.silicon_revision = 0x12
 
-        with patch('src.drivers.lora_detection.LoRaModule', return_value=mock_module):
+        # with patch('src.drivers.lora_detection.LoRaModule', return_value=mock_module):
+        with patch(_LORAMODULE_PATCH_PATH, return_value=mock_module):
             detector = LoRaModuleDetector(ce_pins=[0])
         assert len(detector.modules) == 1
         assert detector.modules[0].communication_success is True
@@ -90,11 +96,12 @@ class TestLoRaModuleDetectorRegisters:
     def test_read_register_rfm95w(self) -> None:
         """Test reading registers from RFM95W fake device through real module."""
         fake_spi = FakeSpiDev(module_type="rfm95w")
-        with patch("src.drivers.lora_module.spidev.SpiDev", return_value=fake_spi):
+        # with patch("src.drivers.lora_module.spidev.SpiDev", return_value=fake_spi):
+        with patch(_SPIDEV_PATCH_PATH, return_value=fake_spi):
             detector = LoRaModuleDetector(ce_pins=[0])
 
         # detect_modules() calls read_register(0x12) during result construction.
-        results: List[Dict] = detector.detect_modules()
+        results: list[dict] = detector.detect_modules()
 
         # The result dict includes the register value from read_register(0x12).
         assert "reg_rxbw_freqifmsb" in results[0]
@@ -107,11 +114,12 @@ class TestLoRaModuleDetectorRegisters:
         fake_spi = FakeSpiDev(module_type="rfm95w")
 
         # Create a real LoRaModule instance (not patched detector).
-        with patch("src.drivers.lora_module.spidev.SpiDev", return_value=fake_spi):
+        # with patch("src.drivers.lora_module.spidev.SpiDev", return_value=fake_spi):
+        with patch(_SPIDEV_PATCH_PATH, return_value=fake_spi):
             module = LoRaModule(ce_pin=0)
 
         # Call write_register directly and verify it writes to FakeSpiDev's register store.
-        result: Optional[int] = module.write_register(0x12, 0xFF)
+        result: int | None = module.write_register(0x12, 0xFF)
 
         assert result == 0xFF  # xfer2 echoes the written byte back
         assert fake_spi.get_register(0x12) == 0xFF
@@ -120,7 +128,8 @@ class TestLoRaModuleDetectorRegisters:
         """Test that reading from 'none' device handles communication failure gracefully."""
         fake_spi = FakeSpiDev(module_type="none")
 
-        with patch("src.drivers.lora_module.spidev.SpiDev", return_value=fake_spi):
+        # with patch("src.drivers.lora_module.spidev.SpiDev", return_value=fake_spi):
+        with patch(_SPIDEV_PATCH_PATH, return_value=fake_spi):
             detector = LoRaModuleDetector(ce_pins=[0])
 
         # The module should report communication_failure.
@@ -134,7 +143,8 @@ class TestLoRaModuleDetection:
         """Test detection of a single module on CE0 with FakeSpiDev."""
         fake_spi = FakeSpiDev(module_type="rfm95w")
 
-        with patch("src.drivers.lora_module.spidev.SpiDev", return_value=fake_spi):
+        # with patch("src.drivers.lora_module.spidev.SpiDev", return_value=fake_spi):
+        with patch(_SPIDEV_PATCH_PATH, return_value=fake_spi):
             detector = LoRaModuleDetector(ce_pins=[0])
 
         results = detector.detect_modules()
@@ -150,7 +160,8 @@ class TestLoRaModuleDetection:
         """Test detection of a single module on CE0 with FakeSpiDev."""
         fake_spi = FakeSpiDev(module_type="rfm98w")
 
-        with patch("src.drivers.lora_module.spidev.SpiDev", return_value=fake_spi):
+        # with patch("src.drivers.lora_module.spidev.SpiDev", return_value=fake_spi):
+        with patch(_SPIDEV_PATCH_PATH, return_value=fake_spi):
             detector = LoRaModuleDetector(ce_pins=[1])
 
         results = detector.detect_modules()
@@ -167,7 +178,8 @@ class TestLoRaModuleDetection:
         fake_spi = FakeSpiDev(module_type="multi_band")
 
 
-        with patch("src.drivers.lora_module.spidev.SpiDev", return_value=fake_spi):
+        # with patch("src.drivers.lora_module.spidev.SpiDev", return_value=fake_spi):
+        with patch(_SPIDEV_PATCH_PATH, return_value=fake_spi):
             detector = LoRaModuleDetector(ce_pins=[0])
 
 
@@ -189,7 +201,8 @@ class TestLoRaModuleDetection:
             call_count[0] += 1
             return fake_spi_ce0 if call_count[0] == 1 else fake_spi_ce1
 
-        with patch("src.drivers.lora_module.spidev.SpiDev") as mock_spidev:
+        # with patch("src.drivers.lora_module.spidev.SpiDev") as mock_spidev:
+        with patch(_SPIDEV_PATCH_PATH) as mock_spidev:
             mock_spidev.side_effect = lambda: spi_factory()
             detector = LoRaModuleDetector(ce_pins=[0, 1])
 
@@ -220,7 +233,8 @@ class TestLoRaModuleDetectorEdgeCases:
         mock_module.module_type = "Unknown / Communication Error"
         mock_module.silicon_revision = None
 
-        with patch('src.drivers.lora_detection.LoRaModule', return_value=mock_module):
+        # with patch('src.drivers.lora_detection.LoRaModule', return_value=mock_module):
+        with patch(_LORAMODULE_PATCH_PATH, return_value=mock_module):
             detector = LoRaModuleDetector(ce_pins=[0])
 
         # The initialization should fail due to the read failure
@@ -234,7 +248,8 @@ class TestLoRaModuleDetectorEdgeCases:
         mock_module.module_type = "RFM95W (High-Band 868MHz / Semtech SX1276)"
         mock_module.silicon_revision = 0x12
 
-        with patch('src.drivers.lora_detection.LoRaModule', return_value=mock_module):
+        # with patch('src.drivers.lora_detection.LoRaModule', return_value=mock_module):
+        with patch(_LORAMODULE_PATCH_PATH, return_value=mock_module):
             detector = LoRaModuleDetector(ce_pins=[0])
 
         # The module was created but communication may have failed
@@ -266,7 +281,8 @@ class TestLoRaModuleDetectorValidation:
         """Test validation when detected module matches expected type."""
         fake_spi = FakeSpiDev(module_type="rfm95w")
 
-        with patch("src.drivers.lora_module.spidev.SpiDev", return_value=fake_spi):
+        # with patch("src.drivers.lora_module.spidev.SpiDev", return_value=fake_spi):
+        with patch(_SPIDEV_PATCH_PATH, return_value=fake_spi):
             detector = LoRaModuleDetector(ce_pins=[0])
 
         config = LoRaModuleConfig(
@@ -283,7 +299,8 @@ class TestLoRaModuleDetectorValidation:
         """Test validation when detected module does NOT match expected type."""
         fake_spi = FakeSpiDev(module_type="none")
 
-        with patch("src.drivers.lora_module.spidev.SpiDev", return_value=fake_spi):
+        # with patch("src.drivers.lora_module.spidev.SpiDev", return_value=fake_spi):
+        with patch(_SPIDEV_PATCH_PATH, return_value=fake_spi):
             detector = LoRaModuleDetector(ce_pins=[0])
 
         config = LoRaModuleConfig(
@@ -300,7 +317,8 @@ class TestLoRaModuleDetectorValidation:
         """Test validation when expected module type is None (no expectation)."""
         fake_spi = FakeSpiDev(module_type="rfm95w")
 
-        with patch("src.drivers.lora_module.spidev.SpiDev", return_value=fake_spi):
+        # with patch("src.drivers.lora_module.spidev.SpiDev", return_value=fake_spi):
+        with patch(_SPIDEV_PATCH_PATH, return_value=fake_spi):
             detector = LoRaModuleDetector(ce_pins=[0])
 
         config = LoRaModuleConfig(
@@ -325,7 +343,8 @@ class TestLoRaModuleDetectorValidation:
                 else FakeSpiDev(module_type="rfm98w")
             )
 
-        with patch("src.drivers.lora_module.spidev.SpiDev") as mock_spidev:
+        # with patch("src.drivers.lora_module.spidev.SpiDev") as mock_spidev:
+        with patch(_SPIDEV_PATCH_PATH) as mock_spidev:
             mock_spidev.side_effect = lambda: spi_factory()
             detector = LoRaModuleDetector(ce_pins=[0, 1])
 
@@ -344,7 +363,8 @@ class TestLoRaModuleDetectorValidation:
         # an "Unknown / Communication Error" type which does NOT match rfm98w.
         fake_spi = FakeSpiDev(module_type="none")
 
-        with patch("src.drivers.lora_module.spidev.SpiDev", return_value=fake_spi):
+        # with patch("src.drivers.lora_module.spidev.SpiDev", return_value=fake_spi):
+        with patch(_SPIDEV_PATCH_PATH, return_value=fake_spi):
             detector = LoRaModuleDetector(ce_pins=[0])
 
         config = LoRaModuleConfig(
@@ -369,7 +389,8 @@ class TestLoRaModuleDetectorValidation:
                 else FakeSpiDev(module_type="none")  # CE1: none does NOT match rfm98w expectation
             )
 
-        with patch("src.drivers.lora_module.spidev.SpiDev") as mock_spidev:
+        # with patch("src.drivers.lora_module.spidev.SpiDev") as mock_spidev:
+        with patch(_SPIDEV_PATCH_PATH) as mock_spidev:
             mock_spidev.side_effect = lambda: spi_factory()
             detector = LoRaModuleDetector(ce_pins=[0, 1])
 
@@ -396,7 +417,8 @@ class TestLoRaModuleDetectorFrequency:
         """Test unique frequency calculation for RFM95W on CE0."""
         fake_spi = FakeSpiDev(module_type="rfm95w")
 
-        with patch("src.drivers.lora_module.spidev.SpiDev", return_value=fake_spi):
+        # with patch("src.drivers.lora_module.spidev.SpiDev", return_value=fake_spi):
+        with patch(_SPIDEV_PATCH_PATH, return_value=fake_spi):
             detector = LoRaModuleDetector(ce_pins=[0])
 
         freq: int = detector.calculate_unique_frequency(
@@ -409,7 +431,8 @@ class TestLoRaModuleDetectorFrequency:
         """Test unique frequency calculation for RFM98W on CE1."""
         fake_spi = FakeSpiDev(module_type="rfm98w")
 
-        with patch("src.drivers.lora_module.spidev.SpiDev", return_value=fake_spi):
+        # with patch("src.drivers.lora_module.spidev.SpiDev", return_value=fake_spi):
+        with patch(_SPIDEV_PATCH_PATH, return_value=fake_spi):
             detector = LoRaModuleDetector(ce_pins=[1])
 
         freq: int = detector.calculate_unique_frequency(
@@ -422,7 +445,8 @@ class TestLoRaModuleDetectorFrequency:
         """Test unique frequency calculation for RFM95W on CE1."""
         fake_spi = FakeSpiDev(module_type="rfm95w")
 
-        with patch("src.drivers.lora_module.spidev.SpiDev", return_value=fake_spi):
+        # with patch("src.drivers.lora_module.spidev.SpiDev", return_value=fake_spi):
+        with patch(_SPIDEV_PATCH_PATH, return_value=fake_spi):
             detector = LoRaModuleDetector(ce_pins=[1])
 
         freq: int = detector.calculate_unique_frequency(
@@ -435,7 +459,8 @@ class TestLoRaModuleDetectorFrequency:
         """Test unique frequency calculation for RFM98W on CE0."""
         fake_spi = FakeSpiDev(module_type="rfm98w")
 
-        with patch("src.drivers.lora_module.spidev.SpiDev", return_value=fake_spi):
+        # with patch("src.drivers.lora_module.spidev.SpiDev", return_value=fake_spi):
+        with patch(_SPIDEV_PATCH_PATH, return_value=fake_spi):
             detector = LoRaModuleDetector(ce_pins=[0])
 
         freq: int = detector.calculate_unique_frequency(
@@ -448,7 +473,8 @@ class TestLoRaModuleDetectorFrequency:
         """Test unique frequency calculation when module type is ambiguous (CE0)."""
         fake_spi = FakeSpiDev(module_type="multi_band")
 
-        with patch("src.drivers.lora_module.spidev.SpiDev", return_value=fake_spi):
+        # with patch("src.drivers.lora_module.spidev.SpiDev", return_value=fake_spi):
+        with patch(_SPIDEV_PATCH_PATH, return_value=fake_spi):
             detector = LoRaModuleDetector(ce_pins=[0, 1])
 
         freq_ce0: int = detector.calculate_unique_frequency(
@@ -462,7 +488,8 @@ class TestLoRaModuleDetectorFrequency:
         """Test unique frequency calculation when module type is ambiguous (CE1)."""
         fake_spi = FakeSpiDev(module_type="multi_band")
 
-        with patch("src.drivers.lora_module.spidev.SpiDev", return_value=fake_spi):
+        # with patch("src.drivers.lora_module.spidev.SpiDev", return_value=fake_spi):
+        with patch(_SPIDEV_PATCH_PATH, return_value=fake_spi):
             detector = LoRaModuleDetector(ce_pins=[0, 1])
 
         freq_ce1: int = detector.calculate_unique_frequency(
@@ -491,7 +518,8 @@ class TestLoRaModuleDetectorExtendedDetection:
             call_count[0] += 1
             return fake_spi_ce0 if call_count[0] == 1 else fake_spi_ce1
 
-        with patch("src.drivers.lora_module.spidev.SpiDev") as mock_spidev:
+        # with patch("src.drivers.lora_module.spidev.SpiDev") as mock_spidev:
+        with patch(_SPIDEV_PATCH_PATH) as mock_spidev:
             mock_spidev.side_effect = lambda: spi_factory()
             detector = LoRaModuleDetector(ce_pins=[0, 1])
 
@@ -518,7 +546,8 @@ class TestLoRaModuleDetectorExtendedDetection:
             call_count[0] += 1
             return fake_spi_ce0 if call_count[0] == 1 else fake_spi_ce1
 
-        with patch("src.drivers.lora_module.spidev.SpiDev") as mock_spidev:
+        # with patch("src.drivers.lora_module.spidev.SpiDev") as mock_spidev:
+        with patch(_SPIDEV_PATCH_PATH) as mock_spidev:
             mock_spidev.side_effect = lambda: spi_factory()
             detector = LoRaModuleDetector(ce_pins=[0, 1])
 
@@ -545,7 +574,8 @@ class TestLoRaModuleDetectorExtendedDetection:
         """
         fake_spi = FakeSpiDev(module_type="rfm95w")
 
-        with patch("src.drivers.lora_module.spidev.SpiDev", return_value=fake_spi):
+        # with patch("src.drivers.lora_module.spidev.SpiDev", return_value=fake_spi):
+        with patch(_SPIDEV_PATCH_PATH, return_value=fake_spi):
             detector = LoRaModuleDetector(ce_pins=[0])
 
         results = detector.detect_modules()
@@ -575,7 +605,8 @@ class TestLoRaModuleDetectorExtendedDetection:
             else:
                 return fake_spi_ce1
 
-        with patch("src.drivers.lora_module.spidev.SpiDev") as mock_spidev:
+        # with patch("src.drivers.lora_module.spidev.SpiDev") as mock_spidev:
+        with patch(_SPIDEV_PATCH_PATH) as mock_spidev:
             mock_spidev.side_effect = lambda: spi_factory()
             detector = LoRaModuleDetector(ce_pins=[0, 1])
 
@@ -610,7 +641,8 @@ class TestLoRaModuleDetectorExtendedDetection:
             call_count[0] += 1
             return fake_spi_ce0 if call_count[0] == 1 else fake_spi_ce1
 
-        with patch("src.drivers.lora_module.spidev.SpiDev") as mock_spidev:
+        # with patch("src.drivers.lora_module.spidev.SpiDev") as mock_spidev:
+        with patch(_SPIDEV_PATCH_PATH) as mock_spidev:
             mock_spidev.side_effect = lambda: spi_factory()
             detector = LoRaModuleDetector(ce_pins=[0, 1])
 
@@ -663,13 +695,14 @@ class TestLoRaModuleDetectorExtendedDetection:
         # --- Single-pin path: only common keys expected ---
         fake_spi = FakeSpiDev(module_type="rfm95w")
 
-        with patch("src.drivers.lora_module.spidev.SpiDev", return_value=fake_spi):
+        # with patch("src.drivers.lora_module.spidev.SpiDev", return_value=fake_spi):
+        with patch(_SPIDEV_PATCH_PATH, return_value=fake_spi):
             detector = LoRaModuleDetector(ce_pins=[0])
 
         single_results = detector.detect_modules()
 
         assert len(single_results) == 1
-        common_keys: List[str] = [
+        common_keys: list[str] = [
             "ce_pin",
             "module_type",
             "Silicon Revision",
@@ -681,7 +714,7 @@ class TestLoRaModuleDetectorExtendedDetection:
             )
 
         # Extended detection keys should NOT be present with a single pin.
-        extended_keys: List[str] = [
+        extended_keys: list[str] = [
             "is_single_module_dual_spi",
             "unique_value_written",
             "unique_value_verified",
@@ -701,14 +734,15 @@ class TestLoRaModuleDetectorExtendedDetection:
             call_count[0] += 1
             return fake_spi_ce0 if call_count[0] == 1 else fake_spi_ce1
 
-        with patch("src.drivers.lora_module.spidev.SpiDev") as mock_spidev:
+        # with patch("src.drivers.lora_module.spidev.SpiDev") as mock_spidev:
+        with patch(_SPIDEV_PATCH_PATH) as mock_spidev:
             mock_spidev.side_effect = lambda: spi_factory()
             detector_dual = LoRaModuleDetector(ce_pins=[0, 1])
 
         dual_results = detector_dual.detect_modules()
 
         assert len(dual_results) == 2
-        all_expected_keys: List[str] = common_keys + extended_keys
+        all_expected_keys: list[str] = common_keys + extended_keys
         for result in dual_results:
             for key in all_expected_keys:
                 assert key in result, (
@@ -729,7 +763,8 @@ class TestLoRaModuleDetectorUnexpectedPins:
         fake_spi = FakeSpiDev(module_type="none")
 
         # Patch spidev to return our "none" (failure) fake for the unexpected pin.
-        with patch("src.drivers.lora_module.spidev.SpiDev", return_value=fake_spi):
+        # with patch("src.drivers.lora_module.spidev.SpiDev", return_value=fake_spi):
+        with patch(_SPIDEV_PATCH_PATH, return_value=fake_spi):
             detector = LoRaModuleDetector(ce_pins=[2])
 
         assert len(detector.modules) == 1
@@ -765,7 +800,8 @@ class TestLoRaModuleDetectorExtendedDetectionPaths:
             call_count[0] += 1
             return fake_spi_ce0 if call_count[0] == 1 else fake_spi_ce1
 
-        with patch("src.drivers.lora_module.spidev.SpiDev") as mock_spidev:
+        # with patch("src.drivers.lora_module.spidev.SpiDev") as mock_spidev:
+        with patch(_SPIDEV_PATCH_PATH) as mock_spidev:
             mock_spidev.side_effect = lambda: spi_factory()
             detector = LoRaModuleDetector(ce_pins=[0, 1])
 
@@ -796,14 +832,17 @@ class TestLoRaModuleDetectorExtendedDetectionPaths:
             call_count[0] += 1
             return fake_spi_ce0 if call_count[0] == 1 else fake_spi_ce1
 
-        with patch("src.drivers.lora_module.spidev.SpiDev") as mock_spidev:
+        # with patch("src.drivers.lora_module.spidev.SpiDev") as mock_spidev:
+        with patch(_SPIDEV_PATCH_PATH) as mock_spidev:
             mock_spidev.side_effect = lambda: spi_factory()
             detector = LoRaModuleDetector(ce_pins=[0, 1])
 
         # Patch verify_unique_value_retention on both modules to return False.
-        with patch.object(detector.modules[0], "verify_unique_value_retention", return_value=False):
-            with patch.object(detector.modules[1], "verify_unique_value_retention", return_value=False):
-                results = detector.detect_modules()
+        with (
+            patch.object(detector.modules[0], "verify_unique_value_retention", return_value=False),
+            patch.object(detector.modules[1], "verify_unique_value_retention", return_value=False),
+        ):
+            results = detector.detect_modules()
 
         assert len(results) == 2
         for result in results:
@@ -825,14 +864,17 @@ class TestLoRaModuleDetectorExtendedDetectionPaths:
             call_count[0] += 1
             return fake_spi_ce0 if call_count[0] == 1 else fake_spi_ce1
 
-        with patch("src.drivers.lora_module.spidev.SpiDev") as mock_spidev:
+        # with patch("src.drivers.lora_module.spidev.SpiDev") as mock_spidev:
+        with patch(_SPIDEV_PATCH_PATH) as mock_spidev:
             mock_spidev.side_effect = lambda: spi_factory()
             detector = LoRaModuleDetector(ce_pins=[0, 1])
 
         # CE0 verifies (True), CE1 does not verify (False).
-        with patch.object(detector.modules[0], "verify_unique_value_retention", return_value=True):
-            with patch.object(detector.modules[1], "verify_unique_value_retention", return_value=False):
-                results = detector.detect_modules()
+        with (
+            patch.object(detector.modules[0], "verify_unique_value_retention", return_value=True),
+            patch.object(detector.modules[1], "verify_unique_value_retention", return_value=False),
+        ):
+            results = detector.detect_modules()
 
         assert len(results) == 2
         for result in results:

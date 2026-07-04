@@ -13,23 +13,24 @@
 # limitations under the License.
 
 from __future__ import annotations
-import sys
-import os
 
+import os
+import sys
 from enum import Enum
 
 import typer
 
-
 # Add project root to Python path if not already present
 current_dir = os.path.abspath(os.path.dirname(__file__))
-project_root = os.path.abspath(os.path.join(current_dir, '..', '..'))
+# project_root = os.path.abspath(os.path.join(current_dir, '..', '..'))
+project_root = os.path.abspath(os.path.join(current_dir, '..'))
 
 if project_root not in sys.path:
     sys.path.append(project_root)
     print(f"✅ Added project root to sys.path: {project_root}")
 
-from src.drivers.lora_detection import LoRaModuleDetector
+# from src.drivers.lora_detection import LoRaModuleDetector
+from drivers.lora_detection import LoRaModuleDetector
 
 
 class ModuleType(str, Enum):
@@ -69,13 +70,15 @@ def detect_modules(
         print(f"  ✅ {result}")
 
     if ce0 is not None or ce1 is not None:
-        from src.drivers.lora_detection import LoRaModuleConfig, ValidationResult
+        # from src.drivers.lora_detection import LoRaModuleConfig, ValidationResult
+        from drivers.lora_detection import LoRaModuleConfig, ValidationResult
 
         config = LoRaModuleConfig(
             ce0_expected_module_type=ce0.value if ce0 else None,
             ce1_expected_module_type=ce1.value if ce1 else None,
         )
-        validation_results: list[ValidationReport] = detector.validate_config(config)  # type: ignore[name-defined]
+
+        validation_results: list[ValidationResult] = detector.validate_config(config)
 
         print("\nConfiguration Validation Results:")
         all_passed = True
@@ -103,3 +106,7 @@ def main_callback(ctx: typer.Context) -> None:
 
 if __name__ == "__main__":
     app()
+
+
+
+
