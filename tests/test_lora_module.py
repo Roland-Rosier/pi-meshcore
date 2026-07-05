@@ -17,10 +17,10 @@
 from unittest.mock import patch
 
 # from src.drivers.lora_module import LoRaModule
-from drivers.lora_module import LoRaModule
+from pi_lora.drivers.lora_module import LoRaModule
 from tests.fakes import FakeSpiDev
 
-_SPIDEV_PATCH_PATH: str = 'drivers.lora_module.spidev.SpiDev'
+_SPIDEV_PATCH_PATH: str = 'pi_lora.drivers.lora_module.spidev.SpiDev'
 
 class TestLoRaModuleInitialization:
     """Test suite for LoRaModule initialization."""

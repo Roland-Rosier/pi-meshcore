@@ -232,7 +232,8 @@ uv remove <package-name>
 
 ## References
 
-- [MeshCore Website](https://meshcore.co.uk/)
+- [Official Meshcore Website](https://meshcore.io/)
+- [Andy Kirby MeshCore Website](https://meshcore.co.uk/)
 - [RFM95W/RFM98W Datasheet](https://github.com/SeeedDocument/RFM95-98_LoRa_Module/blob/master/RFM95_96_97_98_DataSheet.pdf)
 - [SX1276/SX1278 Datasheet](https://semtech.my.salesforce.com/sfc/p/#E0000000JelG/a/2R0000001Rbr/6EfVZUorrpoKFfvaF_Fkpgp5kzjiNyiAbqcpqh9qSjE)
 - [MeshCore Python Library](https://github.com/meshcore-dev/meshcore_py)

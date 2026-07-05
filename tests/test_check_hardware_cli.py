@@ -28,8 +28,7 @@ from unittest.mock import MagicMock, patch
 import pytest
 from typer.testing import CliRunner
 
-# from src.cli.check_hardware import app as cli_app
-from cli.check_hardware import app as cli_app
+from pi_lora.cli.check_hardware import app as cli_app
 from tests.fakes import FakeSpiDev
 
 # ---------------------------------------------------------------------------
@@ -80,7 +79,7 @@ def fake_rfm98w_spi() -> FakeSpiDev:
 # more robust because it does not depend on where LoRaModuleDetector was
 # originally imported from.
 
-_DETECTOR_PATCH_PATH: str = "cli.check_hardware.LoRaModuleDetector"
+_DETECTOR_PATCH_PATH: str = "pi_lora.cli.check_hardware.LoRaModuleDetector"
 
 
 def _build_mock_detector(
@@ -222,7 +221,7 @@ class TestDetectModulesMatchingConfig:
 
         # The validate_config method must return a single ValidationResult for CE0.
         # from src.drivers.lora_detection import ValidationResult
-        from drivers.lora_detection import ValidationResult
+        from pi_lora.drivers.lora_detection import ValidationResult
 
         mock_detector.validate_config.return_value = [
             ValidationResult(
@@ -270,7 +269,7 @@ class TestDetectModulesMismatchingConfig:
         )
 
         # from src.drivers.lora_detection import ValidationResult
-        from drivers.lora_detection import ValidationResult
+        from pi_lora.drivers.lora_detection import ValidationResult
 
         mock_detector.validate_config.return_value = [
             ValidationResult(
@@ -319,7 +318,7 @@ class TestDetectModulesDualCeValidation:
         )
 
         # from src.drivers.lora_detection import ValidationResult
-        from drivers.lora_detection import ValidationResult
+        from pi_lora.drivers.lora_detection import ValidationResult
 
         mock_detector.validate_config.return_value = [
             ValidationResult(
@@ -404,7 +403,7 @@ class TestDetectModulesWithNoneExpectation:
         )
 
         # from src.drivers.lora_detection import ValidationResult
-        from drivers.lora_detection import ValidationResult
+        from pi_lora.drivers.lora_detection import ValidationResult
 
         # Expecting 'none' but detecting RFM98W → mismatch.
         mock_detector.validate_config.return_value = [
@@ -464,7 +463,7 @@ class TestCliEdgeCases:
         )
 
         # from src.drivers.lora_detection import ValidationResult
-        from drivers.lora_detection import ValidationResult
+        from pi_lora.drivers.lora_detection import ValidationResult
 
         mock_detector.validate_config.return_value = [
             ValidationResult(

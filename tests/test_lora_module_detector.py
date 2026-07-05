@@ -18,16 +18,16 @@ import sys
 from unittest.mock import MagicMock, patch
 
 import pytest
-from src.drivers.lora_detection import (
+
+from pi_lora.drivers.lora_detection import (
     LoRaModuleConfig,
     LoRaModuleDetector,
 )
-from src.drivers.lora_module import LoRaModule
-
+from pi_lora.drivers.lora_module import LoRaModule
 from tests.fakes import FakeSpiDev
 
-_SPIDEV_PATCH_PATH: str = 'drivers.lora_module.spidev.SpiDev'
-_LORAMODULE_PATCH_PATH: str = 'src.drivers.lora_detection.LoRaModule'
+_SPIDEV_PATCH_PATH: str = 'pi_lora.drivers.lora_module.spidev.SpiDev'
+_LORAMODULE_PATCH_PATH: str = 'pi_lora.drivers.lora_detection.LoRaModule'
 
 class TestLoRaModuleDetectorInitialization:
     """Test suite for LoRaModuleDetector initialization."""
