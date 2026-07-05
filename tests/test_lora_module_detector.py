@@ -18,12 +18,12 @@ import sys
 from unittest.mock import MagicMock, patch
 
 import pytest
+
 from pi_lora.drivers.lora_detection import (
     LoRaModuleConfig,
     LoRaModuleDetector,
 )
 from pi_lora.drivers.lora_module import LoRaModule
-
 from tests.fakes import FakeSpiDev
 
 _SPIDEV_PATCH_PATH: str = 'pi_lora.drivers.lora_module.spidev.SpiDev'

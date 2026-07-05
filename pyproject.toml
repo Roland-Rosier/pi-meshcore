@@ -19,7 +19,7 @@ requires = ["uv_build>=0.11.25,<0.12"]
 build-backend = "uv_build"
 
 [tool.uv.build-backend]
-module-name = "cli"
+module-name = "pi_lora"
 
 # -----------------------------------------------------------------------------
 # Project metadata
@@ -223,15 +223,16 @@ ignore = [
 "tests/**/__init__.py" = ["E501", "F401"]
 
 # Files that intentionally append to sys.path for import resolution on RPi, and tests using bare Exception.
-"src/cli/check_hardware.py" = ["E402", "B008"]
-"src/drivers/lora_detection.py" = ["E402"]
+"src/pi_lora/cli/check_hardware.py" = ["E402", "B008"]
+"src/pi_lora/drivers/lora_detection.py" = ["E402"]
 "tests/test_lora_module_detection.py" = ["E402", "B017"]
 
 # Tests that verify simulated SPI failures use bare Exception intentionally.
 "tests/test_fakes.py" = ["B017"]
 
 [tool.ruff.lint.isort]
-known-first-party = ["drivers", "cli", "fakes"]
+
+known-first-party = ["pi_lora.drivers", "pi_lora.cli", "tests.fakes"]
 force-single-line = false
 combine-as-imports = true
 order-by-type = true
@@ -239,3 +240,5 @@ relative-imports-order = "closest-to-furthest"
 
 [tool.ruff.lint.pyupgrade]
 keep-runtime-typing = false
+
+
