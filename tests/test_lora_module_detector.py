@@ -18,11 +18,11 @@ import sys
 from unittest.mock import MagicMock, patch
 
 import pytest
-from src.drivers.lora_detection import (
+from pi_lora.drivers.lora_detection import (
     LoRaModuleConfig,
     LoRaModuleDetector,
 )
-from src.drivers.lora_module import LoRaModule
+from pi_lora.drivers.lora_module import LoRaModule
 
 from tests.fakes import FakeSpiDev
 
