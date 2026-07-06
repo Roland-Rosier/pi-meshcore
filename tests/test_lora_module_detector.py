@@ -79,7 +79,7 @@ class TestLoRaModuleDetectorInitialization:
         mock_module = MagicMock(spec=LoRaModule)
         mock_module.ce_pin = 0
         mock_module.communication_success = True
-        mock_module.module_type = "Multi-band - Likely RFM95W (High-Band 868MHz and/or Low-Band 433Mhz / Semtech SX1276)"
+        mock_module.module_type = "RFM9XW/SX127X family series"
         mock_module.silicon_revision = 0x12
 
         # with patch('src.drivers.lora_detection.LoRaModule', return_value=mock_module):
@@ -87,7 +87,7 @@ class TestLoRaModuleDetectorInitialization:
             detector = LoRaModuleDetector(ce_pins=[0])
         assert len(detector.modules) == 1
         assert detector.modules[0].communication_success is True
-        assert "Multi-band" in detector.modules[0].module_type
+        assert "RFM9XW/SX127X family series" in detector.modules[0].module_type
 
 
 class TestLoRaModuleDetectorRegisters:
@@ -186,7 +186,7 @@ class TestLoRaModuleDetection:
         results = detector.detect_modules()
 
         assert len(results) == 1
-        assert "Multi-band" in results[0].get("module_type", "")
+        assert "RFM9XW/SX127X family series" in results[0].get("module_type", "")
 
 
     def test_detect_multiple_modules(self) -> None:
@@ -478,7 +478,7 @@ class TestLoRaModuleDetectorFrequency:
             detector = LoRaModuleDetector(ce_pins=[0, 1])
 
         freq_ce0: int = detector.calculate_unique_frequency(
-            0, "Multi-band - Likely RFM95W...", None
+            0, "RFM9XW/SX127X family series", None
         )
 
         # Should default to CE0 frequency (RFM95W band)
@@ -493,7 +493,7 @@ class TestLoRaModuleDetectorFrequency:
             detector = LoRaModuleDetector(ce_pins=[0, 1])
 
         freq_ce1: int = detector.calculate_unique_frequency(
-            1, "Multi-band - Likely RFM98W...", None
+            1, "RFM9XW/SX127X family series", None
         )
 
         # Should default to CE1 frequency (RFM98W band)
@@ -671,14 +671,14 @@ class TestLoRaModuleDetectorExtendedDetection:
 
         # Verify that calculate_unique_frequency uses the config for multi-band.
         freq_ce0 = detector.calculate_unique_frequency(
-            0, "Multi-band - Likely RFM95W...", config
+            0, "RFM9XW/SX127X family series", config
         )
         assert freq_ce0 == 480000, (
             f"CE0 multi-band with rfm98w config should return 480000 kHz, got {freq_ce0}"
         )
 
         freq_ce1 = detector.calculate_unique_frequency(
-            1, "Multi-band - Likely RFM95W...", config
+            1, "RFM9XW/SX127X family series", config
         )
         assert freq_ce1 == 862000, (
             f"CE1 multi-band with rfm95w config should return 862000 kHz, got {freq_ce1}"
