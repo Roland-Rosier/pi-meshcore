@@ -14,7 +14,17 @@
 
 from __future__ import annotations
 
+import os
+import sys
 import typer
+
+# Add project root to Python path if not already present
+current_dir = os.path.abspath(os.path.dirname(__file__))
+project_root = os.path.abspath(os.path.join(current_dir, '..', '..'))
+
+if project_root not in sys.path:
+    sys.path.append(project_root)
+    print(f"✅ Added project root to sys.path: {project_root}")
 
 from pi_lora.drivers.lora_detection import LoRaModuleDetector
 
