@@ -249,7 +249,7 @@ class LoRaModule:
                 # transmission fails.
                 # Note also that being able to select 1010 MHz suggests that it is *not* an SX1279
                 # Note it could be an SX1277, which cannot do all the spreading factors, we might want to detect that
-                self.module_type = "Multi-band - Likely RFM95W (High-Band 868MHz and/or Low-Band 433Mhz / Semtech SX1276)"
+                self.module_type = "RFM9XW/SX127X family series"
             elif self.lf_mode_not_success:
                 self.module_type = "RFM95W (High-Band 868MHz / Semtech SX1276)"
             elif self.lf_mode_success:
