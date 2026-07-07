@@ -30,6 +30,28 @@ if project_root not in sys.path:
 from pi_lora.drivers.lora_module import LoRaModule
 
 
+def _normalise_expected_type(raw_value: str | None) -> Literal["rfm95w", "rfm98w", "none"] | None:
+    """Normalise a raw user-supplied module type string to its canonical form.
+
+    Accepts case-insensitive aliases:
+      - rfm95w, sx1276  → "rfm95w"
+      - rfm98w, sx1278  → "rfm98w"
+      - none            → "none"
+    """
+    if raw_value is None:
+        return None
+    canonical = raw_value.strip().lower()
+    if canonical in ("rfm95w", "sx1276"):
+        return "rfm95w"
+    if canonical in ("rfm98w", "sx1278"):
+        return "rfm98w"
+    if canonical == "none":
+        return "none"
+    raise ValueError(
+        f"Unsupported module type '{raw_value}'. Expected one of: rfm95w, sx1276, rfm98w, sx1278, none."
+    )
+
+
 @dataclass
 class LoRaModuleConfig:
     """Configuration describing expected LoRa modules on CE lines.
@@ -39,11 +61,15 @@ class LoRaModuleConfig:
     validate this configuration against actual hardware detection results.
     """
 
-    ce0_expected_module_type: Literal["rfm95w", "rfm98w", "none"] | None = None
-    ce1_expected_module_type: Literal["rfm95w", "rfm98w", "none"] | None = None
+    ce0_expected_module_type: Literal["rfm95w", "rfm98w", "none", "sx1276", "sx1278"] | None = None
+    ce1_expected_module_type: Literal["rfm95w", "rfm98w", "none", "sx1276", "sx1278"] | None = None
 
     def __post_init__(self) -> None:
         """Validate that at least one CE line has a non-None expectation."""
+        if self.ce0_expected_module_type is not None:
+            self.ce0_expected_module_type = _normalise_expected_type(self.ce0_expected_module_type)
+        if self.ce1_expected_module_type is not None:
+            self.ce1_expected_module_type = _normalise_expected_type(self.ce1_expected_module_type)
         if self.ce0_expected_module_type is None and self.ce1_expected_module_type is None:
             raise ValueError("At least one CE line must have an expected module type specified.")
 
@@ -66,10 +92,12 @@ class LoRaModuleDetector:
     _MODULE_TYPE_MAP: dict[str, list[str]] = {
         "rfm95w": [
             "RFM95W (High-Band 868MHz / Semtech SX1276)",
+            "RFM9XW/SX127X family series",
             "Multi-band - Likely RFM95W (High-Band 868MHz and/or Low-Band 433Mhz / Semtech SX1276)",
         ],
         "rfm98w": [
             "RFM98W (Low-Band 433Mhz / Semtech SX1278)",
+            "RFM9XW/SX127X family series",
             "Multi-band - Likely RFM95W (High-Band 868MHz and/or Low-Band 433Mhz / Semtech SX1276)",
         ],
         "none": [
@@ -123,13 +151,13 @@ class LoRaModuleDetector:
 
             if ce0_result["module_type"] == "RFM95W (High-Band 868MHz / Semtech SX1276)":
                 pass
-            elif "Multi-band" in ce0_result["module_type"]:
+            elif "RFM9XW/SX127X family series" in ce0_result["module_type"] or "Multi-band" in ce0_result["module_type"]:
                 # For multi-band, assume RFM95W for CE0 as default
                 pass
 
             if ce1_result["module_type"] == "RFM95W (High-Band 868MHz / Semtech SX1276)":
                 pass
-            elif "Multi-band" in ce1_result["module_type"]:
+            elif "RFM9XW/SX127X family series" in ce1_result["module_type"] or "Multi-band" in ce1_result["module_type"]:
                 # For multi-band, assume RFM98W for CE1 as default
                 pass  # ce1_is_rfm95w remains False
 
@@ -177,7 +205,7 @@ class LoRaModuleDetector:
             is_rfm95w = True
         elif detected_type == "RFM98W (Low-Band 433Mhz / Semtech SX1278)":
             is_rfm98w = True
-        elif "Multi-band" in detected_type:
+        elif "RFM9XW/SX127X family series" in detected_type or "Multi-band" in detected_type:
             # Multi-band logic
             if config is not None:
                 if ce_pin == 0:

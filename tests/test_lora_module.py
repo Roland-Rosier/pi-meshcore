@@ -38,7 +38,7 @@ class TestLoRaModuleInitialization:
         assert module.supports_high_frequency is True
         # FakeSpiDev SPI layer echoes all register writes back — both freq tests succeed.
         assert module.supports_low_frequency is True
-        assert "RFM95W" in module.module_type or "Multi-band" in module.module_type
+        assert "RFM9XW/SX127X family series" in module.module_type
 
     def test_init_rfm98w_with_factory(self, rfm98w_factory: FakeSpiDev) -> None:
         """Test that LoRaModule initializes correctly with RFM98W fake device.
@@ -52,7 +52,7 @@ class TestLoRaModuleInitialization:
         # FakeSpiDev SPI layer echoes all register writes back — both freq tests succeed.
         assert module.supports_high_frequency is True
         assert module.supports_low_frequency is True
-        assert "RFM95W" in module.module_type or "Multi-band" in module.module_type
+        assert "RFM9XW/SX127X family series" in module.module_type
 
     def test_init_none_module(self, fake_spi_none: FakeSpiDev) -> None:
         """Test that LoRaModule handles 'none' (no device) correctly.
@@ -169,7 +169,7 @@ class TestLoRaModuleDetection:
         """Test that RFM95W is correctly detected."""
         module = LoRaModule(ce_pin=0, spi_factory=lambda: rfm95w_factory)
 
-        assert "RFM95W" in module.module_type or "Multi-band" in module.module_type
+        assert "RFM9XW/SX127X family series" in module.module_type
 
     def test_detect_rfm98w(self, rfm98w_factory: FakeSpiDev) -> None:
         """Test that RFM98W is correctly detected.
@@ -181,13 +181,13 @@ class TestLoRaModuleDetection:
         """
         module = LoRaModule(ce_pin=1, spi_factory=lambda: rfm98w_factory)
 
-        assert "RFM98W" in module.module_type or "Multi-band" in module.module_type
+        assert "RFM9XW/SX127X family series" in module.module_type
 
     def test_detect_multi_band(self, fake_spi_multi_band: FakeSpiDev) -> None:
         """Test that multi-band is correctly detected."""
         module = LoRaModule(ce_pin=0, spi_factory=lambda: fake_spi_multi_band)
 
-        assert "Multi-band" in module.module_type
+        assert "RFM9XW/SX127X family series" in module.module_type
 
 
 class TestLoRaModuleUniqueValue:

@@ -16,7 +16,7 @@ from __future__ import annotations
 
 import os
 import sys
-from enum import Enum
+from typing import Literal, cast
 
 import typer
 
@@ -31,11 +31,29 @@ if project_root not in sys.path:
 from pi_lora.drivers.lora_detection import LoRaModuleDetector
 
 
-class ModuleType(str, Enum):
-    """Allowed LoRa module types for CE slot validation."""
-    RFM95W = "rfm95w"
-    RFM98W = "rfm98w"
-    NONE = "none"
+def _normalise_module_type(value: str | None) -> Literal["rfm95w", "rfm98w", "none"] | None:
+    """Typer callback to normalise module type input to canonical form.
+
+    Accepts case-insensitive aliases:
+      - rfm95w, sx1276  → "rfm95w"
+      - rfm98w, sx1278  → "rfm98w"
+      - none            → "none"
+    """
+    if value is None:
+        return None
+    canonical = value.strip().lower()
+    mapping: dict[Literal["rfm95w", "sx1276", "rfm98w", "sx1278", "none"], Literal["rfm95w", "rfm98w", "none"]] = {
+        "rfm95w": "rfm95w",
+        "sx1276": "rfm95w",
+        "rfm98w": "rfm98w",
+        "sx1278": "rfm98w",
+        "none":   "none",
+    }
+    if canonical not in mapping:
+        raise typer.BadParameter(
+            f"Invalid module type '{value}'. Expected one of: rfm95w/sx1276, rfm98w/sx1278, none."
+        )
+    return mapping[canonical]
 
 
 app = typer.Typer(
@@ -46,15 +64,17 @@ app = typer.Typer(
 
 @app.command("detect-modules")
 def detect_modules(
-    ce0: ModuleType | None = typer.Option(
+    ce0: str | None = typer.Option(
         None,
         "--ce0",
-        help="Expected module type on CE0 slot (rfm95w, rfm98w, or none).",
+        callback=_normalise_module_type,
+        help="Expected module type on CE0 slot (rfm95w/sx1276, rfm98w/sx1278, or none).",
     ),
-    ce1: ModuleType | None = typer.Option(
+    ce1: str | None = typer.Option(
         None,
         "--ce1",
-        help="Expected module type on CE1 slot (rfm95w, rfm98w, or none).",
+        callback=_normalise_module_type,
+        help="Expected module type on CE1 slot (rfm95w/sx1276, rfm98w/sx1278, or none).",
     ),
 ) -> None:
     """Scan hardware and optionally validate against an expected configuration."""
@@ -71,8 +91,8 @@ def detect_modules(
         from pi_lora.drivers.lora_detection import LoRaModuleConfig, ValidationResult
 
         config = LoRaModuleConfig(
-            ce0_expected_module_type=ce0.value if ce0 else None,
-            ce1_expected_module_type=ce1.value if ce1 else None,
+            ce0_expected_module_type=cast(Literal["rfm95w", "rfm98w", "none"], ce0) if ce0 is not None else None,  # Already normalised by callback
+            ce1_expected_module_type=cast(Literal["rfm95w", "rfm98w", "none"], ce1) if ce1 is not None else None,  # Already normalised by callback
         )
 
         validation_results: list[ValidationResult] = detector.validate_config(config)

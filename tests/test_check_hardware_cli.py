@@ -434,10 +434,12 @@ class TestCliEdgeCases:
     """Extra CLI tests for robustness — not explicitly listed in Phase 1."""
 
     def test_detect_modules_with_invalid_module_type(self) -> None:
-        """Typer should reject an invalid ModuleType value.
+        """A truly unknown module type is rejected by the CLI.
 
-        The ``ModuleType`` enum only allows "rfm95w", "rfm98w", and "none".
-        Passing anything else is a Typer-level validation error, not our code's.
+        The callback accepts rfm95w/sx1276, rfm98w/sx1278, and none.
+        Passing anything else (e.g. "invalid_type") causes a Typer-level
+        validation error, not our code's.  Alias values like "sx1276" are
+        accepted — only genuinely unknown strings are rejected.
         """
         runner = CliRunner()
         result = runner.invoke(cli_app, ["detect-modules", "--ce0", "invalid_type"])
@@ -489,6 +491,48 @@ class TestCliEdgeCases:
             f"Expected 'CE0:' label in validation output but got: {result.output}"
         )
 
+    def test_sx1276_alias_accepted_ce0(self) -> None:
+        """Verify that 'sx1276' is accepted as an alias for 'rfm95w' on CE0."""
+        runner = CliRunner()
+        mock_detector = _build_mock_detector(
+            ce_pins=[0, 1],
+            module_type_strings=["RFM95W (High-Band 868MHz / Semtech SX1276)", "Unknown"],
+            communication_successes=[True, False],
+        )
+        from pi_lora.drivers.lora_detection import ValidationResult
+
+        mock_detector.validate_config.return_value = [
+            ValidationResult(
+                ce_pin=0, passed=True,
+                message="Expected: rfm95w, Detected: RFM95W (High-Band 868MHz / Semtech SX1276) (Match)",
+                expected_type="rfm95w", detected_type="RFM95W (High-Band 868MHz / Semtech SX1276)",
+            ),
+        ]
+        with patch(_DETECTOR_PATCH_PATH, return_value=mock_detector):
+            result = runner.invoke(cli_app, ["detect-modules", "--ce0", "sx1276"])
+        assert result.exit_code == 0, f"Expected exit code 0 but got {result.exit_code}. Output: {result.output}"
+
+    def test_sx1278_alias_accepted_ce1(self) -> None:
+        """Verify that 'SX1278' (mixed-case alias) is accepted for 'rfm98w' on CE1."""
+        runner = CliRunner()
+        mock_detector = _build_mock_detector(
+            ce_pins=[0, 1],
+            module_type_strings=["RFM95W (High-Band 868MHz / Semtech SX1276)", "RFM98W (Low-Band 433Mhz / Semtech SX1278)"],
+            communication_successes=[True, True],
+        )
+        from pi_lora.drivers.lora_detection import ValidationResult
+
+        mock_detector.validate_config.return_value = [
+            ValidationResult(
+                ce_pin=1, passed=True,
+                message="Expected: rfm98w, Detected: RFM98W (Low-Band 433Mhz / Semtech SX1278) (Match)",
+                expected_type="rfm98w", detected_type="RFM98W (Low-Band 433Mhz / Semtech SX1278)",
+            ),
+        ]
+        with patch(_DETECTOR_PATCH_PATH, return_value=mock_detector):
+            result = runner.invoke(cli_app, ["detect-modules", "--ce1", "SX1278"])
+        assert result.exit_code == 0, f"Expected exit code 0 but got {result.exit_code}. Output: {result.output}"
+
     def test_output_format_contains_silicon_revision(self) -> None:
         """Verify that Silicon Revision appears in detection output."""
         runner = CliRunner()
@@ -512,6 +556,8 @@ if __name__ == "__main__":
 
     exit_code = pytest.main([__file__, "-v"])
     _sys.exit(exit_code)
+
+
 
 
 
