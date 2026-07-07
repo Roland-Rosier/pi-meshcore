@@ -67,9 +67,9 @@ class LoRaModuleConfig:
     def __post_init__(self) -> None:
         """Validate that at least one CE line has a non-None expectation."""
         if self.ce0_expected_module_type is not None:
-            self.ce0_expected_module_type = _normalise_expected_type(self.ce0_expected_module_type)  # type: ignore[assignment]
+            self.ce0_expected_module_type = _normalise_expected_type(self.ce0_expected_module_type)
         if self.ce1_expected_module_type is not None:
-            self.ce1_expected_module_type = _normalise_expected_type(self.ce1_expected_module_type)  # type: ignore[assignment]
+            self.ce1_expected_module_type = _normalise_expected_type(self.ce1_expected_module_type)
         if self.ce0_expected_module_type is None and self.ce1_expected_module_type is None:
             raise ValueError("At least one CE line must have an expected module type specified.")
 
