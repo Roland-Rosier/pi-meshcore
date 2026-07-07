@@ -43,7 +43,7 @@ class TestLoRaModuleDetectorInitialization:
 
         assert len(detector.modules) == 1
         assert detector.modules[0].communication_success is True
-        assert "RFM95W" in detector.modules[0].module_type or "Multi-band" in detector.modules[0].module_type
+        assert "RFM9XW/SX127X family series" in detector.modules[0].module_type
 
     def test_init_rfm98w_with_factory(self) -> None:
         """Test that LoRaModuleDetector initializes correctly with RFM98W fake device."""
@@ -56,7 +56,7 @@ class TestLoRaModuleDetectorInitialization:
 
         assert len(detector.modules) == 1
         assert detector.modules[0].communication_success is True
-        assert "RFM98W" in detector.modules[0].module_type or "Multi-band" in detector.modules[0].module_type
+        assert "RFM9XW/SX127X family series" in detector.modules[0].module_type
 
     def test_init_none_module(self) -> None:
         """Test that LoRaModuleDetector handles 'none' (no device) correctly."""
@@ -151,13 +151,10 @@ class TestLoRaModuleDetection:
 
         assert len(results) == 1
         assert results[0]["ce_pin"] == 0
-        assert (
-            "RFM95W" in results[0].get("module_type", "")
-            or "Multi-band" in results[0].get("module_type", "")
-        )
+        assert "RFM9XW/SX127X family series" in results[0].get("module_type", "")
 
     def test_detect_single_module_ce1(self) -> None:
-        """Test detection of a single module on CE0 with FakeSpiDev."""
+        """Test detection of a single module on CE1 with FakeSpiDev."""
         fake_spi = FakeSpiDev(module_type="rfm98w")
 
         # with patch("src.drivers.lora_module.spidev.SpiDev", return_value=fake_spi):
@@ -168,10 +165,7 @@ class TestLoRaModuleDetection:
 
         assert len(results) == 1
         assert results[0]["ce_pin"] == 1
-        assert (
-            "RFM98W" in results[0].get("module_type", "")
-            or "Multi-band" in results[0].get("module_type", "")
-        )
+        assert "RFM9XW/SX127X family series" in results[0].get("module_type", "")
 
     def test_detect_multi_band(self) -> None:
         """Test that multi-band is correctly detected with FakeSpiDev."""
