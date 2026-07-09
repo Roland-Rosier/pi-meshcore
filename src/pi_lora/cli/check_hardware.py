@@ -76,12 +76,17 @@ def detect_modules(
         callback=_normalise_module_type,
         help="Expected module type on CE1 slot (rfm95w/sx1276, rfm98w/sx1278, or none).",
     ),
+    extended: bool = typer.Option(
+        False,
+        "--extended",
+        help="Run extended detection to distinguish RFM95W from RFM98W via PLL lock test.",
+    ),
 ) -> None:
     """Scan hardware and optionally validate against an expected configuration."""
 
     detector = LoRaModuleDetector(ce_pins=[0, 1])
 
-    results = detector.detect_modules()
+    results = detector.detect_modules(extended=extended)
 
     print("\nHardware Detection Results:")
     for result in results:
