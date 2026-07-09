@@ -115,12 +115,18 @@ class LoRaModuleDetector:
             ce_pins = [0, 1]
         self.modules = [LoRaModule(ce_pin) for ce_pin in ce_pins]
 
-    def detect_modules(self, config: LoRaModuleConfig | None = None) -> list[dict[str, Any]]:
+    def detect_modules(
+        self,
+        config: LoRaModuleConfig | None = None,
+        extended: bool = False,
+    ) -> list[dict[str, Any]]:
         """Detect LoRa modules connected to the CE pins using LoRaModule instances.
 
         If both CE0 and CE1 are detected, performs extended verification to determine
         if they are the same physical module.
 
+        :param config: Optional user configuration for validation.
+        :param extended: When True, run PLL lock test to distinguish RFM95W from RFM98W.
         :return: List of detection results with additional verification status when applicable
         """
         # First, run standard detection
@@ -131,9 +137,46 @@ class LoRaModuleDetector:
                 "ce_pin": module.ce_pin,
                 "module_type": module.module_type,
                 "Silicon Revision": f"0x{module.silicon_revision:02X}" if module.silicon_revision is not None else "None detected",
-                "reg_rxbw_freqifmsb": f"0x{module.read_register(0x12):02X}" if module.read_register(0x12) is not None else "None read"
+                "reg_rxbw_freqifmsb": f"0x{module.read_register(0x12):02X}" if module.read_register(0x12) is not None else "None read",
+                "extended_detection": False,
             }
             results.append(result)
+
+        if extended:
+            # Perform extended detection on family-type modules
+            for module in self.modules:
+                if "RFM9XW/SX127X family series" in module.module_type or \
+                   "Multi-band" in module.module_type:
+                    extended_result: Literal["rfm95w", "rfm98w"] | None = \
+                        module._perform_extended_detection()
+                    if extended_result == "rfm95w":
+                        module.module_type = (
+                            "RFM95W (High-Band 868MHz / Semtech SX1276)"
+                        )
+                    elif extended_result == "rfm98w":
+                        module.module_type = (
+                            "RFM98W (Low-Band 433Mhz / Semtech SX1278)"
+                        )
+
+            # Rebuild results after extended detection updated module types
+            results = []
+            for module in self.modules:
+                result: dict[str, Any] = {
+                    "ce_pin": module.ce_pin,
+                    "module_type": module.module_type,
+                    "Silicon Revision": (
+                        f"0x{module.silicon_revision:02X}"
+                        if module.silicon_revision is not None
+                        else "None detected"
+                    ),
+                    "reg_rxbw_freqifmsb": (
+                        f"0x{module.read_register(0x12):02X}"
+                        if module.read_register(0x12) is not None
+                        else "None read"
+                    ),
+                    "extended_detection": True,
+                }
+                results.append(result)
 
         # Check if both CE0 and CE1 have modules attached before running extended detection
         ce0_result: dict[str, Any] | None = None
@@ -376,5 +419,7 @@ class LoRaModuleDetector:
             ))
 
         return results
+
+
 
 
