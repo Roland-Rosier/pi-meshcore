@@ -37,6 +37,7 @@ class FakeSpiDev:
     REG_IRQ_FLAGS_MASK: int = 0x11
     REG_IRQ_FLAGS: int = 0x12
     REG_RX_NB_BYTES: int = 0x13
+    REG_IRQ_FLAGS1: int = 0x3E
     REG_PKT_RSSI_VALUE: int = 0x1A
     REG_PKT_SNR_VALUE: int = 0x1B
 
@@ -87,6 +88,10 @@ class FakeSpiDev:
             self._registers[self.REG_PKT_RSSI_VALUE] = 0x00
         if self.REG_PKT_SNR_VALUE not in self._registers:
             self._registers[self.REG_PKT_SNR_VALUE] = 0x00
+
+        # IRQ Flags 1 register (0x3E) — used for PLL lock simulation
+        if self.REG_IRQ_FLAGS1 not in self._registers:
+            self._registers[self.REG_IRQ_FLAGS1] = 0x00
 
     def open(self, bus: int, device: int) -> None:
         """Simulate opening the SPI device.
@@ -301,6 +306,17 @@ class FakeSpiDev:
         op_mode: int = self.get_operating_mode()
         return (op_mode & self.BIT_LF_MODE_ON) == self.BIT_LF_MODE_ON
 
+    def set_pll_lock_state(self, locked: bool) -> None:
+        """Set the simulated PLL lock state for RegIrqFlags1 bit 4.
+
+        :param locked: True if PLL should report as locked.
+        """
+        current: int = self._registers.get(self.REG_IRQ_FLAGS1, 0x00)
+        if locked:
+            self._registers[self.REG_IRQ_FLAGS1] = current | 0x10  # Set bit 4 (PLLLock)
+        else:
+            self._registers[self.REG_IRQ_FLAGS1] = current & ~0x10  # Clear bit 4
+
 
 def create_fake_spi_dev(module_type: str = "none",
                         registers: dict[int, int] | None = None) -> FakeSpiDev:
@@ -366,4 +382,6 @@ if __name__ == "__main__":
     except SyntaxError as e:
         print(f"✗ Syntax error: {e}")
         sys.exit(1)
+
+
 
