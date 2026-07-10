@@ -59,3 +59,17 @@ def rfm95w_factory(fake_spi_rfm95w: FakeSpiDev) -> Generator[FakeSpiDev, None, N
 def rfm98w_factory(fake_spi_rfm98w: FakeSpiDev) -> Generator[FakeSpiDev, None, None]:
     """Provide a SPI factory that returns an RFM98W fake device."""
     yield fake_spi_rfm98w
+
+
+@pytest.fixture()
+def fake_spi_rfm95w_pll_locked(fake_spi_rfm95w: FakeSpiDev) -> FakeSpiDev:
+    """RFM95W with PLL lock simulated (for extended detection)."""
+    fake_spi_rfm95w.set_pll_lock_state(True)
+    return fake_spi_rfm95w
+
+
+@pytest.fixture()
+def fake_spi_rfm98w_pll_not_locked(fake_spi_rfm98w: FakeSpiDev) -> FakeSpiDev:
+    """RFM98W with PLL lock NOT simulated (for extended detection)."""
+    fake_spi_rfm98w.set_pll_lock_state(False)
+    return fake_spi_rfm98w
