@@ -131,6 +131,7 @@ def _build_mock_detector(
 
     def _detect_modules(
         config: Any | None = None,
+        extended: bool = False,
     ) -> list[dict[str, Any]]:
         results: list[dict[str, Any]] = []
         for mod in modules:

@@ -154,7 +154,7 @@ class TestLoRaModuleFrequency:
         read_msb: int
         read_mid: int
         read_lsb: int
-        (success, req_msb, req_mid, req_lsb, read_msb, read_mid, read_lsb) = module._write_and_verify_frequency_for_khz(868000)
+        (success, req_msb, req_mid, req_lsb, read_msb, read_mid, read_lsb) = module.write_and_verify_frequency_for_khz(868000)
 
         assert success is True
         assert req_msb == read_msb
@@ -408,7 +408,7 @@ class TestLoRaModuleModerateGaps:
         assert response_lsb is None
 
     # ------------------------------------------------------------------
-    # M4: _write_and_verify_frequency_for_khz — failure paths
+    # M4: write_and_verify_frequency_for_khz — failure paths
     # ------------------------------------------------------------------
 
     def test_write_and_verify_frequency_read_mismatch(self, rfm95w_factory: FakeSpiDev) -> None:
@@ -425,7 +425,7 @@ class TestLoRaModuleModerateGaps:
             read_mid: int | None
             read_lsb: int | None
             (success, req_msb, req_mid, req_lsb, read_msb, read_mid, read_lsb) = \
-                module._write_and_verify_frequency_for_khz(868000)
+                module.write_and_verify_frequency_for_khz(868000)
 
         assert success is False
 
@@ -443,7 +443,7 @@ class TestLoRaModuleModerateGaps:
             read_mid: int | None
             read_lsb: int | None
             (success, req_msb, req_mid, req_lsb, read_msb, read_mid, read_lsb) = \
-                module._write_and_verify_frequency_for_khz(868000)
+                module.write_and_verify_frequency_for_khz(868000)
 
         assert success is False
 
