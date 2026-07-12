@@ -551,12 +551,108 @@ class TestCliEdgeCases:
         assert "0x12" in result.output
 
 
+# ---------------------------------------------------------------------------
+# Step 11 — Extended detection CLI flag tests
+# ---------------------------------------------------------------------------
+
+class TestDetectModulesExtendedFlag:
+    """Tests for the --extended CLI flag (Step 11 of extended_detect plan)."""
+
+    def test_detect_modules_extended_flag_accepted(self) -> None:
+        """Verify --extended flag is accepted and does not cause error.
+
+        Verify:
+          - Exit code is 0.
+          - ``detect_modules()`` was called with ``extended=True``.
+        """
+        runner = CliRunner()
+        mock_detector = _build_mock_detector(
+            ce_pins=[0],
+            module_type_strings=["RFM95W (High-Band 868MHz / Semtech SX1276)"],
+            communication_successes=[True],
+        )
+
+        with patch(_DETECTOR_PATCH_PATH, return_value=mock_detector):
+            result = runner.invoke(cli_app, ["detect-modules", "--extended"])
+
+        assert result.exit_code == 0, (
+            f"Expected exit code 0 but got {result.exit_code}. Output: {result.output}"
+        )
+        # Verify detect_modules was called with extended=True
+        mock_detector.detect_modules.assert_called()
+        call_kwargs = mock_detector.detect_modules.call_args
+        assert call_kwargs.kwargs.get("extended") is True
+
+    def test_detect_modules_extended_with_validation(self) -> None:
+        """Verify --extended works alongside --ce0 / --ce1 validation."""
+        runner = CliRunner()
+        mock_detector = _build_mock_detector(
+            ce_pins=[0, 1],
+            module_type_strings=[
+                "RFM95W (High-Band 868MHz / Semtech SX1276)",
+                "RFM98W (Low-Band 433Mhz / Semtech SX1278)",
+            ],
+            communication_successes=[True, True],
+        )
+
+        from pi_lora.drivers.lora_detection import ValidationResult
+
+        mock_detector.validate_config.return_value = [
+            ValidationResult(
+                ce_pin=0,
+                passed=True,
+                message="Expected: rfm95w, Detected: RFM95W (High-Band 868MHz / Semtech SX1276) (Match)",
+                expected_type="rfm95w",
+                detected_type="RFM95W (High-Band 868MHz / Semtech SX1276)",
+            ),
+            ValidationResult(
+                ce_pin=1,
+                passed=True,
+                message="Expected: rfm98w, Detected: RFM98W (Low-Band 433Mhz / Semtech SX1278) (Match)",
+                expected_type="rfm98w",
+                detected_type="RFM98W (Low-Band 433Mhz / Semtech SX1278)",
+            ),
+        ]
+
+        with patch(_DETECTOR_PATCH_PATH, return_value=mock_detector):
+            result = runner.invoke(
+                cli_app, ["detect-modules", "--extended", "--ce0", "rfm95w", "--ce1", "rfm98w"]
+            )
+
+        assert result.exit_code == 0, (
+            f"Expected exit code 0 but got {result.exit_code}. Output: {result.output}"
+        )
+        call_kwargs = mock_detector.detect_modules.call_args
+        assert call_kwargs.kwargs.get("extended") is True
+
+    def test_detect_modules_no_extended_by_default(self) -> None:
+        """Without --extended, the extended parameter should be False or absent."""
+        runner = CliRunner()
+        mock_detector = _build_mock_detector(
+            ce_pins=[0],
+            module_type_strings=["RFM95W (High-Band 868MHz / Semtech SX1276)"],
+            communication_successes=[True],
+        )
+
+        with patch(_DETECTOR_PATCH_PATH, return_value=mock_detector):
+            result = runner.invoke(cli_app, ["detect-modules"])
+
+        assert result.exit_code == 0, (
+            f"Expected exit code 0 but got {result.exit_code}. Output: {result.output}"
+        )
+        call_kwargs = mock_detector.detect_modules.call_args
+        extended_val: bool | None = call_kwargs.kwargs.get("extended")
+        assert extended_val is False or "extended" not in call_kwargs.kwargs
+
+
 if __name__ == "__main__":
     """Run tests using pytest."""
     import sys as _sys
 
     exit_code = pytest.main([__file__, "-v"])
     _sys.exit(exit_code)
+
+
 
 
 
