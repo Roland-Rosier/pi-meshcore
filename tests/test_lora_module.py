@@ -14,17 +14,17 @@
 
 """Tests for LoRaModule class using FakeSpiDev."""
 
+from typing import Literal
 from unittest.mock import patch
 
 # from src.drivers.lora_module import LoRaModule
 from pi_lora.drivers.lora_module import (
     BIT_LF_MODE_ON,
-    LoRaModule,
-    LoRaModuleMode,
     MODE_SLEEP,
     REG_OP_MODE,
+    LoRaModule,
+    LoRaModuleMode,
 )
-from typing import Literal
 from tests.fakes import FakeSpiDev
 
 _SPIDEV_PATCH_PATH: str = 'pi_lora.drivers.lora_module.spidev.SpiDev'
@@ -630,7 +630,7 @@ class TestPublicWriteAndVerifyFrequency:
     def test_public_method_exists(self, rfm95w_factory: FakeSpiDev) -> None:
         module = LoRaModule(ce_pin=0, spi_factory=lambda: rfm95w_factory)
         assert hasattr(module, 'write_and_verify_frequency_for_khz')
-        assert callable(getattr(module, 'write_and_verify_frequency_for_khz'))
+        assert callable(module.write_and_verify_frequency_for_khz)
 
     def test_public_method_returns_same_as_private(self, rfm95w_factory: FakeSpiDev) -> None:
         module = LoRaModule(ce_pin=0, spi_factory=lambda: rfm95w_factory)

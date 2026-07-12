@@ -15,10 +15,8 @@
 from __future__ import annotations
 
 import sys
+from typing import Any
 from unittest.mock import MagicMock, patch
-
-from collections.abc import Generator
-from typing import Any, Literal
 
 import pytest
 
