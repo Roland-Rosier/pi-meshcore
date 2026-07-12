@@ -594,9 +594,10 @@ class TestExtendedDetection:
 
     def test_extended_detect_frequency_write_failure(self, rfm95w_factory: FakeSpiDev) -> None:
         # Make frequency register writes fail during extended detection
-        for _ in range(3):  # Need failures on all three freq register writes (0x06, 0x07, 0x08)
-            rfm95w_factory.enable_failure_write()
         module = LoRaModule(ce_pin=0, spi_factory=lambda: rfm95w_factory)
+        # Re-enable write failures for the three frequency register writes in _perform_extended_detection()
+        for _ in range(3):
+            rfm95w_factory.enable_failure_write()
         result: Literal["rfm95w", "rfm98w"] | None = module._perform_extended_detection()
         assert result is None  # Frequency write failed → detection returns None
 
@@ -609,10 +610,11 @@ class TestExtendedDetection:
 
     def test_extended_detect_returns_to_sleep_on_failure(self, rfm95w_factory: FakeSpiDev) -> None:
         """Verify that the module is returned to SLEEP mode even when detection fails."""
-        # Make reads fail so _perform_extended_detection returns None via exception path
-        for _ in range(10):  # Exhaust failure flags on read operations
-            rfm95w_factory.enable_failure_read()
+        # Create module first (consumes any pre-existing failure flags during init)
         module = LoRaModule(ce_pin=0, spi_factory=lambda: rfm95w_factory)
+        # Re-enable read failures for _perform_extended_detection() operations
+        for _ in range(10):
+            rfm95w_factory.enable_failure_read()
         result: Literal["rfm95w", "rfm98w"] | None = module._perform_extended_detection()
         assert result is None
 

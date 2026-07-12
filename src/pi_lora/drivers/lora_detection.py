@@ -161,7 +161,7 @@ class LoRaModuleDetector:
             # Rebuild results after extended detection updated module types
             results = []
             for module in self.modules:
-                result: dict[str, Any] = {
+                result_rebuilt: dict[str, Any] = {
                     "ce_pin": module.ce_pin,
                     "module_type": module.module_type,
                     "Silicon Revision": (
@@ -176,7 +176,7 @@ class LoRaModuleDetector:
                     ),
                     "extended_detection": True,
                 }
-                results.append(result)
+                results.append(result_rebuilt)
 
         # Check if both CE0 and CE1 have modules attached before running extended detection
         ce0_result: dict[str, Any] | None = None

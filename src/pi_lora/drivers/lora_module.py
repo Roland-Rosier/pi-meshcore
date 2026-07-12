@@ -14,6 +14,7 @@
 
 import time
 from collections.abc import Callable
+from contextlib import suppress
 from enum import IntEnum
 from typing import Any, Literal
 
@@ -390,9 +391,6 @@ class LoRaModule:
             return None  # Communication or logic error during detection
         finally:
             # 1f — Always return to sleep mode, even on failure
-            try:
-                self.set_module_mode(LoRaModuleMode.SLEEP)
-            except Exception:
-                pass  # Best-effort cleanup; detection result already determined
+            suppress(Exception)(self.set_module_mode(LoRaModuleMode.SLEEP))
 
 

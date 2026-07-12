@@ -182,13 +182,9 @@ class FakeSpiDev:
                     self._fail_next_write = False
                     raise Exception("SPI write failure simulated")
 
-                # Handle special register writes
-                if address == self.REG_OP_MODE:
-                    # Track LF mode bit state
-                    current_op_mode: int = self._registers.get(address, 0)
-                    new_op_mode: int = (current_op_mode & ~self.BIT_LF_MODE_ON) | (value & self.BIT_LF_MODE_ON)
-                    self._registers[address] = new_op_mode
-                elif address in [0x06, 0x07, 0x08]:  # Frequency registers
+                # Handle special register writes — store the full written value so that
+                # mode-setting and LF-bit operations are both faithfully simulated.
+                if address == self.REG_OP_MODE or address in [0x06, 0x07, 0x08]:
                     self._registers[address] = value
                 else:
                     self._registers[address] = value
@@ -382,6 +378,10 @@ if __name__ == "__main__":
     except SyntaxError as e:
         print(f"✗ Syntax error: {e}")
         sys.exit(1)
+
+
+
+
 
 
 
