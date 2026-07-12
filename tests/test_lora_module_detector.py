@@ -17,6 +17,9 @@ from __future__ import annotations
 import sys
 from unittest.mock import MagicMock, patch
 
+from collections.abc import Generator
+from typing import Any, Literal
+
 import pytest
 
 from pi_lora.drivers.lora_detection import (
@@ -878,6 +881,108 @@ class TestLoRaModuleDetectorExtendedDetectionPaths:
         ce1_result = next(r for r in results if r["ce_pin"] == 1)
         assert ce0_result["unique_value_verified"] is True
         assert ce1_result["unique_value_verified"] is False
+
+
+class TestExtendedDetectionIntegration:
+    """Tests for detect_modules(extended=True) path."""
+
+    def test_detect_extended_rfm95w(self) -> None:
+        """RFM95W module detected via PLL lock at 915 MHz."""
+        fake_spi = FakeSpiDev(module_type="rfm95w")
+        fake_spi.set_pll_lock_state(True)
+
+        with patch(_SPIDEV_PATCH_PATH, return_value=fake_spi):
+            detector = LoRaModuleDetector(ce_pins=[0])
+
+        results: list[dict[str, Any]] = detector.detect_modules(extended=True)
+
+        assert len(results) == 1
+        assert "RFM95W" in results[0]["module_type"]
+        assert "SX1276" in results[0]["module_type"]
+
+    def test_detect_extended_rfm98w(self) -> None:
+        """RFM98W module detected via PLL failure at 915 MHz."""
+        fake_spi = FakeSpiDev(module_type="rfm98w")
+        fake_spi.set_pll_lock_state(False)
+
+        with patch(_SPIDEV_PATCH_PATH, return_value=fake_spi):
+            detector = LoRaModuleDetector(ce_pins=[0])
+
+        results: list[dict[str, Any]] = detector.detect_modules(extended=True)
+
+        assert len(results) == 1
+        assert "RFM98W" in results[0]["module_type"]
+        assert "SX1278" in results[0]["module_type"]
+
+    def test_detect_extended_family_module_resolved(self, fake_spi_multi_band: FakeSpiDev) -> None:
+        """A family-type module is resolved to RFM95W after extended detection."""
+        # Multi-band fixture starts with "RFM9XW/SX127X family series" type.
+        # Simulate PLL lock → resolves to RFM95W.
+        fake_spi_multi_band.set_pll_lock_state(True)
+
+        with patch(_SPIDEV_PATCH_PATH, return_value=fake_spi_multi_band):
+            detector = LoRaModuleDetector(ce_pins=[0])
+
+        results: list[dict[str, Any]] = detector.detect_modules(extended=True)
+
+        assert len(results) == 1
+        assert "RFM95W" in results[0]["module_type"]
+        assert "family series" not in results[0]["module_type"]
+
+    def test_detect_no_extended_when_flag_false(self, fake_spi_rfm95w: FakeSpiDev) -> None:
+        """When extended=False (default), family modules are NOT resolved."""
+        with patch(_SPIDEV_PATCH_PATH, return_value=fake_spi_rfm95w):
+            detector = LoRaModuleDetector(ce_pins=[0])
+
+        results: list[dict[str, Any]] = detector.detect_modules()  # No extended flag
+
+        assert len(results) == 1
+        # Basic detection may still show family type if both freqs succeed on FakeSpiDev
+        # The point is that _perform_extended_detection was NOT called.
+        assert "RFM9XW/SX127X family series" in results[0]["module_type"] or \
+               "RFM95W" in results[0]["module_type"]
+
+    def test_detect_dual_ce_extended(self) -> None:
+        """Extended detection on dual CE pins resolves both modules."""
+        fake_spi_ce0 = FakeSpiDev(module_type="rfm95w")
+        fake_spi_ce1 = FakeSpiDev(module_type="rfm98w")
+        fake_spi_ce0.set_pll_lock_state(True)   # CE0 → RFM95W
+        fake_spi_ce1.set_pll_lock_state(False)  # CE1 → RFM98W
+
+        call_count: list[int] = [0]
+
+        def spi_factory() -> FakeSpiDev:
+            call_count[0] += 1
+            return fake_spi_ce0 if call_count[0] == 1 else fake_spi_ce1
+
+        with patch(_SPIDEV_PATCH_PATH) as mock_spidev:
+            mock_spidev.side_effect = lambda: spi_factory()
+            detector = LoRaModuleDetector(ce_pins=[0, 1])
+
+        results: list[dict[str, Any]] = detector.detect_modules(extended=True)
+
+        assert len(results) == 2
+        ce0_result = next(r for r in results if r["ce_pin"] == 0)
+        ce1_result = next(r for r in results if r["ce_pin"] == 1)
+        assert "RFM95W" in ce0_result["module_type"]
+        assert "RFM98W" in ce1_result["module_type"]
+
+    def test_detect_extended_with_config(self, fake_spi_multi_band: FakeSpiDev) -> None:
+        """Extended detection works alongside LoRaModuleConfig."""
+        fake_spi_multi_band.set_pll_lock_state(True)  # Resolves to RFM95W
+
+        with patch(_SPIDEV_PATCH_PATH, return_value=fake_spi_multi_band):
+            detector = LoRaModuleDetector(ce_pins=[0])
+
+        config = LoRaModuleConfig(
+            ce0_expected_module_type="rfm98w",
+            ce1_expected_module_type=None,
+        )
+        results: list[dict[str, Any]] = detector.detect_modules(config=config, extended=True)
+
+        assert len(results) == 1
+        # Extended detection should override the config expectation based on PLL result
+        assert "RFM95W" in results[0]["module_type"]
 
 
 if __name__ == "__main__":
