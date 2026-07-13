@@ -593,12 +593,11 @@ class TestExtendedDetection:
         assert result is None
 
     def test_extended_detect_frequency_write_failure(self, rfm95w_factory: FakeSpiDev) -> None:
-        # Make frequency register writes fail during extended detection
-        module = LoRaModule(ce_pin=0, spi_factory=lambda: rfm95w_factory)
-        # Re-enable write failures for the three frequency register writes in _perform_extended_detection()
-        for _ in range(3):
-            rfm95w_factory.enable_failure_write()
-        result: Literal["rfm95w", "rfm98w"] | None = module._perform_extended_detection()
+        # Make frequency register writes fail during extended detection.
+        # Use patch.object to reliably cause write_register to return None,
+        # which causes write_and_verify_frequency_for_khz(915000) to fail verification.
+        with patch.object(module := LoRaModule(ce_pin=0, spi_factory=lambda: rfm95w_factory), 'write_register', return_value=None):
+            result: Literal["rfm95w", "rfm98w"] | None = module._perform_extended_detection()
         assert result is None  # Frequency write failed → detection returns None
 
     def test_extended_detect_returns_to_sleep(self, fake_spi_rfm95w_pll_locked: FakeSpiDev) -> None:
@@ -610,12 +609,11 @@ class TestExtendedDetection:
 
     def test_extended_detect_returns_to_sleep_on_failure(self, rfm95w_factory: FakeSpiDev) -> None:
         """Verify that the module is returned to SLEEP mode even when detection fails."""
-        # Create module first (consumes any pre-existing failure flags during init)
-        module = LoRaModule(ce_pin=0, spi_factory=lambda: rfm95w_factory)
-        # Re-enable read failures for _perform_extended_detection() operations
-        for _ in range(10):
-            rfm95w_factory.enable_failure_read()
-        result: Literal["rfm95w", "rfm98w"] | None = module._perform_extended_detection()
+        # Use patch.object to reliably cause read_register to return None during extended
+        # detection. This triggers the communication failure path which returns None, and
+        # ensures the finally block always runs (returning to sleep mode).
+        with patch.object(module := LoRaModule(ce_pin=0, spi_factory=lambda: rfm95w_factory), 'read_register', return_value=None):
+            result: Literal["rfm95w", "rfm98w"] | None = module._perform_extended_detection()
         assert result is None
 
     def test_extended_detect_pll_locks_on_second_attempt(self, fake_spi_rfm95w_pll_locked: FakeSpiDev) -> None:

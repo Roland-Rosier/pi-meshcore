@@ -180,6 +180,11 @@ class LoRaModule:
         response_mid = None
         response_lsb = None
         # 1. Put the chip into Sleep Mode to allow frequency register changes
+        # But this should be a pre-requisite of calling this funciton, so
+        # should always be done before calling the function.
+        # TODO: Stop setting the mode sleep here, because it loses any other
+        # settings in RegOpMode, such as LowFrequencyModeOn, Modulation Type,
+        # LongRangeMode
         response_mode = self.write_register(REG_OP_MODE, MODE_SLEEP)
         if response_mode is not None:
             response_msb = self.write_register(0x06, a_msb)
@@ -215,6 +220,9 @@ class LoRaModule:
 
     def _check_frequency_support(self) -> None:
         """Check if the module supports high and low frequency settings."""
+        # Put module into sleep mode
+        self.set_module_mode(LoRaModuleMode.SLEEP)
+
         # Verify High Frequency (1015- MHz) to see if it supports high frequencies (which *may* indicate RFM95W)
         verify_success = False
         (verify_success, _, _, _, _, _, _) = self.write_and_verify_frequency_for_khz(HIGH_FREQ_KHZ)
@@ -299,6 +307,10 @@ class LoRaModule:
         :param frequency_khz: Frequency in kHz to test
         :return: True if the value was successfully written and retained, False otherwise
         """
+        # TODO: Figure out why putting the module to sleep here causes several tests to fail.
+        # Put module into sleep mode
+        # self.set_module_mode(LoRaModuleMode.SLEEP)
+
         # Use the existing verification function to write and verify the frequency
         (verify_success, req_msb, req_mid, req_lsb, _, _, _) = self.write_and_verify_frequency_for_khz(frequency_khz)
         # print(f"Tested ({verify_success}) unique value initial retention for frequency of {frequency_khz} kHz with register values (0x{req_msb:02X} 0x{req_mid:02X} 0x{req_lsb:02X})")
@@ -391,6 +403,13 @@ class LoRaModule:
             return None  # Communication or logic error during detection
         finally:
             # 1f — Always return to sleep mode, even on failure
-            suppress(Exception)(self.set_module_mode(LoRaModuleMode.SLEEP))
+            with suppress(Exception):
+                self.set_module_mode(LoRaModuleMode.SLEEP)
+
+
+
+
+
+
 
 
