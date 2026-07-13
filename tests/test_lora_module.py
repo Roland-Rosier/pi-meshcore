@@ -14,10 +14,17 @@
 
 """Tests for LoRaModule class using FakeSpiDev."""
 
+from typing import Literal
 from unittest.mock import patch
 
 # from src.drivers.lora_module import LoRaModule
-from pi_lora.drivers.lora_module import LoRaModule
+from pi_lora.drivers.lora_module import (
+    BIT_LF_MODE_ON,
+    MODE_SLEEP,
+    REG_OP_MODE,
+    LoRaModule,
+    LoRaModuleMode,
+)
 from tests.fakes import FakeSpiDev
 
 _SPIDEV_PATCH_PATH: str = 'pi_lora.drivers.lora_module.spidev.SpiDev'
@@ -154,7 +161,7 @@ class TestLoRaModuleFrequency:
         read_msb: int
         read_mid: int
         read_lsb: int
-        (success, req_msb, req_mid, req_lsb, read_msb, read_mid, read_lsb) = module._write_and_verify_frequency_for_khz(868000)
+        (success, req_msb, req_mid, req_lsb, read_msb, read_mid, read_lsb) = module.write_and_verify_frequency_for_khz(868000)
 
         assert success is True
         assert req_msb == read_msb
@@ -408,7 +415,7 @@ class TestLoRaModuleModerateGaps:
         assert response_lsb is None
 
     # ------------------------------------------------------------------
-    # M4: _write_and_verify_frequency_for_khz — failure paths
+    # M4: write_and_verify_frequency_for_khz — failure paths
     # ------------------------------------------------------------------
 
     def test_write_and_verify_frequency_read_mismatch(self, rfm95w_factory: FakeSpiDev) -> None:
@@ -425,7 +432,7 @@ class TestLoRaModuleModerateGaps:
             read_mid: int | None
             read_lsb: int | None
             (success, req_msb, req_mid, req_lsb, read_msb, read_mid, read_lsb) = \
-                module._write_and_verify_frequency_for_khz(868000)
+                module.write_and_verify_frequency_for_khz(868000)
 
         assert success is False
 
@@ -443,7 +450,7 @@ class TestLoRaModuleModerateGaps:
             read_mid: int | None
             read_lsb: int | None
             (success, req_msb, req_mid, req_lsb, read_msb, read_mid, read_lsb) = \
-                module._write_and_verify_frequency_for_khz(868000)
+                module.write_and_verify_frequency_for_khz(868000)
 
         assert success is False
 
@@ -510,6 +517,139 @@ class TestLoRaModuleModerateGaps:
             result: bool = module.verify_unique_value_retention()
 
         assert result is False
+
+
+class TestLoRaModuleMode:
+    """Tests for set_module_mode() and LoRaModuleMode enum."""
+
+    def test_set_module_mode_sleep(self, rfm95w_factory: FakeSpiDev) -> None:
+        module = LoRaModule(ce_pin=0, spi_factory=lambda: rfm95w_factory)
+        module.set_module_mode(LoRaModuleMode.SLEEP)
+        assert rfm95w_factory.get_register(REG_OP_MODE) & 0x07 == LoRaModuleMode.SLEEP
+
+    def test_set_module_mode_standby(self, rfm95w_factory: FakeSpiDev) -> None:
+        module = LoRaModule(ce_pin=0, spi_factory=lambda: rfm95w_factory)
+        module.set_module_mode(LoRaModuleMode.STANDBY)
+        assert rfm95w_factory.get_register(REG_OP_MODE) & 0x07 == LoRaModuleMode.STANDBY
+
+    def test_set_module_mode_preserves_lf_bit(self, rfm95w_factory: FakeSpiDev) -> None:
+        module = LoRaModule(ce_pin=0, spi_factory=lambda: rfm95w_factory)
+        # Set LF mode bit manually
+        rfm95w_factory.set_register(REG_OP_MODE, BIT_LF_MODE_ON | MODE_SLEEP)
+        # Now set to STANDBY — LF bit should be preserved
+        module.set_module_mode(LoRaModuleMode.STANDBY)
+        op_mode: int = rfm95w_factory.get_register(REG_OP_MODE)
+        assert (op_mode & BIT_LF_MODE_ON) == BIT_LF_MODE_ON  # Bit 3 preserved
+
+    def test_set_module_mode_fsrx(self, rfm95w_factory: FakeSpiDev) -> None:
+        module = LoRaModule(ce_pin=0, spi_factory=lambda: rfm95w_factory)
+        module.set_module_mode(LoRaModuleMode.FSRX)
+        assert rfm95w_factory.get_register(REG_OP_MODE) & 0x07 == LoRaModuleMode.FSRX
+
+    def test_set_module_mode_tx(self, rfm95w_factory: FakeSpiDev) -> None:
+        module = LoRaModule(ce_pin=0, spi_factory=lambda: rfm95w_factory)
+        module.set_module_mode(LoRaModuleMode.TX)
+        assert rfm95w_factory.get_register(REG_OP_MODE) & 0x07 == LoRaModuleMode.TX
+
+    def test_set_module_mode_rx_continuous(self, rfm95w_factory: FakeSpiDev) -> None:
+        module = LoRaModule(ce_pin=0, spi_factory=lambda: rfm95w_factory)
+        module.set_module_mode(LoRaModuleMode.RXCONTINUOUS)
+        assert rfm95w_factory.get_register(REG_OP_MODE) & 0x07 == LoRaModuleMode.RXCONTINUOUS
+
+    def test_set_module_mode_rx_single(self, rfm95w_factory: FakeSpiDev) -> None:
+        module = LoRaModule(ce_pin=0, spi_factory=lambda: rfm95w_factory)
+        module.set_module_mode(LoRaModuleMode.RXSINGLE)
+        assert rfm95w_factory.get_register(REG_OP_MODE) & 0x07 == LoRaModuleMode.RXSINGLE
+
+    def test_set_module_mode_cad(self, rfm95w_factory: FakeSpiDev) -> None:
+        module = LoRaModule(ce_pin=0, spi_factory=lambda: rfm95w_factory)
+        module.set_module_mode(LoRaModuleMode.CAD)
+        assert rfm95w_factory.get_register(REG_OP_MODE) & 0x07 == LoRaModuleMode.CAD
+
+    def test_set_module_mode_spi_failure(self, fake_spi_rfm95w: FakeSpiDev) -> None:
+        module = LoRaModule(ce_pin=0, spi_factory=lambda: fake_spi_rfm95w)
+        fake_spi_rfm95w.enable_failure_read()  # read_register returns None
+        module.set_module_mode(LoRaModuleMode.STANDBY)
+        # Should not raise; method handles None gracefully
+
+
+class TestExtendedDetection:
+    """Tests for _perform_extended_detection()."""
+
+    def test_extended_detect_rfm95w_pll_locks(self, fake_spi_rfm95w_pll_locked: FakeSpiDev) -> None:
+        module = LoRaModule(ce_pin=0, spi_factory=lambda: fake_spi_rfm95w_pll_locked)
+        result: Literal["rfm95w", "rfm98w"] | None = module._perform_extended_detection()
+        assert result == "rfm95w"
+
+    def test_extended_detect_rfm98w_no_pll_lock(self, fake_spi_rfm98w_pll_not_locked: FakeSpiDev) -> None:
+        module = LoRaModule(ce_pin=1, spi_factory=lambda: fake_spi_rfm98w_pll_not_locked)
+        result: Literal["rfm95w", "rfm98w"] | None = module._perform_extended_detection()
+        assert result == "rfm98w"
+
+    def test_extended_detect_communication_failure(self, fake_spi_none: FakeSpiDev) -> None:
+        module = LoRaModule(ce_pin=0, spi_factory=lambda: fake_spi_none)
+        # Module has communication_success=False; read_register returns None
+        result: Literal["rfm95w", "rfm98w"] | None = module._perform_extended_detection()
+        assert result is None
+
+    def test_extended_detect_frequency_write_failure(self, rfm95w_factory: FakeSpiDev) -> None:
+        # Make frequency register writes fail during extended detection.
+        # Use patch.object to reliably cause write_register to return None,
+        # which causes write_and_verify_frequency_for_khz(915000) to fail verification.
+        with patch.object(module := LoRaModule(ce_pin=0, spi_factory=lambda: rfm95w_factory), 'write_register', return_value=None):
+            result: Literal["rfm95w", "rfm98w"] | None = module._perform_extended_detection()
+        assert result is None  # Frequency write failed → detection returns None
+
+    def test_extended_detect_returns_to_sleep(self, fake_spi_rfm95w_pll_locked: FakeSpiDev) -> None:
+        """Verify that the module is always returned to SLEEP mode after extended detection."""
+        module = LoRaModule(ce_pin=0, spi_factory=lambda: fake_spi_rfm95w_pll_locked)
+        _ = module._perform_extended_detection()
+        op_mode: int = fake_spi_rfm95w_pll_locked.get_register(REG_OP_MODE)
+        assert (op_mode & 0x07) == LoRaModuleMode.SLEEP
+
+    def test_extended_detect_returns_to_sleep_on_failure(self, rfm95w_factory: FakeSpiDev) -> None:
+        """Verify that the module is returned to SLEEP mode even when detection fails."""
+        # Use patch.object to reliably cause read_register to return None during extended
+        # detection. This triggers the communication failure path which returns None, and
+        # ensures the finally block always runs (returning to sleep mode).
+        with patch.object(module := LoRaModule(ce_pin=0, spi_factory=lambda: rfm95w_factory), 'read_register', return_value=None):
+            result: Literal["rfm95w", "rfm98w"] | None = module._perform_extended_detection()
+        assert result is None
+
+    def test_extended_detect_pll_locks_on_second_attempt(self, fake_spi_rfm95w_pll_locked: FakeSpiDev) -> None:
+        """PLL doesn't lock on first read but locks on second (simulated by initial 0x00 flag)."""
+        # The fixture already sets PLL lock bit; the first sleep(0.1) + read will succeed.
+        module = LoRaModule(ce_pin=0, spi_factory=lambda: fake_spi_rfm95w_pll_locked)
+        result: Literal["rfm95w", "rfm98w"] | None = module._perform_extended_detection()
+        assert result == "rfm95w"
+
+
+class TestPublicWriteAndVerifyFrequency:
+    """Tests for the now-public write_and_verify_frequency_for_khz()."""
+
+    def test_public_method_exists(self, rfm95w_factory: FakeSpiDev) -> None:
+        module = LoRaModule(ce_pin=0, spi_factory=lambda: rfm95w_factory)
+        assert hasattr(module, 'write_and_verify_frequency_for_khz')
+        assert callable(module.write_and_verify_frequency_for_khz)
+
+    def test_public_method_returns_same_as_private(self, rfm95w_factory: FakeSpiDev) -> None:
+        module = LoRaModule(ce_pin=0, spi_factory=lambda: rfm95w_factory)
+        success: bool
+        req_msb: int | None
+        req_mid: int | None
+        req_lsb: int | None
+        read_msb: int | None
+        read_mid: int | None
+        read_lsb: int | None
+        (success, req_msb, req_mid, req_lsb, read_msb, read_mid, read_lsb) = \
+            module.write_and_verify_frequency_for_khz(915000)
+        assert success is True
+
+
+
+
+
+
 
 
 

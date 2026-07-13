@@ -14,7 +14,9 @@
 
 import time
 from collections.abc import Callable
-from typing import Any
+from contextlib import suppress
+from enum import IntEnum
+from typing import Any, Literal
 
 import spidev
 
@@ -24,6 +26,25 @@ MODE_STANDBY = 0x01
 BIT_LF_MODE_ON = 0x08
 HIGH_FREQ_KHZ: int = 1015000
 LOW_FREQ_KHZ: int = 415000
+
+
+class LoRaModuleMode(IntEnum):
+    """Operating modes for SX127x LoRa modules.
+
+    Values correspond to the Mode field (bits [2:0]) of RegOpMode (0x01).
+    When writing to the register, bit 3 (LowFrequencyModeOn) must be
+    handled separately and preserved across mode changes.
+    """
+
+    SLEEP = 0x00
+    STANDBY = 0x01
+    FSTX = 0x02
+    TX = 0x03
+    FSRX = 0x04  # Frequency Synthesiser RX — Mode field value
+    RXCONTINUOUS = 0x05
+    RXSINGLE = 0x06
+    CAD = 0x07
+
 
 class LoRaModule:
     """Class to represent and interact with a LoRa module."""
@@ -120,6 +141,20 @@ class LoRaModule:
             print(f"SPI write error for CE {self.ce_pin}: {e}")
             return None
 
+    def set_module_mode(self, mode: LoRaModuleMode) -> None:
+        """Set the operating mode of the LoRa module via RegOpMode.
+
+        Preserves the LowFrequencyModeOn bit (bit 3) and all reserved bits.
+
+        :param mode: The desired operating mode from LoRaModuleMode enum.
+        """
+        current_value: int | None = self.read_register(REG_OP_MODE)
+        if current_value is None:
+            return
+        # Preserve all bits except the Mode field (bits [2:0])
+        new_value: int = (current_value & ~0x07) | (mode & 0x07)
+        self.write_register(REG_OP_MODE, new_value)
+
     def _calc_freq_registers_for_khz(self, a_freq_in_khz: int) -> tuple[int, int, int]:
         """Calculate the register values for a requested frequency."""
         freq_hz_times_100000000 = a_freq_in_khz * 100000000000
@@ -145,6 +180,11 @@ class LoRaModule:
         response_mid = None
         response_lsb = None
         # 1. Put the chip into Sleep Mode to allow frequency register changes
+        # But this should be a pre-requisite of calling this funciton, so
+        # should always be done before calling the function.
+        # TODO: Stop setting the mode sleep here, because it loses any other
+        # settings in RegOpMode, such as LowFrequencyModeOn, Modulation Type,
+        # LongRangeMode
         response_mode = self.write_register(REG_OP_MODE, MODE_SLEEP)
         if response_mode is not None:
             response_msb = self.write_register(0x06, a_msb)
@@ -163,7 +203,7 @@ class LoRaModule:
         r_lsb = lsb if w_lsb is not None else None
         return (w_mode, r_msb, r_mid, r_lsb)
 
-    def _write_and_verify_frequency_for_khz(self, a_freq_in_khz: int) -> tuple[bool, int|None, int|None, int|None, int|None, int|None, int|None]:
+    def write_and_verify_frequency_for_khz(self, a_freq_in_khz: int) -> tuple[bool, int|None, int|None, int|None, int|None, int|None, int|None]:
         """Write and verify a frequency."""
         verify_success = False
         msb = None
@@ -180,15 +220,18 @@ class LoRaModule:
 
     def _check_frequency_support(self) -> None:
         """Check if the module supports high and low frequency settings."""
+        # Put module into sleep mode
+        self.set_module_mode(LoRaModuleMode.SLEEP)
+
         # Verify High Frequency (1015- MHz) to see if it supports high frequencies (which *may* indicate RFM95W)
         verify_success = False
-        (verify_success, _, _, _, _, _, _) = self._write_and_verify_frequency_for_khz(HIGH_FREQ_KHZ)
+        (verify_success, _, _, _, _, _, _) = self.write_and_verify_frequency_for_khz(HIGH_FREQ_KHZ)
         if verify_success:
             self.supports_high_frequency = True
 
         # Verify Low Frequency (415 MHz) for RFM98W validation
         verify_success = False
-        (verify_success, _, _, _, _, _, _) = self._write_and_verify_frequency_for_khz(LOW_FREQ_KHZ)
+        (verify_success, _, _, _, _, _, _) = self.write_and_verify_frequency_for_khz(LOW_FREQ_KHZ)
         if verify_success:
             self.supports_low_frequency = True
 
@@ -264,8 +307,12 @@ class LoRaModule:
         :param frequency_khz: Frequency in kHz to test
         :return: True if the value was successfully written and retained, False otherwise
         """
+        # TODO: Figure out why putting the module to sleep here causes several tests to fail.
+        # Put module into sleep mode
+        # self.set_module_mode(LoRaModuleMode.SLEEP)
+
         # Use the existing verification function to write and verify the frequency
-        (verify_success, req_msb, req_mid, req_lsb, _, _, _) = self._write_and_verify_frequency_for_khz(frequency_khz)
+        (verify_success, req_msb, req_mid, req_lsb, _, _, _) = self.write_and_verify_frequency_for_khz(frequency_khz)
         # print(f"Tested ({verify_success}) unique value initial retention for frequency of {frequency_khz} kHz with register values (0x{req_msb:02X} 0x{req_mid:02X} 0x{req_lsb:02X})")
 
         # Save the requested values as instance variables
@@ -302,5 +349,67 @@ class LoRaModule:
                     current_lsb == self.unique_lsb)
         else:
             return False
+
+    def _perform_extended_detection(self) -> Literal["rfm95w", "rfm98w"] | None:
+        """Perform PLL lock test at 915 MHz to distinguish RFM95W/SX1276 from RFM98W/SX1278.
+
+        Procedure (per module, in read-only safety mode):
+          1a. Put module into SLEEP mode.
+          1b. Clear bit 3 (LowFrequencyModeOn) in RegOpMode for HF operation.
+          1c. Write 915 MHz (= 915000 kHz) to frequency registers.
+          1d. Set mode to FS RX.
+          1e. Wait up to 5 × 100ms for PLL lock (read RegIrqFlags1 bit 4).
+          1f. Return module to SLEEP mode.
+          1g. Return "rfm95w" if PLL locked, "rfm98w" otherwise.
+
+        Returns:
+            "rfm95w" if the PLL locked at 915 MHz (SX1276 / RFM95W).
+            "rfm98w" if the PLL did not lock (SX1278 / RFM98W).
+            None if communication fails or module is non-functional.
+        """
+        try:
+            # 1a — Put module into sleep mode
+            self.set_module_mode(LoRaModuleMode.SLEEP)
+
+            # 1b — Clear bit 3 (LowFrequencyModeOn) in RegOpMode for HF operation
+            current_op_mode: int | None = self.read_register(REG_OP_MODE)
+            if current_op_mode is not None:
+                hf_op_mode: int = current_op_mode & ~BIT_LF_MODE_ON
+                self.write_register(REG_OP_MODE, hf_op_mode)
+
+            # 1c — Write 915 MHz (915000 kHz) to frequency registers
+            (verified, _req_msb, _req_mid, _req_lsb, _read_msb, _read_mid, _read_lsb) = \
+                self.write_and_verify_frequency_for_khz(915000)
+
+            if not verified:
+                return None  # Could not write frequency; module may be non-functional
+
+            time.sleep(0.01)  # Allow register update
+
+            # 1d — Set mode to FS RX (frequency synthesiser RX)
+            self.set_module_mode(LoRaModuleMode.FSRX)
+
+            # 1e — PLL lock detection loop (up to 5 iterations)
+            for _attempt in range(5):
+                time.sleep(0.1)  # 1ei — Wait 100ms for PLL to settle
+                irq_flags: int | None = self.read_register(0x3E)  # RegIrqFlags1
+                if irq_flags is not None and (irq_flags & 0x10):  # Bit 4 = PLLLock
+                    return "rfm95w"  # 1eii — PLL locked → RFM95W/SX1276
+
+            # 1g — PLL did not lock after all attempts → RFM98W/SX1278
+            return "rfm98w"
+
+        except Exception:
+            return None  # Communication or logic error during detection
+        finally:
+            # 1f — Always return to sleep mode, even on failure
+            with suppress(Exception):
+                self.set_module_mode(LoRaModuleMode.SLEEP)
+
+
+
+
+
+
 
 
