@@ -141,6 +141,19 @@ class LoRaModule:
             print(f"SPI write error for CE {self.ce_pin}: {e}")
             return None
 
+    def _write_op_mode(self, mode: LoRaModuleMode) -> None:
+        """Write only the Mode field (bits [2:0]) of RegOpMode.
+
+        Preserves all other bits in the register via read-modify-write semantics.
+
+        :param mode: The desired operating mode from LoRaModuleMode enum.
+        """
+        current_value: int | None = self.read_register(REG_OP_MODE)
+        if current_value is None:
+            return
+        new_value: int = (current_value & ~0x07) | (mode & 0x07)
+        self.write_register(REG_OP_MODE, new_value)
+
     def set_module_mode(self, mode: LoRaModuleMode) -> None:
         """Set the operating mode of the LoRa module via RegOpMode.
 
@@ -148,12 +161,7 @@ class LoRaModule:
 
         :param mode: The desired operating mode from LoRaModuleMode enum.
         """
-        current_value: int | None = self.read_register(REG_OP_MODE)
-        if current_value is None:
-            return
-        # Preserve all bits except the Mode field (bits [2:0])
-        new_value: int = (current_value & ~0x07) | (mode & 0x07)
-        self.write_register(REG_OP_MODE, new_value)
+        self._write_op_mode(mode)
 
     def _calc_freq_registers_for_khz(self, a_freq_in_khz: int) -> tuple[int, int, int]:
         """Calculate the register values for a requested frequency."""
