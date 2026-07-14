@@ -164,8 +164,18 @@ class LoRaModule:
         self._write_op_mode(mode)
 
     def _calc_freq_registers_for_khz(self, a_freq_in_khz: int) -> tuple[int, int, int]:
-        """Calculate the register values for a requested frequency."""
+        """Calculate the register values for a requested frequency.
+        
+        Assuming that this module is in the RFM9X family:
+        1. The Crystal oscillator frequency (FXOSC) is 32MHz
+        2. The Frequency synthesiser step (FSTEP) is FXOSC/(2^19) = 61.0 Hz (61.03515625 Hz)
+        3. It takes 250 us for the XTAL Osc to wake up
+        4. It takes 60 us between freq. synthesiser wake up from standby to PllLock.
+        """
+        # This gives frequency in micro-Hz * 100.
         freq_hz_times_100000000 = a_freq_in_khz * 100000000000
+        # 6103515625 is step frequency in micro-Hz * 100
+        # freq_register_value is the multiple of the FSTEP frequency
         freq_register_value = int(freq_hz_times_100000000 / 6103515625)
         lsb = int(freq_register_value & 0xFF)
         mid = int((freq_register_value & 0xFF00) >> 8)
@@ -247,10 +257,11 @@ class LoRaModule:
         """Test if LF mode can be set and unset."""
         # The LF Mode Bit might not be retained when switching between Sleep and Standby modes
         # Set LF mode
-        self.write_register(REG_OP_MODE, MODE_SLEEP | BIT_LF_MODE_ON)
+        # TODO: This no longer sets nor clears the LF Mode bit, since switching to using _write_op_mode
+        self._write_op_mode(LoRaModuleMode.SLEEP)
         time.sleep(0.01)
         # Change to STANDBY mode to activate internal logic
-        self.write_register(REG_OP_MODE, MODE_STANDBY | BIT_LF_MODE_ON)
+        self._write_op_mode(LoRaModuleMode.STANDBY)
         time.sleep(0.01)
         # Re-read the register after mode change
         mod_check = self.read_register(REG_OP_MODE)
@@ -258,10 +269,10 @@ class LoRaModule:
             self.lf_mode_success = ((mod_check & BIT_LF_MODE_ON) == BIT_LF_MODE_ON)
 
         # Unset LF mode
-        self.write_register(REG_OP_MODE, MODE_SLEEP)
+        self._write_op_mode(LoRaModuleMode.SLEEP)
         time.sleep(0.01)
         # Change to STANDBY mode again to activate internal logic
-        self.write_register(REG_OP_MODE, MODE_STANDBY)
+        self._write_op_mode(LoRaModuleMode.STANDBY)
         time.sleep(0.01)
         # Re-read the register after mode change
         mod_check = self.read_register(REG_OP_MODE)
@@ -269,7 +280,7 @@ class LoRaModule:
             self.lf_mode_not_success = ((mod_check & BIT_LF_MODE_ON) != BIT_LF_MODE_ON)
 
         # Put the device back into sleep mode with LF_MODE_ON
-        self.write_register(REG_OP_MODE, MODE_SLEEP | BIT_LF_MODE_ON)
+        self._write_op_mode(LoRaModuleMode.SLEEP)
         time.sleep(0.01)
 
     def _determine_module_type(self) -> None:
@@ -413,6 +424,8 @@ class LoRaModule:
             # 1f — Always return to sleep mode, even on failure
             with suppress(Exception):
                 self.set_module_mode(LoRaModuleMode.SLEEP)
+
+
 
 
 
