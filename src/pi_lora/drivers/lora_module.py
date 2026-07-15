@@ -42,8 +42,8 @@ class LoRaModuleMode(IntEnum):
     TX = 0x03
     FSRX = 0x04  # Frequency Synthesiser RX — Mode field value
     RXCONTINUOUS = 0x05
-    RXSINGLE = 0x06
-    CAD = 0x07
+    RXSINGLE = 0x06 # Available in LoRa mode only
+    CAD = 0x07 # Available in LoRa mode only
 
 
 class LoRaModule:
@@ -141,6 +141,19 @@ class LoRaModule:
             print(f"SPI write error for CE {self.ce_pin}: {e}")
             return None
 
+    def _write_op_mode(self, mode: LoRaModuleMode) -> None:
+        """Write only the Mode field (bits [2:0]) of RegOpMode.
+
+        Preserves all other bits in the register via read-modify-write semantics.
+
+        :param mode: The desired operating mode from LoRaModuleMode enum.
+        """
+        current_value: int | None = self.read_register(REG_OP_MODE)
+        if current_value is None:
+            return
+        new_value: int = (current_value & ~0x07) | (mode & 0x07)
+        self.write_register(REG_OP_MODE, new_value)
+
     def set_module_mode(self, mode: LoRaModuleMode) -> None:
         """Set the operating mode of the LoRa module via RegOpMode.
 
@@ -148,16 +161,47 @@ class LoRaModule:
 
         :param mode: The desired operating mode from LoRaModuleMode enum.
         """
+        self._write_op_mode(mode)
+
+    def _set_lf_mode_bit(self) -> None:
+        """Set only the LowFrequencyModeOn bit (bit 3) of RegOpMode.
+
+        Preserves all other bits including Mode [2:0] via read-modify-write semantics.
+        Used before high-frequency operations to ensure LF mode is disabled.
+
+        :return: None
+        """
         current_value: int | None = self.read_register(REG_OP_MODE)
-        if current_value is None:
-            return
-        # Preserve all bits except the Mode field (bits [2:0])
-        new_value: int = (current_value & ~0x07) | (mode & 0x07)
-        self.write_register(REG_OP_MODE, new_value)
+        if current_value is not None:
+            hf_value: int = current_value | BIT_LF_MODE_ON
+            self.write_register(REG_OP_MODE, hf_value)
+
+    def _clear_lf_mode_bit(self) -> None:
+        """Clear only the LowFrequencyModeOn bit (bit 3) of RegOpMode.
+
+        Preserves all other bits including Mode [2:0] via read-modify-write semantics.
+        Used before high-frequency operations to ensure LF mode is disabled.
+
+        :return: None
+        """
+        current_value: int | None = self.read_register(REG_OP_MODE)
+        if current_value is not None:
+            hf_value: int = current_value & ~BIT_LF_MODE_ON
+            self.write_register(REG_OP_MODE, hf_value)
 
     def _calc_freq_registers_for_khz(self, a_freq_in_khz: int) -> tuple[int, int, int]:
-        """Calculate the register values for a requested frequency."""
+        """Calculate the register values for a requested frequency.
+
+        Assuming that this module is in the RFM9X family:
+        1. The Crystal oscillator frequency (FXOSC) is 32MHz
+        2. The Frequency synthesiser step (FSTEP) is FXOSC/(2^19) = 61.0 Hz (61.03515625 Hz)
+        3. It takes 250 us for the XTAL Osc to wake up
+        4. It takes 60 us between freq. synthesiser wake up from standby to PllLock.
+        """
+        # This gives frequency in micro-Hz * 100.
         freq_hz_times_100000000 = a_freq_in_khz * 100000000000
+        # 6103515625 is step frequency in micro-Hz * 100
+        # freq_register_value is the multiple of the FSTEP frequency
         freq_register_value = int(freq_hz_times_100000000 / 6103515625)
         lsb = int(freq_register_value & 0xFF)
         mid = int((freq_register_value & 0xFF00) >> 8)
@@ -173,35 +217,42 @@ class LoRaModule:
         time.sleep(0.01)
         return (msb, mid, lsb)
 
-    def _write_frequency_registers(self, a_msb: int, a_mid: int, a_lsb: int) -> tuple[int|None, int|None, int|None, int|None]:
-        """Write the frequency registers."""
-        response_mode = None
-        response_msb = None
-        response_mid = None
-        response_lsb = None
-        # 1. Put the chip into Sleep Mode to allow frequency register changes
-        # But this should be a pre-requisite of calling this funciton, so
-        # should always be done before calling the function.
-        # TODO: Stop setting the mode sleep here, because it loses any other
-        # settings in RegOpMode, such as LowFrequencyModeOn, Modulation Type,
-        # LongRangeMode
-        response_mode = self.write_register(REG_OP_MODE, MODE_SLEEP)
-        if response_mode is not None:
-            response_msb = self.write_register(0x06, a_msb)
+    # def _write_frequency_registers(self, a_msb: int, a_mid: int, a_lsb: int) -> tuple[int|None, int|None, int|None, int|None]:
+    def _write_frequency_registers(self, a_msb: int, a_mid: int, a_lsb: int) -> tuple[int|None, int|None, int|None]:
+        """Write the frequency registers.
+
+        The module must already be in SLEEP or STANDBY mode before calling this method.
+        """
+        # response_mode: int | None = None
+        response_msb: int | None = None
+        response_mid: int | None = None
+        response_lsb: int | None = None
+        # Module should already be in sleep mode — no need to set it here.
+        response_msb = self.write_register(0x06, a_msb)
         if response_msb is not None:
             response_mid = self.write_register(0x07, a_mid)
         if response_mid is not None:
+            # Note: the manual states tha a change in the center frequency will
+            # only be taken into account when the least significant byte FrfLsb
+            # in RegFrfLsb is written.
             response_lsb = self.write_register(0x08, a_lsb)
-        return (response_mode, response_msb, response_mid, response_lsb)
+        # return (response_mode, response_msb, response_mid, response_lsb)
+        return (response_msb, response_mid, response_lsb)
 
-    def _write_frequency_for_khz(self, a_freq_in_khz: int) -> tuple[int|None, int|None, int|None, int|None]:
-        """Write a target frequency to the module."""
+    # def _write_frequency_for_khz(self, a_freq_in_khz: int) -> tuple[int|None, int|None, int|None, int|None]:
+    def _write_frequency_for_khz(self, a_freq_in_khz: int) -> tuple[int|None, int|None, int|None]:
+        """Write a target frequency to the module.
+
+        The module must already be in SLEEP or STANDBY mode before calling this method.
+        """
         (msb, mid, lsb) = self._calc_freq_registers_for_khz(a_freq_in_khz)
-        (w_mode, w_msb, w_mid, w_lsb) = self._write_frequency_registers(msb, mid, lsb)
+        # (w_mode, w_msb, w_mid, w_lsb) = self._write_frequency_registers(msb, mid, lsb)
+        (w_msb, w_mid, w_lsb) = self._write_frequency_registers(msb, mid, lsb)
         r_msb = msb if w_msb is not None else None
         r_mid = mid if w_mid is not None else None
         r_lsb = lsb if w_lsb is not None else None
-        return (w_mode, r_msb, r_mid, r_lsb)
+        # return (w_mode, r_msb, r_mid, r_lsb)
+        return (r_msb, r_mid, r_lsb)
 
     def write_and_verify_frequency_for_khz(self, a_freq_in_khz: int) -> tuple[bool, int|None, int|None, int|None, int|None, int|None, int|None]:
         """Write and verify a frequency."""
@@ -209,9 +260,11 @@ class LoRaModule:
         msb = None
         mid = None
         lsb = None
-        (new_mode, req_msb, req_mid, req_lsb) = self._write_frequency_for_khz(a_freq_in_khz)
+        # (new_mode, req_msb, req_mid, req_lsb) = self._write_frequency_for_khz(a_freq_in_khz)
+        (req_msb, req_mid, req_lsb) = self._write_frequency_for_khz(a_freq_in_khz)
         time.sleep(0.01)  # Allow time for register update
-        if all(ele is not None for ele in (new_mode, req_msb, req_mid, req_lsb)):
+        # if all(ele is not None for ele in (new_mode, req_msb, req_mid, req_lsb)):
+        if all(ele is not None for ele in (req_msb, req_mid, req_lsb)):
             (msb, mid, lsb) = self._read_frequency_registers()
             time.sleep(0.01)  # Allow time for register stabilization
             if all(ele is not None for ele in (msb, mid, lsb)) and msb == req_msb and mid == req_mid and lsb == req_lsb:
@@ -222,12 +275,21 @@ class LoRaModule:
         """Check if the module supports high and low frequency settings."""
         # Put module into sleep mode
         self.set_module_mode(LoRaModuleMode.SLEEP)
+        time.sleep(0.01)
+
+        # Clear the LF mode bit (for high frequency)
+        self._clear_lf_mode_bit()
+        time.sleep(0.01)
 
         # Verify High Frequency (1015- MHz) to see if it supports high frequencies (which *may* indicate RFM95W)
         verify_success = False
         (verify_success, _, _, _, _, _, _) = self.write_and_verify_frequency_for_khz(HIGH_FREQ_KHZ)
         if verify_success:
             self.supports_high_frequency = True
+
+        # Set the LF mode bit (for low frequency)
+        self._set_lf_mode_bit()
+        time.sleep(0.01)
 
         # Verify Low Frequency (415 MHz) for RFM98W validation
         verify_success = False
@@ -238,11 +300,13 @@ class LoRaModule:
     def _test_lf_mode_retention(self) -> None:
         """Test if LF mode can be set and unset."""
         # The LF Mode Bit might not be retained when switching between Sleep and Standby modes
-        # Set LF mode
-        self.write_register(REG_OP_MODE, MODE_SLEEP | BIT_LF_MODE_ON)
+        # Set LF mode - but this might be the default, so check that it can be re-set again later
+        self._write_op_mode(LoRaModuleMode.SLEEP)
+        time.sleep(0.01)
+        self._set_lf_mode_bit()
         time.sleep(0.01)
         # Change to STANDBY mode to activate internal logic
-        self.write_register(REG_OP_MODE, MODE_STANDBY | BIT_LF_MODE_ON)
+        self._write_op_mode(LoRaModuleMode.STANDBY)
         time.sleep(0.01)
         # Re-read the register after mode change
         mod_check = self.read_register(REG_OP_MODE)
@@ -250,10 +314,12 @@ class LoRaModule:
             self.lf_mode_success = ((mod_check & BIT_LF_MODE_ON) == BIT_LF_MODE_ON)
 
         # Unset LF mode
-        self.write_register(REG_OP_MODE, MODE_SLEEP)
+        self._write_op_mode(LoRaModuleMode.SLEEP)
+        time.sleep(0.01)
+        self._clear_lf_mode_bit()
         time.sleep(0.01)
         # Change to STANDBY mode again to activate internal logic
-        self.write_register(REG_OP_MODE, MODE_STANDBY)
+        self._write_op_mode(LoRaModuleMode.STANDBY)
         time.sleep(0.01)
         # Re-read the register after mode change
         mod_check = self.read_register(REG_OP_MODE)
@@ -261,8 +327,22 @@ class LoRaModule:
             self.lf_mode_not_success = ((mod_check & BIT_LF_MODE_ON) != BIT_LF_MODE_ON)
 
         # Put the device back into sleep mode with LF_MODE_ON
-        self.write_register(REG_OP_MODE, MODE_SLEEP | BIT_LF_MODE_ON)
+        self._write_op_mode(LoRaModuleMode.SLEEP)
         time.sleep(0.01)
+        self._set_lf_mode_bit()
+        time.sleep(0.01)
+        # Change to STANDBY mode to activate internal logic
+        self._write_op_mode(LoRaModuleMode.STANDBY)
+        time.sleep(0.01)
+        # Re-read the register after mode change
+        mod_check = self.read_register(REG_OP_MODE)
+        if mod_check is not None and self.lf_mode_success:
+            self.lf_mode_success = ((mod_check & BIT_LF_MODE_ON) == BIT_LF_MODE_ON)
+        else:
+            self.lf_mode_success = False
+
+        # Put the device back into sleep mode with LF_MODE_ON
+        self._write_op_mode(LoRaModuleMode.SLEEP)
 
     def _determine_module_type(self) -> None:
         """Determine the module type based on silicon revision and LF mode.
@@ -307,10 +387,6 @@ class LoRaModule:
         :param frequency_khz: Frequency in kHz to test
         :return: True if the value was successfully written and retained, False otherwise
         """
-        # TODO: Figure out why putting the module to sleep here causes several tests to fail.
-        # Put module into sleep mode
-        # self.set_module_mode(LoRaModuleMode.SLEEP)
-
         # Use the existing verification function to write and verify the frequency
         (verify_success, req_msb, req_mid, req_lsb, _, _, _) = self.write_and_verify_frequency_for_khz(frequency_khz)
         # print(f"Tested ({verify_success}) unique value initial retention for frequency of {frequency_khz} kHz with register values (0x{req_msb:02X} 0x{req_mid:02X} 0x{req_lsb:02X})")
@@ -372,10 +448,7 @@ class LoRaModule:
             self.set_module_mode(LoRaModuleMode.SLEEP)
 
             # 1b — Clear bit 3 (LowFrequencyModeOn) in RegOpMode for HF operation
-            current_op_mode: int | None = self.read_register(REG_OP_MODE)
-            if current_op_mode is not None:
-                hf_op_mode: int = current_op_mode & ~BIT_LF_MODE_ON
-                self.write_register(REG_OP_MODE, hf_op_mode)
+            self._clear_lf_mode_bit()
 
             # 1c — Write 915 MHz (915000 kHz) to frequency registers
             (verified, _req_msb, _req_mid, _req_lsb, _read_msb, _read_mid, _read_lsb) = \
@@ -405,6 +478,10 @@ class LoRaModule:
             # 1f — Always return to sleep mode, even on failure
             with suppress(Exception):
                 self.set_module_mode(LoRaModuleMode.SLEEP)
+
+
+
+
 
 
 
