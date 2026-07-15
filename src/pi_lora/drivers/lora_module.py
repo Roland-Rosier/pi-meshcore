@@ -205,20 +205,16 @@ class LoRaModule:
         return (msb, mid, lsb)
 
     def _write_frequency_registers(self, a_msb: int, a_mid: int, a_lsb: int) -> tuple[int|None, int|None, int|None, int|None]:
-        """Write the frequency registers."""
-        response_mode = None
-        response_msb = None
-        response_mid = None
-        response_lsb = None
-        # 1. Put the chip into Sleep Mode to allow frequency register changes
-        # But this should be a pre-requisite of calling this funciton, so
-        # should always be done before calling the function.
-        # TODO: Stop setting the mode sleep here, because it loses any other
-        # settings in RegOpMode, such as LowFrequencyModeOn, Modulation Type,
-        # LongRangeMode
-        response_mode = self.write_register(REG_OP_MODE, MODE_SLEEP)
-        if response_mode is not None:
-            response_msb = self.write_register(0x06, a_msb)
+        """Write the frequency registers.
+
+        The module must already be in SLEEP mode before calling this method.
+        """
+        response_mode: int | None = None
+        response_msb: int | None = None
+        response_mid: int | None = None
+        response_lsb: int | None
+        # Module should already be in sleep mode — no need to set it here.
+        response_msb = self.write_register(0x06, a_msb)
         if response_msb is not None:
             response_mid = self.write_register(0x07, a_mid)
         if response_mid is not None:
@@ -342,10 +338,6 @@ class LoRaModule:
         :param frequency_khz: Frequency in kHz to test
         :return: True if the value was successfully written and retained, False otherwise
         """
-        # TODO: Figure out why putting the module to sleep here causes several tests to fail.
-        # Put module into sleep mode
-        # self.set_module_mode(LoRaModuleMode.SLEEP)
-
         # Use the existing verification function to write and verify the frequency
         (verify_success, req_msb, req_mid, req_lsb, _, _, _) = self.write_and_verify_frequency_for_khz(frequency_khz)
         # print(f"Tested ({verify_success}) unique value initial retention for frequency of {frequency_khz} kHz with register values (0x{req_msb:02X} 0x{req_mid:02X} 0x{req_lsb:02X})")
