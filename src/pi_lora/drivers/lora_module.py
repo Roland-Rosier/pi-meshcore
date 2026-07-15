@@ -191,7 +191,7 @@ class LoRaModule:
 
     def _calc_freq_registers_for_khz(self, a_freq_in_khz: int) -> tuple[int, int, int]:
         """Calculate the register values for a requested frequency.
-        
+
         Assuming that this module is in the RFM9X family:
         1. The Crystal oscillator frequency (FXOSC) is 32MHz
         2. The Frequency synthesiser step (FSTEP) is FXOSC/(2^19) = 61.0 Hz (61.03515625 Hz)

@@ -135,17 +135,15 @@ class TestLoRaModuleFrequency:
     def test_write_frequency_for_khz(self, rfm95w_factory: FakeSpiDev) -> None:
         """Test writing frequency registers.
 
-        Note: _write_frequency_for_khz returns a 4-tuple (response_mode, req_msb, req_mid, req_lsb).
+        Note: _write_frequency_for_khz returns a 3-tuple (req_msb, req_mid, req_lsb).
         """
         module = LoRaModule(ce_pin=0, spi_factory=lambda: rfm95w_factory)
 
-        response_mode: int | None
         msb: int | None
         mid: int | None
         lsb: int | None
-        (response_mode, msb, mid, lsb) = module._write_frequency_for_khz(868000)
+        (msb, mid, lsb) = module._write_frequency_for_khz(868000)
 
-        assert isinstance(response_mode, int) or response_mode is None
         assert isinstance(msb, int) or msb is None
         assert isinstance(mid, int) or mid is None
         assert isinstance(lsb, int) or lsb is None
@@ -392,24 +390,28 @@ class TestLoRaModuleModerateGaps:
         # mid and lsb may or may not be None depending on whether subsequent reads succeed.
 
     # ------------------------------------------------------------------
-    # M3: _write_frequency_registers — cascading None (mode write fails)
+    # M3: _write_frequency_registers — cascading None (MSB write fails)
     # ------------------------------------------------------------------
 
     def test_write_frequency_registers_mode_failure(self, rfm95w_factory: FakeSpiDev) -> None:
-        """M3: Mode write returns None → all subsequent writes skipped via cascading-None."""
+        """M3: MSB frequency register write returns None → mid and lsb skipped via cascading-None.
+
+        After the MODE_SLEEP write was removed from _write_frequency_registers (per plan
+        2026_07_13), the first SPI write is now RegFrfMsb (0x06). Enabling write failure
+        causes this first register to return None, and the cascading-None checks in the
+        method prevent mid and lsb writes from executing.
+        """
         module = LoRaModule(ce_pin=0, spi_factory=lambda: rfm95w_factory)
 
-        # Enable failure on the very first write (REG_OP_MODE).
+        # Enable failure on the very first write (RegFrfMsb at 0x06).
         rfm95w_factory.enable_failure_write()
 
-        response_mode: int | None
         response_msb: int | None
         response_mid: int | None
         response_lsb: int | None
-        (response_mode, response_msb, response_mid, response_lsb) = module._write_frequency_registers(0x12, 0x34, 0x56)
+        (response_msb, response_mid, response_lsb) = module._write_frequency_registers(0x12, 0x34, 0x56)
 
-        # Mode write fails → all subsequent writes are skipped due to cascading None check.
-        assert response_mode is None
+        # MSB write fails → mid and lsb writes are skipped due to cascading None check.
         assert response_msb is None
         assert response_mid is None
         assert response_lsb is None
