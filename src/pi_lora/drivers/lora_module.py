@@ -163,6 +163,19 @@ class LoRaModule:
         """
         self._write_op_mode(mode)
 
+    def _clear_lf_mode_bit(self) -> None:
+        """Clear only the LowFrequencyModeOn bit (bit 3) of RegOpMode.
+
+        Preserves all other bits including Mode [2:0] via read-modify-write semantics.
+        Used before high-frequency operations to ensure LF mode is disabled.
+
+        :return: None
+        """
+        current_value: int | None = self.read_register(REG_OP_MODE)
+        if current_value is not None:
+            hf_value: int = current_value & ~BIT_LF_MODE_ON
+            self.write_register(REG_OP_MODE, hf_value)
+
     def _calc_freq_registers_for_khz(self, a_freq_in_khz: int) -> tuple[int, int, int]:
         """Calculate the register values for a requested frequency.
         
@@ -209,6 +222,9 @@ class LoRaModule:
         if response_msb is not None:
             response_mid = self.write_register(0x07, a_mid)
         if response_mid is not None:
+            # Note: the manual states tha a change in the center frequency will
+            # only be taken into account when the least significant byte FrfLsb
+            # in RegFrfLsb is written.
             response_lsb = self.write_register(0x08, a_lsb)
         return (response_mode, response_msb, response_mid, response_lsb)
 
@@ -391,10 +407,7 @@ class LoRaModule:
             self.set_module_mode(LoRaModuleMode.SLEEP)
 
             # 1b — Clear bit 3 (LowFrequencyModeOn) in RegOpMode for HF operation
-            current_op_mode: int | None = self.read_register(REG_OP_MODE)
-            if current_op_mode is not None:
-                hf_op_mode: int = current_op_mode & ~BIT_LF_MODE_ON
-                self.write_register(REG_OP_MODE, hf_op_mode)
+            self._clear_lf_mode_bit()
 
             # 1c — Write 915 MHz (915000 kHz) to frequency registers
             (verified, _req_msb, _req_mid, _req_lsb, _read_msb, _read_mid, _read_lsb) = \
