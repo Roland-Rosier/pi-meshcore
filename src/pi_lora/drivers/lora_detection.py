@@ -27,7 +27,7 @@ if project_root not in sys.path:
     sys.path.append(project_root)
     print(f"✅ Added project root to sys.path: {project_root}")
 
-from pi_lora.drivers.lora_module import LoRaModule
+from pi_lora.drivers.lora_module import LoRaModule, LoRaModuleTypes
 
 
 def _normalise_expected_type(raw_value: str | None) -> Literal["rfm95w", "rfm98w", "none"] | None:
@@ -102,6 +102,7 @@ class LoRaModuleDetector:
         ],
         "none": [
             "Unknown / Communication Error",
+            "Unknown"
         ],
     }
 
@@ -145,17 +146,27 @@ class LoRaModuleDetector:
         if extended:
             # Perform extended detection on family-type modules
             for module in self.modules:
-                if "RFM9XW/SX127X family series" in module.module_type or \
+                # if "RFM9XW/SX127X family series" in module.module_type or \
+                if LoRaModuleTypes.RFM9XW_SX127X_FAMILY.value in module.module_type or \
                    "Multi-band" in module.module_type:
                     extended_result: Literal["rfm95w", "rfm98w"] | None = \
                         module._perform_extended_detection()
-                    if extended_result == "rfm95w":
+                    # if extended_result == "rfm95w":
+                    if extended_result == LoRaModuleTypes.RFM95W_SX1276.value:
                         module.module_type = (
-                            "RFM95W (High-Band 868MHz / Semtech SX1276)"
+                            # "RFM95W (High-Band 868MHz / Semtech SX1276)"
+                            LoRaModuleTypes.RFM95W_SX1276.value
                         )
-                    elif extended_result == "rfm98w":
+                    # elif extended_result == "rfm98w":
+                    elif extended_result == LoRaModuleTypes.RFM98W_SX1278.value:
                         module.module_type = (
-                            "RFM98W (Low-Band 433Mhz / Semtech SX1278)"
+                            # "RFM98W (Low-Band 433Mhz / Semtech SX1278)"
+                            LoRaModuleTypes.RFM98W_SX1278.value
+                        )
+                    elif extended_result == LoRaModuleTypes.RFM9XW_SX127X_FAMILY.value:
+                        module.module_type = (
+                            # "RFM98W (Low-Band 433Mhz / Semtech SX1278)"
+                            LoRaModuleTypes.RFM9XW_SX127X_FAMILY.value
                         )
 
             # Rebuild results after extended detection updated module types

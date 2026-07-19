@@ -15,7 +15,7 @@
 import time
 from collections.abc import Callable
 from contextlib import suppress
-from enum import IntEnum
+from enum import Enum, IntEnum
 from typing import Any, Literal
 
 import spidev
@@ -45,6 +45,12 @@ class LoRaModuleMode(IntEnum):
     RXSINGLE = 0x06 # Available in LoRa mode only
     CAD = 0x07 # Available in LoRa mode only
 
+class LoRaModuleTypes(str, Enum):
+    UNKNOWN = "Unknown"
+    UNKNOWN_OR_COMM_ERROR = "Unknown / Communication Error"
+    RFM95W_SX1276 = "RFM95W (High-Band 868MHz / Semtech SX1276)"
+    RFM98W_SX1278 = "RFM98W (Low-Band 433Mhz / Semtech SX1278)"
+    RFM9XW_SX127X_FAMILY = "RFM9XW/SX127X family series"
 
 class LoRaModule:
     """Class to represent and interact with a LoRa module."""
@@ -71,7 +77,7 @@ class LoRaModule:
         self.unique_lsb: int | None = None
         self.lf_mode_success = False
         self.lf_mode_not_success = False
-        self.module_type = "Unknown"
+        self.module_type = LoRaModuleTypes.UNKNOWN.value
         self._initialize()
 
     def _initialize(self) -> None:
@@ -358,11 +364,14 @@ class LoRaModule:
         if self.supports_high_frequency and self.supports_low_frequency:
             potentially_multi_band_support = True
         elif self.supports_high_frequency:
-            self.module_type = "RFM95W (High-Band 868MHz / Semtech SX1276)"
+            # self.module_type = "RFM95W (High-Band 868MHz / Semtech SX1276)"
+            self.module_type = LoRaModuleTypes.RFM95W_SX1276.value
         elif self.supports_low_frequency:
-            self.module_type = "RFM98W (Low-Band 433Mhz / Semtech SX1278)"
+            # self.module_type = "RFM98W (Low-Band 433Mhz / Semtech SX1278)"
+            self.module_type = LoRaModuleTypes.RFM98W_SX1278.value
         else:
-            self.module_type = "Unknown / Communication Error"
+            # self.module_type = "Unknown / Communication Error"
+            self.module_type = LoRaModuleTypes.UNKNOWN_OR_COMM_ERROR.value
 
         if potentially_multi_band_support:
             if self.lf_mode_not_success and self.lf_mode_success:
@@ -372,13 +381,17 @@ class LoRaModule:
                 # transmission fails.
                 # Note also that being able to select 1010 MHz suggests that it is *not* an SX1279
                 # Note it could be an SX1277, which cannot do all the spreading factors, we might want to detect that
-                self.module_type = "RFM9XW/SX127X family series"
+                # self.module_type = "RFM9XW/SX127X family series"
+                self.module_type = LoRaModuleTypes.RFM9XW_SX127X_FAMILY.value
             elif self.lf_mode_not_success:
-                self.module_type = "RFM95W (High-Band 868MHz / Semtech SX1276)"
+                # self.module_type = "RFM95W (High-Band 868MHz / Semtech SX1276)"
+                self.module_type = LoRaModuleTypes.RFM95W_SX1276.value
             elif self.lf_mode_success:
-                self.module_type = "RFM98W (Low-Band 433Mhz / Semtech SX1278)"
+                # self.module_type = "RFM98W (Low-Band 433Mhz / Semtech SX1278)"
+                self.module_type = LoRaModuleTypes.RFM98W_SX1278.value
             else:
-                self.module_type = "Unknown / Communication Error"
+                # self.module_type = "Unknown / Communication Error"
+                self.module_type = LoRaModuleTypes.UNKNOWN_OR_COMM_ERROR.value
 
     def test_unique_value_retention(self, frequency_khz: int) -> bool:
         """
@@ -426,7 +439,8 @@ class LoRaModule:
         else:
             return False
 
-    def _perform_extended_detection(self) -> Literal["rfm95w", "rfm98w"] | None:
+    # def _perform_extended_detection(self) -> Literal["rfm95w", "rfm98w"] | None:
+    def _perform_extended_detection(self) -> Literal[LoRaModuleTypes.UNKNOWN.value, LoRaModuleTypes.RFM95W_SX1276.value, LoRaModuleTypes.RFM98W_SX1278.value, LoRaModuleTypes.RFM9XW_SX127X_FAMILY.value] | None:
         """Perform PLL lock test at 915 MHz to distinguish RFM95W/SX1276 from RFM98W/SX1278.
 
         Procedure (per module, in read-only safety mode):
@@ -436,11 +450,22 @@ class LoRaModule:
           1d. Set mode to FS RX.
           1e. Wait up to 5 × 100ms for PLL lock (read RegIrqFlags1 bit 4).
           1f. Return module to SLEEP mode.
-          1g. Return "rfm95w" if PLL locked, "rfm98w" otherwise.
+          1g. Record if PLL locked in HF mode or not
+          2a. Put module into SLEEP mode.
+          2b. Set bit 3 (LowFrequencyModeOn) in RegOpMode for LF operation
+          2c. Write 410 MHz (= 410000 kHz) to frequency registers
+          2d. Set mode to FS RX
+          2e Wait up to 5 × 100ms for PLL lock (read RegIrqFlag1 bit 4).
+          2f. Return module to SLEEP mode.
+          2g. Record if PLL locked in LF mode or not
+          3a. If neither locked, return "Unknown", if both locked return "RFM9XW/SX127X family series"
+          3b. If HF only locked, return "RFM95W", if LF only locked, return "RFM98W"
 
         Returns:
-            "rfm95w" if the PLL locked at 915 MHz (SX1276 / RFM95W).
-            "rfm98w" if the PLL did not lock (SX1278 / RFM98W).
+            "Unkonwn" if neither locked"
+            "RFM9XW/SX127X family series" if the PLL locked on both frequencies
+            "RFM95W" if the PLL locked at 915 MHz (SX1276 / RFM95W).
+            "RFM98W" if the PLL locked on 410 MHz (SX1278 / RFM98W).
             None if communication fails or module is non-functional.
         """
         try:
@@ -463,14 +488,55 @@ class LoRaModule:
             self.set_module_mode(LoRaModuleMode.FSRX)
 
             # 1e — PLL lock detection loop (up to 5 iterations)
+            hf_locked: bool = False
             for _attempt in range(5):
                 time.sleep(0.1)  # 1ei — Wait 100ms for PLL to settle
                 irq_flags: int | None = self.read_register(0x3E)  # RegIrqFlags1
                 if irq_flags is not None and (irq_flags & 0x10):  # Bit 4 = PLLLock
-                    return "rfm95w"  # 1eii — PLL locked → RFM95W/SX1276
+                    hf_locked = True
+                    # return "rfm95w"  # 1e — PLL locked → RFM95W/SX1276
 
             # 1g — PLL did not lock after all attempts → RFM98W/SX1278
-            return "rfm98w"
+            # return "rfm98w"
+
+            # 2a — Put module into sleep mode
+            self.set_module_mode(LoRaModuleMode.SLEEP)
+
+            # 2b — Set bit 3 (LowFrequencyModeOn) in RegOpMode for LF operation
+            self._set_lf_mode_bit()
+
+            # 2c — Write 410 MHz (410000 kHz) to frequency registers
+            (verified, _req_msb, _req_mid, _req_lsb, _read_msb, _read_mid, _read_lsb) = \
+                self.write_and_verify_frequency_for_khz(410000)
+
+            if not verified:
+                return None  # Could not write frequency; module may be non-functional
+
+            time.sleep(0.01)  # Allow register update
+
+            # 2d — Set mode to FS RX (frequency synthesiser RX)
+            self.set_module_mode(LoRaModuleMode.FSRX)
+
+            # 1e — PLL lock detection loop (up to 5 iterations)
+            lf_locked: bool = False
+            for _attempt in range(5):
+                time.sleep(0.1)  # 1ei — Wait 100ms for PLL to settle
+                irq_flags: int | None = self.read_register(0x3E)  # RegIrqFlags1
+                if irq_flags is not None and (irq_flags & 0x10):  # Bit 4 = PLLLock
+                    lf_locked = True
+                    # return "rfm98w"  # 1e — PLL locked → RFM98W/SX1278
+
+            if not (lf_locked or hf_locked):
+                return LoRaModuleTypes.UNKNOWN.value
+            elif lf_locked and hf_locked:
+                return LoRaModuleTypes.RFM9XW_SX127X_FAMILY.value
+            elif hf_locked:
+                return LoRaModuleTypes.RFM95W_SX1276.value
+
+            # 1g — PLL did not lock after all attempts → RFM98W/SX1278
+            # return "rfm98w"
+            return LoRaModuleTypes.RFM98W_SX1278.value
+            # return "RFM98W"
 
         except Exception:
             return None  # Communication or logic error during detection
