@@ -24,6 +24,7 @@ from pi_lora.drivers.lora_module import (
     REG_OP_MODE,
     LoRaModule,
     LoRaModuleMode,
+    LoRaModuleTypes,
 )
 from tests.fakes import FakeSpiDev
 
@@ -579,19 +580,49 @@ class TestExtendedDetection:
     """Tests for _perform_extended_detection()."""
 
     def test_extended_detect_rfm95w_pll_locks(self, fake_spi_rfm95w_pll_locked: FakeSpiDev) -> None:
+        """Working RFM95W hardware — PLL locks on both frequencies → family series."""
         module = LoRaModule(ce_pin=0, spi_factory=lambda: fake_spi_rfm95w_pll_locked)
-        result: Literal["rfm95w", "rfm98w"] | None = module._perform_extended_detection()
-        assert result == "rfm95w"
+        result: Literal[LoRaModuleTypes.UNKNOWN.value,
+                        LoRaModuleTypes.RFM95W_SX1276.value,
+                        LoRaModuleTypes.RFM98W_SX1278.value,
+                        LoRaModuleTypes.RFM9XW_SX127X_FAMILY.value] | None = module._perform_extended_detection()
+        # Working hardware locks PLL on both frequencies → returns family series
+        assert result == "RFM9XW/SX127X family series"
+
+    def test_extended_detect_rfm95w_hf_only(self, fake_spi_rfm95w_hf_pll_only: FakeSpiDev) -> None:
+        """RFM95W with HF-only PLL lock — for future strictly-compliant hardware."""
+        module = LoRaModule(ce_pin=0, spi_factory=lambda: fake_spi_rfm95w_hf_pll_only)
+        result: Literal[LoRaModuleTypes.UNKNOWN.value,
+                        LoRaModuleTypes.RFM95W_SX1276.value,
+                        LoRaModuleTypes.RFM98W_SX1278.value,
+                        LoRaModuleTypes.RFM9XW_SX127X_FAMILY.value] | None = module._perform_extended_detection()
+        assert result == "RFM95W (High-Band 868MHz / Semtech SX1276)"
 
     def test_extended_detect_rfm98w_no_pll_lock(self, fake_spi_rfm98w_pll_not_locked: FakeSpiDev) -> None:
+        """Non-functional module where PLL never locks."""
         module = LoRaModule(ce_pin=1, spi_factory=lambda: fake_spi_rfm98w_pll_not_locked)
-        result: Literal["rfm95w", "rfm98w"] | None = module._perform_extended_detection()
-        assert result == "rfm98w"
+        result: Literal[LoRaModuleTypes.UNKNOWN.value,
+                        LoRaModuleTypes.RFM95W_SX1276.value,
+                        LoRaModuleTypes.RFM98W_SX1278.value,
+                        LoRaModuleTypes.RFM9XW_SX127X_FAMILY.value] | None = module._perform_extended_detection()
+        assert result == "Unknown"
+
+    def test_extended_detect_rfm98w_lf_only(self, fake_spi_rfm98w_lf_pll_only: FakeSpiDev) -> None:
+        """RFM98W with LF-only PLL lock — for future strictly-compliant hardware."""
+        module = LoRaModule(ce_pin=1, spi_factory=lambda: fake_spi_rfm98w_lf_pll_only)
+        result: Literal[LoRaModuleTypes.UNKNOWN.value,
+                        LoRaModuleTypes.RFM95W_SX1276.value,
+                        LoRaModuleTypes.RFM98W_SX1278.value,
+                        LoRaModuleTypes.RFM9XW_SX127X_FAMILY.value] | None = module._perform_extended_detection()
+        assert result == "RFM98W (Low-Band 433Mhz / Semtech SX1278)"
 
     def test_extended_detect_communication_failure(self, fake_spi_none: FakeSpiDev) -> None:
         module = LoRaModule(ce_pin=0, spi_factory=lambda: fake_spi_none)
         # Module has communication_success=False; read_register returns None
-        result: Literal["rfm95w", "rfm98w"] | None = module._perform_extended_detection()
+        result: Literal[LoRaModuleTypes.UNKNOWN.value,
+                        LoRaModuleTypes.RFM95W_SX1276.value,
+                        LoRaModuleTypes.RFM98W_SX1278.value,
+                        LoRaModuleTypes.RFM9XW_SX127X_FAMILY.value] | None = module._perform_extended_detection()
         assert result is None
 
     def test_extended_detect_frequency_write_failure(self, rfm95w_factory: FakeSpiDev) -> None:
@@ -599,7 +630,10 @@ class TestExtendedDetection:
         # Use patch.object to reliably cause write_register to return None,
         # which causes write_and_verify_frequency_for_khz(915000) to fail verification.
         with patch.object(module := LoRaModule(ce_pin=0, spi_factory=lambda: rfm95w_factory), 'write_register', return_value=None):
-            result: Literal["rfm95w", "rfm98w"] | None = module._perform_extended_detection()
+            result: Literal[LoRaModuleTypes.UNKNOWN.value,
+                            LoRaModuleTypes.RFM95W_SX1276.value,
+                            LoRaModuleTypes.RFM98W_SX1278.value,
+                            LoRaModuleTypes.RFM9XW_SX127X_FAMILY.value] | None = module._perform_extended_detection()
         assert result is None  # Frequency write failed → detection returns None
 
     def test_extended_detect_returns_to_sleep(self, fake_spi_rfm95w_pll_locked: FakeSpiDev) -> None:
@@ -615,15 +649,20 @@ class TestExtendedDetection:
         # detection. This triggers the communication failure path which returns None, and
         # ensures the finally block always runs (returning to sleep mode).
         with patch.object(module := LoRaModule(ce_pin=0, spi_factory=lambda: rfm95w_factory), 'read_register', return_value=None):
-            result: Literal["rfm95w", "rfm98w"] | None = module._perform_extended_detection()
+            result: Literal[LoRaModuleTypes.UNKNOWN.value,
+                            LoRaModuleTypes.RFM95W_SX1276.value,
+                            LoRaModuleTypes.RFM98W_SX1278.value,
+                            LoRaModuleTypes.RFM9XW_SX127X_FAMILY.value] | None = module._perform_extended_detection()
         assert result is None
 
     def test_extended_detect_pll_locks_on_second_attempt(self, fake_spi_rfm95w_pll_locked: FakeSpiDev) -> None:
-        """PLL doesn't lock on first read but locks on second (simulated by initial 0x00 flag)."""
-        # The fixture already sets PLL lock bit; the first sleep(0.1) + read will succeed.
+        """PLL locks on both reads for working hardware → family series."""
         module = LoRaModule(ce_pin=0, spi_factory=lambda: fake_spi_rfm95w_pll_locked)
-        result: Literal["rfm95w", "rfm98w"] | None = module._perform_extended_detection()
-        assert result == "rfm95w"
+        result: Literal[LoRaModuleTypes.UNKNOWN.value,
+                        LoRaModuleTypes.RFM95W_SX1276.value,
+                        LoRaModuleTypes.RFM98W_SX1278.value,
+                        LoRaModuleTypes.RFM9XW_SX127X_FAMILY.value] | None = module._perform_extended_detection()
+        assert result == "RFM9XW/SX127X family series"
 
 
 class TestPublicWriteAndVerifyFrequency:
