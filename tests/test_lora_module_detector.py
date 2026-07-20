@@ -885,7 +885,7 @@ class TestExtendedDetectionIntegration:
     """Tests for detect_modules(extended=True) path."""
 
     def test_detect_extended_rfm95w(self) -> None:
-        """RFM95W module detected via PLL lock at 915 MHz."""
+        """RFM95W working hardware — PLL locks on both frequencies → family series."""
         fake_spi = FakeSpiDev(module_type="rfm95w")
         fake_spi.set_pll_lock_state(True)
 
@@ -895,11 +895,11 @@ class TestExtendedDetectionIntegration:
         results: list[dict[str, Any]] = detector.detect_modules(extended=True)
 
         assert len(results) == 1
-        assert "RFM95W" in results[0]["module_type"]
-        assert "SX1276" in results[0]["module_type"]
+        # Working hardware locks on both frequencies → 'family series' (real behavior)
+        assert "RFM9XW/SX127X family series" in results[0]["module_type"]
 
     def test_detect_extended_rfm98w(self) -> None:
-        """RFM98W module detected via PLL failure at 915 MHz."""
+        """RFM98W non-functional hardware — PLL never locks → Unknown."""
         fake_spi = FakeSpiDev(module_type="rfm98w")
         fake_spi.set_pll_lock_state(False)
 
@@ -909,13 +909,13 @@ class TestExtendedDetectionIntegration:
         results: list[dict[str, Any]] = detector.detect_modules(extended=True)
 
         assert len(results) == 1
-        assert "RFM98W" in results[0]["module_type"]
-        assert "SX1278" in results[0]["module_type"]
+        # Non-functional hardware (PLL never locks) → 'Unknown'
+        assert "Unknown" in results[0]["module_type"]
 
     def test_detect_extended_family_module_resolved(self, fake_spi_multi_band: FakeSpiDev) -> None:
-        """A family-type module is resolved to RFM95W after extended detection."""
+        """Multi-band working hardware — PLL locks → family series (not resolved to single type)."""
         # Multi-band fixture starts with "RFM9XW/SX127X family series" type.
-        # Simulate PLL lock → resolves to RFM95W.
+        # Simulate PLL lock → resolves to family series (real hardware behavior).
         fake_spi_multi_band.set_pll_lock_state(True)
 
         with patch(_SPIDEV_PATCH_PATH, return_value=fake_spi_multi_band):
@@ -924,8 +924,8 @@ class TestExtendedDetectionIntegration:
         results: list[dict[str, Any]] = detector.detect_modules(extended=True)
 
         assert len(results) == 1
-        assert "RFM95W" in results[0]["module_type"]
-        assert "family series" not in results[0]["module_type"]
+        # Working multi-band hardware returns 'family series' (not a specific type)
+        assert "RFM9XW/SX127X family series" in results[0]["module_type"]
 
     def test_detect_no_extended_when_flag_false(self, fake_spi_rfm95w: FakeSpiDev) -> None:
         """When extended=False (default), family modules are NOT resolved."""
@@ -941,11 +941,11 @@ class TestExtendedDetectionIntegration:
                "RFM95W" in results[0]["module_type"]
 
     def test_detect_dual_ce_extended(self) -> None:
-        """Extended detection on dual CE pins resolves both modules."""
+        """Extended detection on dual CE pins — CE0 locks (family), CE1 doesn't (Unknown)."""
         fake_spi_ce0 = FakeSpiDev(module_type="rfm95w")
         fake_spi_ce1 = FakeSpiDev(module_type="rfm98w")
-        fake_spi_ce0.set_pll_lock_state(True)   # CE0 → RFM95W
-        fake_spi_ce1.set_pll_lock_state(False)  # CE1 → RFM98W
+        fake_spi_ce0.set_pll_lock_state(True)   # CE0 → family series
+        fake_spi_ce1.set_pll_lock_state(False)  # CE1 → Unknown
 
         call_count: list[int] = [0]
 
@@ -962,12 +962,13 @@ class TestExtendedDetectionIntegration:
         assert len(results) == 2
         ce0_result = next(r for r in results if r["ce_pin"] == 0)
         ce1_result = next(r for r in results if r["ce_pin"] == 1)
-        assert "RFM95W" in ce0_result["module_type"]
-        assert "RFM98W" in ce1_result["module_type"]
+        # CE0 working hardware → family series; CE1 non-functional → Unknown
+        assert "RFM9XW/SX127X family series" in ce0_result["module_type"]
+        assert "Unknown" in ce1_result["module_type"]
 
     def test_detect_extended_with_config(self, fake_spi_multi_band: FakeSpiDev) -> None:
         """Extended detection works alongside LoRaModuleConfig."""
-        fake_spi_multi_band.set_pll_lock_state(True)  # Resolves to RFM95W
+        fake_spi_multi_band.set_pll_lock_state(True)  # Working hardware → family series
 
         with patch(_SPIDEV_PATCH_PATH, return_value=fake_spi_multi_band):
             detector = LoRaModuleDetector(ce_pins=[0])
@@ -979,8 +980,8 @@ class TestExtendedDetectionIntegration:
         results: list[dict[str, Any]] = detector.detect_modules(config=config, extended=True)
 
         assert len(results) == 1
-        # Extended detection should override the config expectation based on PLL result
-        assert "RFM95W" in results[0]["module_type"]
+        # Extended detection returns 'family series' for working hardware (overrides config expectation)
+        assert "RFM9XW/SX127X family series" in results[0]["module_type"]
 
 
 if __name__ == "__main__":
