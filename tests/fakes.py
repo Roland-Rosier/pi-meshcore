@@ -57,6 +57,7 @@ class FakeSpiDev:
         self._fail_next_read: bool = False
         self._fail_next_write: bool = False
         self._opened: bool = False
+        self._pll_auto_mode: bool = False  # When True, auto-set PLL based on freq range after writes
 
         # Initialize default register values
         self._default_registers()
@@ -189,6 +190,30 @@ class FakeSpiDev:
                 else:
                     self._registers[address] = value
 
+                # PLL auto-mode: frequency-dependent automatic PLL lock simulation.
+                if address in (0x06, 0x07, 0x08) and self._pll_auto_mode:
+                    if all(a in self._registers for a in (0x06, 0x07, 0x08)):
+                        frf_msb = self._registers[0x06]
+                        frf_mid = self._registers[0x07]
+                        frf_lsb = self._registers[0x08]
+                        freq_register_value = (frf_msb << 16) | (frf_mid << 8) | frf_lsb
+                        freq_hz_times_100000000 = freq_register_value * 6103515625
+                        freq_khz = int(freq_hz_times_100000000 / 100000000)
+
+                        pll_would_lock = False
+                        if self.module_type == "rfm95w":
+                            pll_would_lock = freq_khz >= 862000  # HF band only (future hardware)
+                        elif self.module_type == "rfm98w":
+                            pll_would_lock = freq_khz <= 525000  # LF band only (future hardware)
+                        elif self.module_type == "multi_band":
+                            pll_would_lock = True  # Both bands supported
+
+                        current_irq_flags1 = self._registers.get(self.REG_IRQ_FLAGS1, 0x00)
+                        if pll_would_lock:
+                            self._registers[self.REG_IRQ_FLAGS1] = current_irq_flags1 | 0x10
+                        else:
+                            self._registers[self.REG_IRQ_FLAGS1] = current_irq_flags1 & ~0x10
+
                 result.append(cmd_byte)
                 result.append(value)
                 i += 2
@@ -209,6 +234,12 @@ class FakeSpiDev:
                         reg_value = 0x19
                     else:
                         reg_value = 0x00
+
+                # Auto-clear PLL lock bit on read of IRQ_FLAGS1 (real SX127x hardware behavior)
+                if address == self.REG_IRQ_FLAGS1 and not is_write:
+                    stored = self._registers.get(address, 0x00)
+                    stored = stored & ~0x10
+                    self._registers[address] = stored
 
                 result.append(cmd_byte)
                 result.append(reg_value)
@@ -312,6 +343,19 @@ class FakeSpiDev:
             self._registers[self.REG_IRQ_FLAGS1] = current | 0x10  # Set bit 4 (PLLLock)
         else:
             self._registers[self.REG_IRQ_FLAGS1] = current & ~0x10  # Clear bit 4
+
+    def set_pll_auto_mode(self, enabled: bool) -> None:
+        """Enable or disable frequency-dependent automatic PLL lock simulation.
+
+        When disabled (default), PLL state persists as manually set — simulating real
+        hardware where all working modules lock on both frequencies and return 'family series'.
+
+        When enabled, PLL is auto-set/cleared based on module type and written frequency range —
+        useful for testing future hardware that may behave according to original RFM95W/RFM98W specs.
+
+        :param enabled: True to enable automatic PLL simulation based on frequency range.
+        """
+        self._pll_auto_mode = enabled
 
 
 def create_fake_spi_dev(module_type: str = "none",
