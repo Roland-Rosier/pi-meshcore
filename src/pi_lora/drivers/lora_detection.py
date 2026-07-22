@@ -149,8 +149,9 @@ class LoRaModuleDetector:
                 # if "RFM9XW/SX127X family series" in module.module_type or \
                 if LoRaModuleTypes.RFM9XW_SX127X_FAMILY.value in module.module_type or \
                    "Multi-band" in module.module_type:
-                    extended_result: Literal["rfm95w", "rfm98w"] | None = \
-                        module._perform_extended_detection()
+                    extended_result: Literal[
+                        "rfm95w", "rfm98w", "Unknown", "RFM9XW/SX127X family series"
+                    ] | None = module._perform_extended_detection()
                     # if extended_result == "rfm95w":
                     if extended_result == LoRaModuleTypes.RFM95W_SX1276.value:
                         module.module_type = (
@@ -168,6 +169,8 @@ class LoRaModuleDetector:
                             # "RFM98W (Low-Band 433Mhz / Semtech SX1278)"
                             LoRaModuleTypes.RFM9XW_SX127X_FAMILY.value
                         )
+                    elif extended_result == LoRaModuleTypes.UNKNOWN.value:
+                        module.module_type = LoRaModuleTypes.UNKNOWN.value
 
             # Rebuild results after extended detection updated module types
             results = []
