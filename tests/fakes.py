@@ -200,7 +200,7 @@ class FakeSpiDev:
                         frf_lsb = self._registers[0x08]
                         freq_register_value = (frf_msb << 16) | (frf_mid << 8) | frf_lsb
                         freq_hz_times_100000000 = freq_register_value * 6103515625
-                        freq_khz = int(freq_hz_times_100000000 / 100000000)
+                        freq_khz = int(freq_hz_times_100000000 / 100000000000)
 
                         pll_would_lock: bool = False
                         if self.module_type == "rfm95w":
@@ -258,7 +258,7 @@ class FakeSpiDev:
                         if all(v is not None for v in (frf_msb, frf_mid, frf_lsb)):
                             freq_register_value: int = (frf_msb << 16) | (frf_mid << 8) | frf_lsb
                             freq_hz_times_100000000: int = freq_register_value * 6103515625
-                            freq_khz: int = int(freq_hz_times_100000000 / 100000000)
+                            freq_khz: int = int(freq_hz_times_100000000 / 100000000000)
 
                             pll_would_lock: bool = False
                             if self.module_type == "rfm95w":
