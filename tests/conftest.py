@@ -73,3 +73,25 @@ def fake_spi_rfm98w_pll_not_locked(fake_spi_rfm98w: FakeSpiDev) -> FakeSpiDev:
     """RFM98W with PLL lock NOT simulated (for extended detection)."""
     fake_spi_rfm98w.set_pll_lock_state(False)
     return fake_spi_rfm98w
+
+
+@pytest.fixture()
+def fake_spi_rfm95w_hf_pll_only(fake_spi_rfm95w: FakeSpiDev) -> FakeSpiDev:
+    """RFM95W-like module with PLL lock only on HF (915 MHz), not on LF (410 MHz).
+
+    This simulates future hardware that strictly adheres to the original SX1276 spec.
+    Requires FakeSpiDev._pll_auto_mode = True for proper behavior.
+    """
+    fake_spi_rfm95w.set_pll_auto_mode(True)  # Enable frequency-dependent PLL simulation
+    return fake_spi_rfm95w
+
+
+@pytest.fixture()
+def fake_spi_rfm98w_lf_pll_only(fake_spi_rfm98w: FakeSpiDev) -> FakeSpiDev:
+    """RFM98W-like module with PLL lock only on LF (410 MHz), not on HF (915 MHz).
+
+    This simulates future hardware that strictly adheres to the original SX1278 spec.
+    Requires FakeSpiDev._pll_auto_mode = True for proper behavior.
+    """
+    fake_spi_rfm98w.set_pll_auto_mode(True)  # Enable frequency-dependent PLL simulation
+    return fake_spi_rfm98w

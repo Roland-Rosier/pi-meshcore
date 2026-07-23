@@ -409,3 +409,52 @@ Constraints:
 * Perform no other tasks
 * Restrict all edits to the `test` directory (or its subdirectories)
 
+ ----- 
+ Context:
+
+You are a Software Architect with Electronics and Radio experience.
+
+You are developing a system which can use LoRa modules attached to a Raspberry PI to scan the radio frequencies to look for radio transmissions.
+
+The Raspberry PI has up to two LoRa modules attached to the CE0 and, optionally, the CE1 lines of the SPI0 module.
+
+Any attached module may be a RFM95W (High Frequency) or RFM98W (Low Frequency) module.
+
+Software has already been written to perform basic detection on these chips; this software is called via the `src/pi_lora/cli/check_hardware.py detect-modules`  cli.
+
+The existing detection software can only perform basic detection of presence and assertion that each module is connected to a single ce line.
+
+Extended detection software now needs to be written, which is called via a new parameter passed to detect-modules `--extended`
+
+This extended detection will first call the current detection and if that current detection is detecting one of the "family" modules, it will
+
+1. For each module
+
+1a. Put the module into sleep mode using a newly created function in `LoRaModule` called `set_module_mode`, which takes an enum with values `sleep`, `standby`, `fstx`, `fsrx`, `tx`, `rxcontinuous`, `rxsingle`, and `cad`. These values should be capitalised as appropriate.
+
+1b. Clear Bit 3 (the LowFrequencyModeOn bit) in RegOpMode (0x01) to enable high-frequency operation.
+
+1c. Write a frequency of 915 MHz into the clock registers. To do this it needs to turn the currently private `_write_and_verify_frequency_for_khz` function in the `LoRaModule` class into a public funciton and then use that function to write 915 MHz as kHz (915000 kHz)
+
+1d. Use the new `set_module_mode` to change the mode to `fsrx` mode.
+
+1e. Wait for the PLL to lock by performing the loop up to five times
+
+1ei. Wait 0.1s
+
+1eii Read the PLLLock bit (bit 4) in the RegIrgFlags1 register (0x3e) to see if the PLL has locked. If locked, exit the loop, returning that the PLL has locked. If not locked, loop again up to the number of repetitions mentioned previously; if it hasn't locked by the time the repetitions complete, return and indicate that the PLL has not locked.
+
+1f. Put the module back into sleep mode
+
+1g. If the PLL locked in the steps around 1e, return an extended detection of an RFM95W/SX1276 module. If the PLL did not lock in the previous step, return an extended detection of an RFM98W/SX1278 module.
+
+Task:
+
+* Figure out how to alter both the source in `src` and the tests in `tests` to achieve the above.
+
+* Write a plan describing how to achieve the above into the file `2026_07_08_plan_extended_detect.md`
+
+Constraints:
+
+* Perform no other tasks.
+
