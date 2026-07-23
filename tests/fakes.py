@@ -247,42 +247,40 @@ class FakeSpiDev:
                         reg_value = 0x00
 
                 # PLL state management on read of IRQ_FLAGS1.
-                if address == self.REG_IRQ_FLAGS1 and not is_write:
-                    if self._pll_auto_mode:
-                        lf_mode_enabled = (self._registers.get(self.REG_OP_MODE, 0) & self.BIT_LF_MODE_ON) != 0
+                if address == self.REG_IRQ_FLAGS1 and not is_write and self._pll_auto_mode:
+                    lf_mode_enabled = (self._registers.get(self.REG_OP_MODE, 0) & self.BIT_LF_MODE_ON) != 0
 
-                        # Auto-mode: recalculate correct PLL state from current frequency registers.
-                        frf_msb = self._registers.get(0x06)
-                        frf_mid = self._registers.get(0x07)
-                        frf_lsb = self._registers.get(0x08)
-                        if all(v is not None for v in (frf_msb, frf_mid, frf_lsb)):
-                            freq_register_value: int = (frf_msb << 16) | (frf_mid << 8) | frf_lsb
-                            freq_hz_times_100000000: int = freq_register_value * 6103515625
-                            freq_khz: int = int(freq_hz_times_100000000 / 100000000000)
+                    # Auto-mode: recalculate correct PLL state from current frequency registers.
+                    frf_msb = self._registers.get(0x06)
+                    frf_mid = self._registers.get(0x07)
+                    frf_lsb = self._registers.get(0x08)
+                    if all(v is not None for v in (frf_msb, frf_mid, frf_lsb)):
+                        freq_register_value: int = (frf_msb << 16) | (frf_mid << 8) | frf_lsb
+                        freq_hz_times_100000000: int = freq_register_value * 6103515625
+                        freq_khz: int = int(freq_hz_times_100000000 / 100000000000)
 
-                            pll_would_lock: bool = False
-                            if self.module_type == "rfm95w":
-                                if lf_mode_enabled:
-                                    pll_would_lock = False  # HF-only chip in LF mode
-                                else:
-                                    pll_would_lock = freq_khz >= self._HIGH_FREQ_MIN
-                            elif self.module_type == "rfm98w":
-                                if lf_mode_enabled:
-                                    pll_would_lock = freq_khz <= self._LOW_FREQ_MAX  # LF chip in LF mode
-                                else:
-                                    pll_would_lock = False  # LF-only chip in HF mode (shouldn't happen)
-                            elif self.module_type == "multi_band":
-                                if lf_mode_enabled:
-                                    pll_would_lock = True  # Both bands supported regardless of LF mode
-                                else:
-                                    pll_would_lock = True
-
-                            current_irq_flags1: int = self._registers.get(self.REG_IRQ_FLAGS1, 0x00)
-                            if pll_would_lock:
-                                self._registers[self.REG_IRQ_FLAGS1] = current_irq_flags1 | 0x10
+                        pll_would_lock: bool = False
+                        if self.module_type == "rfm95w":
+                            if lf_mode_enabled:
+                                pll_would_lock = False  # HF-only chip in LF mode
                             else:
-                                self._registers[self.REG_IRQ_FLAGS1] = current_irq_flags1 & ~0x10
-                    # In non-auto-mode, preserve the stored value unchanged.
+                                pll_would_lock = freq_khz >= self._HIGH_FREQ_MIN
+                        elif self.module_type == "rfm98w":
+                            if lf_mode_enabled:
+                                pll_would_lock = freq_khz <= self._LOW_FREQ_MAX  # LF chip in LF mode
+                            else:
+                                pll_would_lock = False  # LF-only chip in HF mode (shouldn't happen)
+                        elif self.module_type == "multi_band":
+                            if lf_mode_enabled:
+                                pll_would_lock = True  # Both bands supported regardless of LF mode
+                            else:
+                                pll_would_lock = True
+
+                        current_irq_flags1: int = self._registers.get(self.REG_IRQ_FLAGS1, 0x00)
+                        if pll_would_lock:
+                            self._registers[self.REG_IRQ_FLAGS1] = current_irq_flags1 | 0x10
+                        else:
+                            self._registers[self.REG_IRQ_FLAGS1] = current_irq_flags1 & ~0x10
 
                 result.append(cmd_byte)
                 result.append(reg_value)
