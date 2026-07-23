@@ -165,8 +165,7 @@ uv remove <package-name>
 ├── .gitignore                        # Files and directories excluded from version control
 ├── .pre-commit-config.yaml           # Pre-commit hook configuration for automated linting/formatting checks
 ├── .prompts/                         # Reusable agent prompt templates
-│   ├── repo_analyst.prompt           # Repository analysis task prompt template
-│   └── repo_analyst_d.prompt         # Deep repository analysis variant prompt
+│   └── repo_analyst.prompt           # Repository analysis task prompt template
 ├── .vscode/
 │   └── settings.json                 # VS Code workspace settings and configurations
 ├── AGENTS.md                         # AI agent configuration and behavior definitions
@@ -176,18 +175,23 @@ uv remove <package-name>
 ├── README.md                         # Project overview, architecture, and setup guide
 ├── SECURITY.md                       # Security policy and vulnerability reporting guidelines
 ├── configs/                          # Configuration files directory
-│   └── continue/
-│       └── config_lmstudio.yaml      # LM Studio configuration for Continue.dev agent workflows
+│   ├── continue/
+│   │   └── config_lmstudio.yaml      # LM Studio configuration for Continue.dev agent workflows
+│   └── ruff-lint-workflow.yml.disabled  # Disabled ruff lint workflow configuration file
 ├── pyproject.toml                    # Python project metadata, pytest & coverage configuration
 ├── requirements.txt                  # Python dependency list (FastAPI, meshcore, pytest, etc.)
 ├── uv.lock                           # Lock file pinning exact dependency versions for reproducible builds
-├── src/                              # Main source code
+├── src/pi_lora/                      # Main source code package
+│   ├── __init__.py                   # Package initialization for pi_lora top-level module
 │   ├── cli/
+│   │   ├── __init__.py               # CLI sub-package initialization
 │   │   └── check_hardware.py         # CLI tool for LoRa hardware detection and status checks
 │   └── drivers/
+│       ├── __init__.py               # Drivers sub-package initialization
 │       ├── lora_detection.py          # LoRa module auto-detection logic (RFM95W/RFM98W)
 │       └── lora_module.py             # RFM95W/RFM98W radio driver implementation (SX1276/SX1278)
 └── tests/                            # Test suite
+    ├── __init__.py                   # Tests package initialization
     ├── conftest.py                   # pytest fixtures and shared test configuration
     ├── fakes.py                      # Fake/mock implementations for driver testing
     ├── test_check_hardware_cli.py    # Unit tests for CLI hardware check tool
