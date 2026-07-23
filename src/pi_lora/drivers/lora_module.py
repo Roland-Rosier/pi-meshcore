@@ -440,7 +440,12 @@ class LoRaModule:
             return False
 
     # def _perform_extended_detection(self) -> Literal["rfm95w", "rfm98w"] | None:
-    def _perform_extended_detection(self) -> Literal[LoRaModuleTypes.UNKNOWN.value, LoRaModuleTypes.RFM95W_SX1276.value, LoRaModuleTypes.RFM98W_SX1278.value, LoRaModuleTypes.RFM9XW_SX127X_FAMILY.value] | None:
+    def _perform_extended_detection(self) -> Literal[
+        "Unknown",
+        "RFM95W (High-Band 868MHz / Semtech SX1276)",
+        "RFM98W (Low-Band 433Mhz / Semtech SX1278)",
+        "RFM9XW/SX127X family series",
+    ] | None:
         """Perform PLL lock test at 915 MHz to distinguish RFM95W/SX1276 from RFM98W/SX1278.
 
         Procedure (per module, in read-only safety mode):
@@ -489,9 +494,10 @@ class LoRaModule:
 
             # 1e — PLL lock detection loop (up to 5 iterations)
             hf_locked: bool = False
+            irq_flags: int | None = None
             for _attempt in range(5):
                 time.sleep(0.1)  # 1ei — Wait 100ms for PLL to settle
-                irq_flags: int | None = self.read_register(0x3E)  # RegIrqFlags1
+                irq_flags = self.read_register(0x3E)  # RegIrqFlags1
                 if irq_flags is not None and (irq_flags & 0x10):  # Bit 4 = PLLLock
                     hf_locked = True
                     # return "rfm95w"  # 1e — PLL locked → RFM95W/SX1276
@@ -521,7 +527,7 @@ class LoRaModule:
             lf_locked: bool = False
             for _attempt in range(5):
                 time.sleep(0.1)  # 1ei — Wait 100ms for PLL to settle
-                irq_flags: int | None = self.read_register(0x3E)  # RegIrqFlags1
+                irq_flags = self.read_register(0x3E)  # RegIrqFlags1
                 if irq_flags is not None and (irq_flags & 0x10):  # Bit 4 = PLLLock
                     lf_locked = True
                     # return "rfm98w"  # 1e — PLL locked → RFM98W/SX1278
