@@ -20,6 +20,7 @@ from unittest.mock import patch
 # from src.drivers.lora_module import LoRaModule
 from pi_lora.drivers.lora_module import (
     BIT_LF_MODE_ON,
+    BIT_LORA_MODE_ON,
     MODE_SLEEP,
     REG_OP_MODE,
     LoRaModule,
@@ -683,8 +684,69 @@ class TestPublicWriteAndVerifyFrequency:
         read_mid: int | None
         read_lsb: int | None
         (success, req_msb, req_mid, req_lsb, read_msb, read_mid, read_lsb) = \
-            module.write_and_verify_frequency_for_khz(915000)
+                        module.write_and_verify_frequency_for_khz(915000)
         assert success is True
+
+
+class TestExtendedDetectionLoRaModeAndEarlyExit:
+    """Tests for _set_lora_mode_bit(), _clear_lora_mode_bit(), and early-exit in _perform_extended_detection()."""
+
+    def test_clear_lora_mode_bit(self, rfm95w_factory: FakeSpiDev) -> None:
+        """Bit 7 (LoRaMode) is cleared while Mode [2:0] and LF bit are preserved."""
+        module = LoRaModule(ce_pin=0, spi_factory=lambda: rfm95w_factory)
+        rfm95w_factory.set_register(REG_OP_MODE, 0x8B)  # LoRa=1, LF_on=1, SLEEP=0b011
+        module._clear_lora_mode_bit()
+        op_mode: int = rfm95w_factory.get_register(REG_OP_MODE)
+        assert (op_mode & BIT_LORA_MODE_ON) == 0x00  # LoRa bit cleared
+        assert (op_mode & BIT_LF_MODE_ON) == BIT_LF_MODE_ON  # LF preserved
+        assert (op_mode & 0x07) == 0x03  # Mode preserved
+
+    def test_set_lora_mode_bit(self, rfm95w_factory: FakeSpiDev) -> None:
+        """Bit 7 (LoRaMode) is set while Mode [2:0] and LF bit are preserved."""
+        module = LoRaModule(ce_pin=0, spi_factory=lambda: rfm95w_factory)
+        rfm95w_factory.set_register(REG_OP_MODE, 0x03)  # LoRa=0, LF=0, SLEEP=0b011
+        module._set_lora_mode_bit()
+        op_mode: int = rfm95w_factory.get_register(REG_OP_MODE)
+        assert (op_mode & BIT_LORA_MODE_ON) == BIT_LORA_MODE_ON  # LoRa bit set
+        assert (op_mode & BIT_LF_MODE_ON) == 0x00  # LF preserved
+        assert (op_mode & 0x07) == 0x03  # Mode preserved
+
+    def test_clear_lora_mode_bit_spi_failure(self, fake_spi_rfm95w: FakeSpiDev) -> None:
+        """_clear_lora_mode_bit handles read_register returning None (SPI failure)."""
+        module = LoRaModule(ce_pin=0, spi_factory=lambda: fake_spi_rfm95w)
+        fake_spi_rfm95w.enable_failure_read()
+        module._clear_lora_mode_bit()  # Should not raise
+
+    def test_set_lora_mode_bit_spi_failure(self, fake_spi_rfm95w: FakeSpiDev) -> None:
+        """_set_lora_mode_bit handles read_register returning None (SPI failure)."""
+        module = LoRaModule(ce_pin=0, spi_factory=lambda: fake_spi_rfm95w)
+        fake_spi_rfm95w.enable_failure_read()
+        module._set_lora_mode_bit()  # Should not raise
+
+    def test_extended_detect_hf_early_lock(self, fake_spi_rfm95w_hf_pll_only: FakeSpiDev) -> None:
+        """HF PLL locks on first read — detection returns immediately."""
+        module = LoRaModule(ce_pin=0, spi_factory=lambda: fake_spi_rfm95w_hf_pll_only)
+        result = module._perform_extended_detection()
+        assert result == "RFM95W (High-Band 868MHz / Semtech SX1276)"
+
+    def test_extended_detect_lf_early_lock(self, fake_spi_rfm98w_lf_pll_only: FakeSpiDev) -> None:
+        """LF PLL locks on first read — detection returns immediately."""
+        module = LoRaModule(ce_pin=1, spi_factory=lambda: fake_spi_rfm98w_lf_pll_only)
+        result = module._perform_extended_detection()
+        assert result == "RFM98W (Low-Band 433Mhz / Semtech SX1278)"
+
+    def test_extended_detect_clears_lora_before_test(self, fake_spi_rfm95w: FakeSpiDev) -> None:
+        """_perform_extended_detection clears LoRa mode bit at start of function."""
+        module = LoRaModule(ce_pin=0, spi_factory=lambda: fake_spi_rfm95w)
+        module._clear_lora_mode_bit()
+        rfm95w = fake_spi_rfm95w
+        # Manually set LoRa mode bit high before detection
+        rfm95w.set_register(REG_OP_MODE, 0x83)  # LoRa=1, LF_on=1, SLEEP=1
+        module._perform_extended_detection()
+        # After detection, LoRa mode bit should be cleared (in finally block)
+        op_mode: int = rfm95w.get_register(REG_OP_MODE)
+        assert (op_mode & BIT_LORA_MODE_ON) == 0x00  # LoRa bit cleared
+
 
 
 

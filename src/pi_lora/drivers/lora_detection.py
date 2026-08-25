@@ -169,7 +169,7 @@ class LoRaModuleDetector:
                         )
                     elif extended_result == LoRaModuleTypes.RFM9XW_SX127X_FAMILY.value:
                         module.module_type = (
-                            # "RFM98W (Low-Band 433Mhz / Semtech SX1278)"
+                            # "RFM9XW/SX127X family series"
                             LoRaModuleTypes.RFM9XW_SX127X_FAMILY.value
                         )
                     elif extended_result == LoRaModuleTypes.UNKNOWN.value:
