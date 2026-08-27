@@ -161,6 +161,17 @@ uv remove <package-name>
 │       ├── 02-execution-protocol.md    # Phase-based execution protocol guidelines
 │       ├── 03-use-desktop-commander-mcp.md  # Desktop Commander MCP tool usage rules
 │       └── 04-use-native-edit-tools.md    # Native file editing tool (single_find_and_replace) rules
+├── .kilo/                            # Kilo agent configuration directory
+│   ├── agents/
+│   │   └── repo_analyst.md           # Repository analysis agent configuration
+│   ├── kilo.jsonc                    # Kilo main configuration file
+│   └── rules/
+│       ├── 01-strict-tool-calls.md     # Strict tool call enforcement rules
+│       ├── 02-system-constraints.md    # Global system constraints and safety modes
+│       ├── 03-act--execution-protocol.md  # Act phase execution protocol guidelines
+│       ├── 03-plan-execution-protocol.md  # Plan phase execution protocol guidelines
+│       ├── 04-use-desktop-commander-mcp.md  # Desktop Commander MCP tool usage rules
+│       └── 05-use-native-edit-tools.md    # Native file editing tool (single_find_and_replace) rules
 ├── .gitattributes                    # Git attribute definitions for line endings, filters
 ├── .gitignore                        # Files and directories excluded from version control
 ├── .pre-commit-config.yaml           # Pre-commit hook configuration for automated linting/formatting checks
