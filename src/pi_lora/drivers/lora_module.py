@@ -24,6 +24,8 @@ REG_OP_MODE = 0x01
 MODE_SLEEP = 0x00
 MODE_STANDBY = 0x01
 BIT_LF_MODE_ON = 0x08
+BIT_LORA_MODE_ON: int = 0x80
+BIT_ACCESS_SHARED_REG: int = 0x40
 HIGH_FREQ_KHZ: int = 1015000
 LOW_FREQ_KHZ: int = 415000
 
@@ -51,6 +53,13 @@ class LoRaModuleTypes(str, Enum):
     RFM95W_SX1276 = "RFM95W (High-Band 868MHz / Semtech SX1276)"
     RFM98W_SX1278 = "RFM98W (Low-Band 433Mhz / Semtech SX1278)"
     RFM9XW_SX127X_FAMILY = "RFM9XW/SX127X family series"
+
+LoRaModuleDetectResult = Literal[
+    "Unknown",
+    "RFM95W (High-Band 868MHz / Semtech SX1276)",
+    "RFM98W (Low-Band 433Mhz / Semtech SX1278)",
+    "RFM9XW/SX127X family series",
+]
 
 class LoRaModule:
     """Class to represent and interact with a LoRa module."""
@@ -195,6 +204,96 @@ class LoRaModule:
             hf_value: int = current_value & ~BIT_LF_MODE_ON
             self.write_register(REG_OP_MODE, hf_value)
 
+    def _set_lora_mode_bit(self) -> None:
+        """Set only the LoRaMode bit (bit 7) of RegOpMode.
+
+        Preserves all other bits including Mode [2:0] and LowFrequencyModeOn (bit 3).
+        Used to enable LoRa mode before frequency synthesiser operations.
+        """
+        current_value: int | None = self.read_register(REG_OP_MODE)
+        if current_value is not None:
+            new_value: int = current_value | BIT_LORA_MODE_ON
+            self.write_register(REG_OP_MODE, new_value)
+
+    def _clear_lora_mode_bit(self) -> None:
+        """Clear only the LoRaMode bit (bit 7) of RegOpMode.
+
+        Preserves all other bits including Mode [2:0] and LowFrequencyModeOn (bit 3).
+        Used to disable LoRa mode for safety-mode and standard operations.
+        """
+        current_value: int | None = self.read_register(REG_OP_MODE)
+        if current_value is not None:
+            new_value: int = current_value & ~BIT_LORA_MODE_ON
+            self.write_register(REG_OP_MODE, new_value)
+
+    def _get_is_in_lora_mode(self) -> bool | None:
+        """Check whether the module is currently in LoRa mode.
+
+        Reads RegOpMode (0x01) and checks bit 7 (LoRaMode).
+
+        Returns:
+            True if in LoRa mode, False if not, None if SPI read fails.
+        """
+        current_value: int | None = self.read_register(REG_OP_MODE)
+        if current_value is None:
+            return None
+        return (current_value & BIT_LORA_MODE_ON) != 0
+
+    def _set_access_shared_reg_only_if_in_lora_mode(self) -> bool | None:
+        """Set the AccessSharedReg bit (bit 6) only if the module is in LoRa mode.
+
+        RegIrqFlags1 (0x3E) is a shared register in LoRa mode. It is only
+        accessible when AccessSharedReg is set. This function sets that bit
+        after confirming the module is in LoRa mode, preserving all other
+        RegOpMode bits.
+
+        Returns:
+            True if the bit was set (or was already set) and no error occurred.
+            False if AccessSharedReg was set (already set, no-op).
+            None if any SPI read/write operation failed.
+        """
+        is_lora: bool | None = self._get_is_in_lora_mode()
+        if is_lora is None:
+            return None  # SPI read failure
+        if not is_lora:
+            return False  # Not in LoRa mode; nothing to do
+        # In LoRa mode — set AccessSharedReg
+        current_value: int | None = self.read_register(REG_OP_MODE)
+        if current_value is None:
+            return None  # SPI read failure
+        new_value: int = current_value | BIT_ACCESS_SHARED_REG
+        write_result: int | None = self.write_register(REG_OP_MODE, new_value)
+        if write_result is None:
+            return None  # SPI write failure
+        return True
+
+    def _clear_access_shared_reg_only_if_in_lora_mode(self) -> bool | None:
+        """Clear the AccessSharedReg bit (bit 6) only if the module is in LoRa mode.
+
+        RegIrqFlags1 (0x3E) is a shared register in LoRa mode. This function
+        clears the AccessSharedReg bit after confirming the module is in LoRa
+        mode, preserving all other RegOpMode bits.
+
+        Returns:
+            True if the bit was cleared (or was already cleared) and no error occurred.
+            False if AccessSharedReg was cleared (already cleared, no-op, module not in LoRa).
+            None if any SPI read/write operation failed.
+        """
+        is_lora: bool | None = self._get_is_in_lora_mode()
+        if is_lora is None:
+            return None  # SPI read failure
+        if not is_lora:
+            return False  # Not in LoRa mode; nothing to do
+        # In LoRa mode — clear AccessSharedReg
+        current_value: int | None = self.read_register(REG_OP_MODE)
+        if current_value is None:
+            return None  # SPI read failure
+        new_value: int = current_value & ~BIT_ACCESS_SHARED_REG
+        write_result: int | None = self.write_register(REG_OP_MODE, new_value)
+        if write_result is None:
+            return None  # SPI write failure
+        return True
+
     def _calc_freq_registers_for_khz(self, a_freq_in_khz: int) -> tuple[int, int, int]:
         """Calculate the register values for a requested frequency.
 
@@ -283,6 +382,10 @@ class LoRaModule:
         self.set_module_mode(LoRaModuleMode.SLEEP)
         time.sleep(0.01)
 
+        # Clear LoRa mode bit for safety
+        self._clear_lora_mode_bit()
+        time.sleep(0.01)
+
         # Clear the LF mode bit (for high frequency)
         self._clear_lf_mode_bit()
         time.sleep(0.01)
@@ -308,6 +411,8 @@ class LoRaModule:
         # The LF Mode Bit might not be retained when switching between Sleep and Standby modes
         # Set LF mode - but this might be the default, so check that it can be re-set again later
         self._write_op_mode(LoRaModuleMode.SLEEP)
+        time.sleep(0.01)
+        self._clear_lora_mode_bit()  # New: ensure not in LoRa mode
         time.sleep(0.01)
         self._set_lf_mode_bit()
         time.sleep(0.01)
@@ -349,6 +454,9 @@ class LoRaModule:
 
         # Put the device back into sleep mode with LF_MODE_ON
         self._write_op_mode(LoRaModuleMode.SLEEP)
+        time.sleep(0.01)
+        self._clear_lora_mode_bit()  # New: maintain safety mode
+        time.sleep(0.01)
 
     def _determine_module_type(self) -> None:
         """Determine the module type based on silicon revision and LF mode.
@@ -440,116 +548,225 @@ class LoRaModule:
             return False
 
     # def _perform_extended_detection(self) -> Literal["rfm95w", "rfm98w"] | None:
-    def _perform_extended_detection(self) -> Literal[
-        "Unknown",
-        "RFM95W (High-Band 868MHz / Semtech SX1276)",
-        "RFM98W (Low-Band 433Mhz / Semtech SX1278)",
-        "RFM9XW/SX127X family series",
-    ] | None:
+    def _perform_extended_detection(self) -> LoRaModuleDetectResult | None:
         """Perform PLL lock test at 915 MHz to distinguish RFM95W/SX1276 from RFM98W/SX1278.
 
         Procedure (per module, in read-only safety mode):
           1a. Put module into SLEEP mode.
-          1b. Clear bit 3 (LowFrequencyModeOn) in RegOpMode for HF operation.
-          1c. Write 915 MHz (= 915000 kHz) to frequency registers.
-          1d. Set mode to FS RX.
-          1e. Wait up to 5 × 100ms for PLL lock (read RegIrqFlags1 bit 4).
-          1f. Return module to SLEEP mode.
-          1g. Record if PLL locked in HF mode or not
+          1b. Clear LoRa mode bit (bit 7 of RegOpMode) to ensure device is not in LoRa mode.
+          1c. Clear bit 3 (LowFrequencyModeOn) in RegOpMode for HF operation.
+          1b. Write 915 MHz (915000 kHz) to frequency registers.
+          1e. Set mode to FSRX (frequency synthesiser RX).
+          1d. Wait up to 5 iterations, checking RegIrqFlags1 bit 4 for PLL lock.
+              Exit loop as soon as a lock is detected (early-exit on first lock).
+          1f. Record whether PLL locked in HF mode.
           2a. Put module into SLEEP mode.
-          2b. Set bit 3 (LowFrequencyModeOn) in RegOpMode for LF operation
-          2c. Write 410 MHz (= 410000 kHz) to frequency registers
-          2d. Set mode to FS RX
-          2e Wait up to 5 × 100ms for PLL lock (read RegIrqFlag1 bit 4).
-          2f. Return module to SLEEP mode.
-          2g. Record if PLL locked in LF mode or not
-          3a. If neither locked, return "Unknown", if both locked return "RFM9XW/SX127X family series"
-          3b. If HF only locked, return "RFM95W", if LF only locked, return "RFM98W"
+          2b. Set bit 3 (LowFrequencyModeOn) in RegOpMode for LF operation.
+          2c. Write 410 MHz (410000 kHz) to frequency registers.
+          2d. Set mode to FSRX.
+          2e. Wait up to 5 iterations, checking RegIrqFlags1 bit 4 for PLL lock.
+              Exit loop as soon as a lock is detected (early-exit on first lock).
+          2f. Record whether PLL locked in LF mode.
+          3. Initial classification based on non-LoRa PLL results:
+              - Neither locked: "Unknown"
+              - Both locked: "RFM9XW/SX127X family series"
+              - HF only: "RFM95W (High-Band 868MHz / Semtech SX1276)"
+              - LF only: "RFM98W (Low-Band 433Mhz / Semtech SX1278)"
+          4a. (a)-(b) If initial result == "Family series": put module SLEEP → set LoRa mode bit.
+          4a. (c)-(g) LoRa-mode HF test at 915 MHz: clear LF bit, write Frf, FSRX, wait PLL.
+          4b. (h) LoRa-mode LF test at 410 MHz: SLEEP, set LF bit (LoRa stays ON), write Frf, FSRX, wait PLL.
+          4c. (i)-(j) SLEEP → clear LoRa mode bit.
+          4d. (k-l-m) Override step-3 classification based on LoRa-mode results.
+          5. Put module back into SLEEP mode and clear LoRa mode bit.
 
         Returns:
-            "Unkonwn" if neither locked"
-            "RFM9XW/SX127X family series" if the PLL locked on both frequencies
-            "RFM95W" if the PLL locked at 915 MHz (SX1276 / RFM95W).
-            "RFM98W" if the PLL locked on 410 MHz (SX1278 / RFM98W).
-            None if communication fails or module is non-functional.
+            "Unknown" if neither locked
+            "RFM9XW/SX127X family series" if both PLLs locked
+            "RFM95W" if only HF PLL locked
+            "RFM98W" if only LF PLL locked
+            None if communication fails or module is non-functional
         """
         try:
-            # 1a — Put module into sleep mode
+            # ---- Step 1a — Put module into SLEEP mode ----
             self.set_module_mode(LoRaModuleMode.SLEEP)
 
-            # 1b — Clear bit 3 (LowFrequencyModeOn) in RegOpMode for HF operation
-            self._clear_lf_mode_bit()
-
-            # 1c — Write 915 MHz (915000 kHz) to frequency registers
-            (verified, _req_msb, _req_mid, _req_lsb, _read_msb, _read_mid, _read_lsb) = \
-                self.write_and_verify_frequency_for_khz(915000)
-
-            if not verified:
-                return None  # Could not write frequency; module may be non-functional
-
+            # ---- Step 1b — Clear LoRa mode bit ----
+            self._clear_lora_mode_bit()
             time.sleep(0.01)  # Allow register update
 
-            # 1d — Set mode to FS RX (frequency synthesiser RX)
+            # ---- Steps 1c-1f: HF PLL lock test at 915 MHz ----
+            # 1c: HF mode already clear from _clear_lf_mode_bit, but set it explicitly
+            self._clear_lf_mode_bit()
+            time.sleep(0.01)
+
+            # 1d: Write 915 MHz (915000 kHz) to frequency registers
+            verified = self.write_and_verify_frequency_for_khz(915000)
+            if verified[0] is False:
+                return None  # Could not write frequency; module may be non-functional
+
+            time.sleep(0.01)
+
+            # 1e: Set mode to FSRX
             self.set_module_mode(LoRaModuleMode.FSRX)
 
-            # 1e — PLL lock detection loop (up to 5 iterations)
+            # 1f: PLL lock detection — exit as soon as any lock is detected
             hf_locked: bool = False
-            irq_flags: int | None = None
             for _attempt in range(5):
-                time.sleep(0.1)  # 1ei — Wait 100ms for PLL to settle
-                irq_flags = self.read_register(0x3E)  # RegIrqFlags1
+                time.sleep(0.1)
+                irq_flags: int | None = self.read_register(0x3E)  # RegIrqFlags1
                 if irq_flags is not None and (irq_flags & 0x10):  # Bit 4 = PLLLock
                     hf_locked = True
-                    # return "rfm95w"  # 1e — PLL locked → RFM95W/SX1276
+                    break  # Early exit — lock detected, no need to wait further
 
-            # 1g — PLL did not lock after all attempts → RFM98W/SX1278
-            # return "rfm98w"
-
-            # 2a — Put module into sleep mode
+            # ---- Steps 2a-2f: LF PLL lock test at 410 MHz ----
+            # 2a: Put module into SLEEP mode
             self.set_module_mode(LoRaModuleMode.SLEEP)
 
-            # 2b — Set bit 3 (LowFrequencyModeOn) in RegOpMode for LF operation
+            # 2b: Set LF mode bit
             self._set_lf_mode_bit()
+            time.sleep(0.01)
 
-            # 2c — Write 410 MHz (410000 kHz) to frequency registers
-            (verified, _req_msb, _req_mid, _req_lsb, _read_msb, _read_mid, _read_lsb) = \
-                self.write_and_verify_frequency_for_khz(410000)
-
-            if not verified:
+            # 2c: Write 410 MHz (410000 kHz) to frequency registers
+            verified = self.write_and_verify_frequency_for_khz(410000)
+            if verified[0] is False:
                 return None  # Could not write frequency; module may be non-functional
 
-            time.sleep(0.01)  # Allow register update
+            time.sleep(0.01)
 
-            # 2d — Set mode to FS RX (frequency synthesiser RX)
+            # 2d: Set mode to FSRX
             self.set_module_mode(LoRaModuleMode.FSRX)
 
-            # 1e — PLL lock detection loop (up to 5 iterations)
+            # 2e-2f: PLL lock detection — exit as soon as any lock is detected
             lf_locked: bool = False
             for _attempt in range(5):
-                time.sleep(0.1)  # 1ei — Wait 100ms for PLL to settle
+                time.sleep(0.1)
                 irq_flags = self.read_register(0x3E)  # RegIrqFlags1
                 if irq_flags is not None and (irq_flags & 0x10):  # Bit 4 = PLLLock
                     lf_locked = True
-                    # return "rfm98w"  # 1e — PLL locked → RFM98W/SX1278
+                    break  # Early exit — lock detected, no need to wait further
 
-            if not (lf_locked or hf_locked):
-                return LoRaModuleTypes.UNKNOWN.value
-            elif lf_locked and hf_locked:
-                return LoRaModuleTypes.RFM9XW_SX127X_FAMILY.value
+            # ---- Step 3: Initial classification (no LoRa mode) ----
+            # Store result in variable. For "Family series", LoRa-mode refinement
+            # follows below; for all other cases the variable holds the final result.
+            final_result: LoRaModuleDetectResult | None = None
+            if not (hf_locked or lf_locked):
+                final_result = LoRaModuleTypes.UNKNOWN.value
+            elif hf_locked and lf_locked:
+                final_result = LoRaModuleTypes.RFM9XW_SX127X_FAMILY.value
             elif hf_locked:
-                return LoRaModuleTypes.RFM95W_SX1276.value
+                final_result = LoRaModuleTypes.RFM95W_SX1276.value
+            else:
+                final_result = LoRaModuleTypes.RFM98W_SX1278.value
 
-            # 1g — PLL did not lock after all attempts → RFM98W/SX1278
-            # return "rfm98w"
-            return LoRaModuleTypes.RFM98W_SX1278.value
-            # return "RFM98W"
+            # ---- NEW: LoRa-mode PLL refinement (only when initial = Family series) ----
+            if final_result == LoRaModuleTypes.RFM9XW_SX127X_FAMILY.value:
+                print('Testing for LoRa family')
+                lora_ok: bool = True
+                hf_locked_lora: bool = False
+                lf_locked_lora: bool = False
+
+                # (a) SLEEP
+                self.set_module_mode(LoRaModuleMode.SLEEP)
+                time.sleep(0.01)
+
+                # (b) Enter LoRa mode
+                self._set_lora_mode_bit()
+                time.sleep(0.01)
+
+                # --- LoRa-mode HF test (c through g) ---
+                # (c) Clear LF bit (HF operation)
+                self._clear_lf_mode_bit()
+                time.sleep(0.01)
+
+                # (d) Write 915 MHz
+                hf_write_ok, _, _, _, _, _, _ = self.write_and_verify_frequency_for_khz(915000)
+                if hf_write_ok:
+                    # (e) Set FSRX
+                    self.set_module_mode(LoRaModuleMode.FSRX)
+                    # (f) Set AccessSharedReg for LoRa-mode RegIrqFlags1 access
+                    access_ok: bool | None = self._set_access_shared_reg_only_if_in_lora_mode()
+                    if access_ok is not True:
+                        lora_ok = False
+                    else:
+                        # (g) Wait for PLL lock, early exit
+                        for _attempt in range(5):
+                            time.sleep(0.1)
+                            irq_flags = self.read_register(0x3E)
+                            if irq_flags is not None and (irq_flags & 0x10):
+                                hf_locked_lora = True
+                                break
+                        # Clear AccessSharedReg
+                        clear_access_ok: bool | None = self._clear_access_shared_reg_only_if_in_lora_mode()
+                        if clear_access_ok is not True and clear_access_ok is not False:
+                            lora_ok = False
+                else:
+                    lora_ok = False
+
+                # (h) LF test: steps a and c-to-g with LF bit set, 410 MHz
+                if lora_ok:
+                    # (h-a) SLEEP
+                    self.set_module_mode(LoRaModuleMode.SLEEP)
+                    time.sleep(0.01)
+                    # (h-b) Skipped — LoRa mode already ON
+                    # (h-c) Set LF bit (LF operation)
+                    self._set_lf_mode_bit()
+                    time.sleep(0.01)
+                    # (h-d) Write 410 MHz
+                    lf_write_ok, _, _, _, _, _, _ = self.write_and_verify_frequency_for_khz(410000)
+                    if lf_write_ok:
+                        # (h-e) Set FSRX
+                        self.set_module_mode(LoRaModuleMode.FSRX)
+                        # (f) Set AccessSharedReg for LoRa-mode RegIrqFlags1 access
+                        access_ok_2: bool | None = self._set_access_shared_reg_only_if_in_lora_mode()
+                        if access_ok_2 is not True:
+                            lora_ok = False
+                        else:
+                            # (g) Wait for PLL lock, early exit — irq_flags inherits int | None from outer scope
+                            for _attempt in range(5):
+                                time.sleep(0.1)
+                                irq_flags = self.read_register(0x3E)
+                                if irq_flags is not None and (irq_flags & 0x10):
+                                    lf_locked_lora = True
+                                    break
+                            # Clear AccessSharedReg
+                            clear_access_ok_2: bool | None = self._clear_access_shared_reg_only_if_in_lora_mode()
+                            if clear_access_ok_2 is not True and clear_access_ok_2 is not False:
+                                lora_ok = False
+                    else:
+                        lora_ok = False
+
+                # (i) SLEEP
+                self.set_module_mode(LoRaModuleMode.SLEEP)
+                time.sleep(0.01)
+
+                # (j) Exit LoRa mode
+                self._clear_lora_mode_bit()
+                time.sleep(0.01)
+
+                # (k-l-m) Override classification if LoRa-mode tests succeeded
+                if lora_ok:
+                    print('Got LoRa results')
+                    if hf_locked_lora and lf_locked_lora:
+                        final_result = LoRaModuleTypes.RFM9XW_SX127X_FAMILY.value  # (k) keep
+                    elif hf_locked_lora:
+                        final_result = LoRaModuleTypes.RFM95W_SX1276.value         # (l) refine
+                    elif lf_locked_lora:
+                        final_result = LoRaModuleTypes.RFM98W_SX1278.value         # (l) refine
+                    else:
+                        final_result = LoRaModuleTypes.UNKNOWN.value               # (m) downgrade
+
+            # ---- Final return ----
+            return final_result
 
         except Exception:
             return None  # Communication or logic error during detection
         finally:
-            # 1f — Always return to sleep mode, even on failure
+            # Step 4: Always return to SLEEP and clear LoRa mode
             with suppress(Exception):
                 self.set_module_mode(LoRaModuleMode.SLEEP)
+                time.sleep(0.1)
+                self._clear_lora_mode_bit()
+                time.sleep(0.1)
 
 
 

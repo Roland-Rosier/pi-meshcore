@@ -5,10 +5,10 @@
 - **Stack**: Python 3.9+, FastAPI, SPI Drivers, `pytest`.
 - **Install Target**: Official PyPI package is `meshcore` (GitHub: `meshcore_py` by fdlamotte).
 - **Directory Layout**:
-  - `src/drivers/` (e.g. RFM95W/RFM98W radio drivers, in file lora_module.py)
-  - `src/meshcore/` (Protocol client/repeater logic)
-  - `src/cli/` (Command Line UI - meshtui style)
-  - `src/web/` (FastAPI web backend & dashboard)
+  - `src/pi_lora/drivers/` (e.g. RFM95W/RFM98W radio drivers, in file lora_module.py)
+  - `src/pi_lora/meshcore/` (Protocol client/repeater logic)
+  - `src/pi_lora/cli/` (Command Line UI - meshtui style)
+  - `src/pi_lora/web/` (FastAPI web backend & dashboard)
   - `tests/` (Unit/integration) | `docs/` (Guides)
 
 ## 2. Hardware Specs & Pin Mapping
@@ -31,3 +31,4 @@
 - **File Tool Preference**: The agent is must use `single_find_and_replace` rather than `create_new_file` when modifying existing codebases. Code edits should remain idempotent.
 - **Modification Limits**: The agent is restricted to modifying a maximum of one file per execution cycle.
 - **Testing Framework**: The authorized project verification command is `pytest`
+- **Virtual Environment**: For all project actions - e.g. running tests - use the Python virtual environment, either by activating through `.venv` or by using `uv`.
