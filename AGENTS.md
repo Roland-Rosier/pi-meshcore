@@ -31,3 +31,4 @@
 - **File Tool Preference**: The agent is must use `single_find_and_replace` rather than `create_new_file` when modifying existing codebases. Code edits should remain idempotent.
 - **Modification Limits**: The agent is restricted to modifying a maximum of one file per execution cycle.
 - **Testing Framework**: The authorized project verification command is `pytest`
+- **Virtual Environment**: For all project actions - e.g. running tests - use the Python virtual environment, either by activating through `.venv` or by using `uv`.

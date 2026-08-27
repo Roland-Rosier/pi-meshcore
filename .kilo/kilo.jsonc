@@ -1,0 +1,33 @@
+{
+  "$schema": "https://app.kilo.ai/config.json",
+  "instructions": [
+    ".kilo/rules/01-strict-tool-calls.md",
+    ".kilo/rules/02-system-constraints.md",
+    // ".kilo/rules/03-execution-protocol.md",
+    ".kilo/rules/04-use-desktop-commander-mcp.md",
+    ".kilo/rules/05-use-native-edit-tools.md"
+  ],
+  "agent": {
+    "code": {
+      "model": "local_lm_studio/qwen3.6-27b-a3b-coder",
+      "temperature": 0.7,
+      "instructions": [
+        "./kilo/rules/03-act-execution-protocol.md"
+      ]
+    },
+    "plan": {
+      "model": "local_lm_studio/qwen3.6-35b-a3b-mtp@q3_k_m",
+      "temperature": 1.0,
+      "instructions": [
+        "./kilo/rules/03-plan-execution-protocol.md"
+      ]
+    }
+  },
+  "mcp": {
+    "desktop-commander": {
+      "type": "local",
+      "command": ["npx", "-y", "@wonderwhy-er/desktop-commander@latest"],
+      "enabled": true
+    }
+  }
+}

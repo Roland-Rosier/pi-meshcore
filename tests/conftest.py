@@ -95,3 +95,14 @@ def fake_spi_rfm98w_lf_pll_only(fake_spi_rfm98w: FakeSpiDev) -> FakeSpiDev:
     """
     fake_spi_rfm98w.set_pll_auto_mode(True)  # Enable frequency-dependent PLL simulation
     return fake_spi_rfm98w
+
+
+@pytest.fixture()
+def fake_spi_family_lora_neither_locked(fake_spi_rfm95w: FakeSpiDev) -> FakeSpiDev:
+    """Fixture for LoRa-mode refinement test where initial detection = family series but no LoRa locks.
+
+    Uses manual PLL state (set_pll_lock_state(True)) so both initial tests show lock → "Family",
+    but write_and_verify_frequency_for_khz is patched to return False during LoRa-mode tests.
+    """
+    fake_spi_rfm95w.set_pll_lock_state(True)
+    return fake_spi_rfm95w

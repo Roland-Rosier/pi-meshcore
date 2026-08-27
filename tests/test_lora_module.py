@@ -19,6 +19,7 @@ from unittest.mock import patch
 
 # from src.drivers.lora_module import LoRaModule
 from pi_lora.drivers.lora_module import (
+    BIT_ACCESS_SHARED_REG,
     BIT_LF_MODE_ON,
     BIT_LORA_MODE_ON,
     MODE_SLEEP,
@@ -746,6 +747,205 @@ class TestExtendedDetectionLoRaModeAndEarlyExit:
         # After detection, LoRa mode bit should be cleared (in finally block)
         op_mode: int = rfm95w.get_register(REG_OP_MODE)
         assert (op_mode & BIT_LORA_MODE_ON) == 0x00  # LoRa bit cleared
+
+
+
+class TestAccessSharedReg:
+    """Tests for _get_is_in_lora_mode(), _set_access_shared_reg_only_if_in_lora_mode(), and _clear_access_shared_reg_only_if_in_lora_mode()."""
+
+    def test_get_is_in_lora_mode_true(self, rfm95w_factory: FakeSpiDev) -> None:
+        """_get_is_in_lora_mode returns True when LoRa bit (0x80) is set."""
+        module = LoRaModule(ce_pin=0, spi_factory=lambda: rfm95w_factory)
+        rfm95w_factory.set_register(REG_OP_MODE, BIT_LORA_MODE_ON | MODE_SLEEP)
+        result: bool | None = module._get_is_in_lora_mode()
+        assert result is True
+
+    def test_get_is_in_lora_mode_false(self, rfm95w_factory: FakeSpiDev) -> None:
+        """_get_is_in_lora_mode returns False when LoRa bit (0x80) is clear."""
+        module = LoRaModule(ce_pin=0, spi_factory=lambda: rfm95w_factory)
+        rfm95w_factory.set_register(REG_OP_MODE, MODE_SLEEP)
+        result: bool | None = module._get_is_in_lora_mode()
+        assert result is False
+
+    def test_get_is_in_lora_mode_spi_failure(self, fake_spi_rfm95w: FakeSpiDev) -> None:
+        """_get_is_in_lora_mode returns None when SPI read fails."""
+        module = LoRaModule(ce_pin=0, spi_factory=lambda: fake_spi_rfm95w)
+        fake_spi_rfm95w.enable_failure_read()
+        result: bool | None = module._get_is_in_lora_mode()
+        assert result is None
+
+    def test_set_access_shared_reg_only_if_in_lora_mode_sets_bit(self, rfm95w_factory: FakeSpiDev) -> None:
+        """_set_access_shared_reg_only_if_in_lora_mode sets bit 6 when in LoRa mode."""
+        module = LoRaModule(ce_pin=0, spi_factory=lambda: rfm95w_factory)
+        rfm95w_factory.set_register(REG_OP_MODE, BIT_LORA_MODE_ON | MODE_SLEEP)
+        result: bool | None = module._set_access_shared_reg_only_if_in_lora_mode()
+        assert result is True
+        op_mode: int = rfm95w_factory.get_register(REG_OP_MODE)
+        assert (op_mode & BIT_ACCESS_SHARED_REG) == BIT_ACCESS_SHARED_REG
+        assert (op_mode & BIT_LORA_MODE_ON) == BIT_LORA_MODE_ON
+
+    def test_set_access_shared_reg_only_if_in_lora_mode_already_set(self, rfm95w_factory: FakeSpiDev) -> None:
+        """_set_access_shared_reg_only_if_in_lora_mode returns True when bit already set."""
+        module = LoRaModule(ce_pin=0, spi_factory=lambda: rfm95w_factory)
+        rfm95w_factory.set_register(REG_OP_MODE, BIT_LORA_MODE_ON | BIT_ACCESS_SHARED_REG | MODE_SLEEP)
+        result: bool | None = module._set_access_shared_reg_only_if_in_lora_mode()
+        assert result is True
+
+    def test_set_access_shared_reg_only_if_in_lora_mode_not_in_lora(self, rfm95w_factory: FakeSpiDev) -> None:
+        """_set_access_shared_reg_only_if_in_lora_mode returns False when not in LoRa mode."""
+        module = LoRaModule(ce_pin=0, spi_factory=lambda: rfm95w_factory)
+        rfm95w_factory.set_register(REG_OP_MODE, MODE_SLEEP)
+        result: bool | None = module._set_access_shared_reg_only_if_in_lora_mode()
+        assert result is False
+
+    def test_set_access_shared_reg_only_if_in_lora_mode_spi_failure(self, fake_spi_rfm95w: FakeSpiDev) -> None:
+        """_set_access_shared_reg_only_if_in_lora_mode returns None on SPI failure."""
+        module = LoRaModule(ce_pin=0, spi_factory=lambda: fake_spi_rfm95w)
+        rfm95w_factory_setter = fake_spi_rfm95w
+        rfm95w_factory_setter.set_register(REG_OP_MODE, BIT_LORA_MODE_ON | MODE_SLEEP)
+        rfm95w_factory_setter.enable_failure_read()
+        result: bool | None = module._set_access_shared_reg_only_if_in_lora_mode()
+        assert result is None
+
+    def test_clear_access_shared_reg_only_if_in_lora_mode_clears_bit(self, rfm95w_factory: FakeSpiDev) -> None:
+        """_clear_access_shared_reg_only_if_in_lora_mode clears bit 6 when in LoRa mode."""
+        module = LoRaModule(ce_pin=0, spi_factory=lambda: rfm95w_factory)
+        rfm95w_factory.set_register(REG_OP_MODE, BIT_LORA_MODE_ON | BIT_ACCESS_SHARED_REG | MODE_SLEEP)
+        result: bool | None = module._clear_access_shared_reg_only_if_in_lora_mode()
+        assert result is True
+        op_mode: int = rfm95w_factory.get_register(REG_OP_MODE)
+        assert (op_mode & BIT_ACCESS_SHARED_REG) == 0x00
+        assert (op_mode & BIT_LORA_MODE_ON) == BIT_LORA_MODE_ON
+
+    def test_clear_access_shared_reg_only_if_in_lora_mode_already_cleared(self, rfm95w_factory: FakeSpiDev) -> None:
+        """_clear_access_shared_reg_only_if_in_lora_mode returns True when bit already cleared."""
+        module = LoRaModule(ce_pin=0, spi_factory=lambda: rfm95w_factory)
+        rfm95w_factory.set_register(REG_OP_MODE, BIT_LORA_MODE_ON | MODE_SLEEP)
+        result: bool | None = module._clear_access_shared_reg_only_if_in_lora_mode()
+        assert result is True
+
+    def test_clear_access_shared_reg_only_if_in_lora_mode_not_in_lora(self, rfm95w_factory: FakeSpiDev) -> None:
+        """_clear_access_shared_reg_only_if_in_lora_mode returns False when not in LoRa mode."""
+        module = LoRaModule(ce_pin=0, spi_factory=lambda: rfm95w_factory)
+        rfm95w_factory.set_register(REG_OP_MODE, MODE_SLEEP)
+        result: bool | None = module._clear_access_shared_reg_only_if_in_lora_mode()
+        assert result is False
+
+    def test_clear_access_shared_reg_only_if_in_lora_mode_spi_failure(self, fake_spi_rfm95w: FakeSpiDev) -> None:
+        """_clear_access_shared_reg_only_if_in_lora_mode returns None on SPI failure."""
+        module = LoRaModule(ce_pin=0, spi_factory=lambda: fake_spi_rfm95w)
+        rfm95w_factory_setter = fake_spi_rfm95w
+        rfm95w_factory_setter.set_register(REG_OP_MODE, BIT_LORA_MODE_ON | BIT_ACCESS_SHARED_REG | MODE_SLEEP)
+        rfm95w_factory_setter.enable_failure_read()
+        result: bool | None = module._clear_access_shared_reg_only_if_in_lora_mode()
+        assert result is None
+
+    def test_lora_pll_detection_sets_clears_access_shared_reg(self, fake_spi_rfm95w_pll_locked: FakeSpiDev) -> None:
+        """LoRa-mode PLL detection sets AccessSharedReg, reads PLL lock, then clears it."""
+        module = LoRaModule(ce_pin=0, spi_factory=lambda: fake_spi_rfm95w_pll_locked)
+
+        # Pre-condition: both HF and LF PLLs locked, so initial detection = family series
+        # which triggers the LoRa-mode refinement path.
+        result: Literal[LoRaModuleTypes.UNKNOWN.value,
+                        LoRaModuleTypes.RFM95W_SX1276.value,
+                        LoRaModuleTypes.RFM98W_SX1278.value,
+                        LoRaModuleTypes.RFM9XW_SX127X_FAMILY.value] | None = module._perform_extended_detection()
+
+        assert result == "RFM9XW/SX127X family series"
+        # After detection, AccessSharedReg should be cleared and LoRa mode should be cleared.
+        op_mode: int = fake_spi_rfm95w_pll_locked.get_register(REG_OP_MODE)
+        assert (op_mode & BIT_ACCESS_SHARED_REG) == 0x00
+        assert (op_mode & BIT_LORA_MODE_ON) == 0x00
+
+
+class TestLoRaModePLLRefinement:
+    """Tests for the LoRa-mode PLL refinement inserted between step 3 and step 4."""
+
+    def test_rfm95w_hf_locked_lora_only(
+        self, fake_spi_rfm95w_hf_pll_only: FakeSpiDev
+    ) -> None:
+        """HF-only auto-mode → initial non-LoRa detects HF only → no family → returns RFM95W."""
+        module = LoRaModule(ce_pin=0, spi_factory=lambda: fake_spi_rfm95w_hf_pll_only)
+        result: Literal[LoRaModuleTypes.UNKNOWN.value,
+                        LoRaModuleTypes.RFM95W_SX1276.value,
+                        LoRaModuleTypes.RFM98W_SX1278.value,
+                        LoRaModuleTypes.RFM9XW_SX127X_FAMILY.value] | None = module._perform_extended_detection()
+        assert result == "RFM95W (High-Band 868MHz / Semtech SX1276)"
+
+    def test_rfm98w_lf_locked_lora_only(
+        self, fake_spi_rfm98w_lf_pll_only: FakeSpiDev
+    ) -> None:
+        """LF-only auto-mode → initial non-LoRa detects LF only → no family → returns RFM98W."""
+        module = LoRaModule(ce_pin=1, spi_factory=lambda: fake_spi_rfm98w_lf_pll_only)
+        result: Literal[LoRaModuleTypes.UNKNOWN.value,
+                        LoRaModuleTypes.RFM95W_SX1276.value,
+                        LoRaModuleTypes.RFM98W_SX1278.value,
+                        LoRaModuleTypes.RFM9XW_SX127X_FAMILY.value] | None = module._perform_extended_detection()
+        assert result == "RFM98W (Low-Band 433Mhz / Semtech SX1278)"
+
+    def test_family_still_family_with_lora_mode(
+        self, fake_spi_rfm95w_pll_locked: FakeSpiDev
+    ) -> None:
+        """Both PLL locked in non-LoRa → family series → LoRa-mode runs → both still lock → family."""
+        module = LoRaModule(ce_pin=0, spi_factory=lambda: fake_spi_rfm95w_pll_locked)
+        result: Literal[LoRaModuleTypes.UNKNOWN.value,
+                        LoRaModuleTypes.RFM95W_SX1276.value,
+                        LoRaModuleTypes.RFM98W_SX1278.value,
+                        LoRaModuleTypes.RFM9XW_SX127X_FAMILY.value] | None = module._perform_extended_detection()
+        assert result == "RFM9XW/SX127X family series"
+
+    def test_neither_locked_lora_becomes_unknown(
+        self, fake_spi_family_lora_neither_locked: FakeSpiDev
+    ) -> None:
+        """Initial = family (both locked), LoRa-mode HF write fails → lora_ok=False → keeps initial family."""
+        module = LoRaModule(ce_pin=0, spi_factory=lambda: fake_spi_family_lora_neither_locked)
+
+        # Allow initial writes to succeed, fail during LoRa-mode tests.
+        call_counter: list[int] = [0]
+
+        def side_effect(khz: int):
+            if call_counter[0] < 2:
+                call_counter[0] += 1
+                return (True, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00)
+            call_counter[0] += 1
+            return (False, None, None, None, None, None, None)
+
+        with patch.object(module, 'write_and_verify_frequency_for_khz', side_effect=side_effect):
+            result = module._perform_extended_detection()
+
+        # When LoRa-mode write fails (lora_ok=False), initial "Family" is kept.
+        assert result == "RFM9XW/SX127X family series"
+
+    def test_lora_mode_not_run_for_rfm95w(
+        self, fake_spi_rfm95w_hf_pll_only: FakeSpiDev
+    ) -> None:
+        """Initial classification already RFM95W (HF only, no family) → LoRa-mode skipped."""
+        module = LoRaModule(ce_pin=0, spi_factory=lambda: fake_spi_rfm95w_hf_pll_only)
+
+        # Use the real write_and_verify_frequency_for_khz (no patch) so auto-PLL works.
+        result = module._perform_extended_detection()
+
+        assert result == "RFM95W (High-Band 868MHz / Semtech SX1276)"
+
+    def test_lora_mode_not_run_rfm98w(
+        self, fake_spi_rfm98w_lf_pll_only: FakeSpiDev
+    ) -> None:
+        """Initial classification already RFM98W (LF only, no family) → LoRa-mode skipped."""
+        module = LoRaModule(ce_pin=1, spi_factory=lambda: fake_spi_rfm98w_lf_pll_only)
+
+        result = module._perform_extended_detection()
+
+        assert result == "RFM98W (Low-Band 433Mhz / Semtech SX1278)"
+
+    def test_lora_mode_not_run_unknown(
+        self, fake_spi_rfm98w_pll_not_locked: FakeSpiDev
+    ) -> None:
+        """Initial classification already Unknown → LoRa-mode skipped."""
+        module = LoRaModule(ce_pin=1, spi_factory=lambda: fake_spi_rfm98w_pll_not_locked)
+
+        result = module._perform_extended_detection()
+
+        assert result == "Unknown"
 
 
 
