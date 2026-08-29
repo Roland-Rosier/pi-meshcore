@@ -17,6 +17,8 @@
 from typing import Literal
 from unittest.mock import patch
 
+import pytest
+
 # from src.drivers.lora_module import LoRaModule
 from pi_lora.drivers.lora_module import (
     BIT_ACCESS_SHARED_REG,
@@ -946,6 +948,247 @@ class TestLoRaModePLLRefinement:
         result = module._perform_extended_detection()
 
         assert result == "Unknown"
+
+
+class TestTestForPLLLock:
+    """Tests for the new private method `_test_for_pll_lock`.
+
+    Targets every code path in the PLL lock test subroutine. Tests that invoke
+    the real time.sleep loop are marked with pytest.mark.slow to avoid CI slowness.
+    """
+
+    # ------------------------------------------------------------------
+    #PLL lock succeeds — not-lora HF/LF
+    # ------------------------------------------------------------------
+
+    def test_pll_lock_succeeds_not_lora_hf(
+        self, fake_spi_rfm95w_pll_locked: FakeSpiDev
+    ) -> None:
+        """PLL locks successfully in non-LoRa mode at high frequency (915 MHz)."""
+        module = LoRaModule(ce_pin=0, spi_factory=lambda: fake_spi_rfm95w_pll_locked)
+        result: bool | None = module._test_for_pll_lock(False, 915000)
+        assert result is True
+
+    def test_pll_lock_succeeds_not_lora_lf(
+        self, fake_spi_rfm95w_pll_locked: FakeSpiDev
+    ) -> None:
+        """PLL locks successfully in non-LoRa mode at low frequency (410 MHz)."""
+        module = LoRaModule(ce_pin=0, spi_factory=lambda: fake_spi_rfm95w_pll_locked)
+        result: bool | None = module._test_for_pll_lock(False, 410000)
+        assert result is True
+
+    # ------------------------------------------------------------------
+    # PLL lock succeeds — LoRa mode HF/LF
+    # ------------------------------------------------------------------
+
+    def test_pll_lock_succeeds_lora_mode_hf(
+        self, fake_spi_rfm95w_pll_locked: FakeSpiDev
+    ) -> None:
+        """PLL locks successfully in LoRa mode at high frequency (915 MHz)."""
+        module = LoRaModule(ce_pin=0, spi_factory=lambda: fake_spi_rfm95w_pll_locked)
+        result: bool | None = module._test_for_pll_lock(True, 915000)
+        assert result is True
+
+    def test_pll_lock_succeeds_lora_mode_lf(
+        self, fake_spi_rfm95w_pll_locked: FakeSpiDev
+    ) -> None:
+        """PLL locks successfully in LoRa mode at low frequency (410 MHz)."""
+        module = LoRaModule(ce_pin=0, spi_factory=lambda: fake_spi_rfm95w_pll_locked)
+        result: bool | None = module._test_for_pll_lock(True, 410000)
+        assert result is True
+
+    # ------------------------------------------------------------------
+    # PLL lock fails — not-lora HF/LF
+    # ------------------------------------------------------------------
+
+    def test_pll_lock_fails_not_lora_hf(
+        self, fake_spi_rfm98w_pll_not_locked: FakeSpiDev
+    ) -> None:
+        """PLL does not lock in non-LoRa mode at high frequency (915 MHz)."""
+        module = LoRaModule(ce_pin=1, spi_factory=lambda: fake_spi_rfm98w_pll_not_locked)
+        result: bool | None = module._test_for_pll_lock(False, 915000)
+        assert result is False
+
+    def test_pll_lock_fails_not_lora_lf(
+        self, fake_spi_rfm98w_pll_not_locked: FakeSpiDev
+    ) -> None:
+        """PLL does not lock in non-LoRa mode at low frequency (410 MHz)."""
+        module = LoRaModule(ce_pin=1, spi_factory=lambda: fake_spi_rfm98w_pll_not_locked)
+        result: bool | None = module._test_for_pll_lock(False, 410000)
+        assert result is False
+
+    # ------------------------------------------------------------------
+    # PLL lock fails — LoRa mode HF/LF
+    # ------------------------------------------------------------------
+
+    def test_pll_lock_fails_lora_mode_hf(
+        self, fake_spi_rfm98w_pll_not_locked: FakeSpiDev
+    ) -> None:
+        """PLL does not lock in LoRa mode at high frequency (915 MHz)."""
+        module = LoRaModule(ce_pin=1, spi_factory=lambda: fake_spi_rfm98w_pll_not_locked)
+        result: bool | None = module._test_for_pll_lock(True, 915000)
+        assert result is False
+
+    def test_pll_lock_fails_lora_mode_lf(
+        self, fake_spi_rfm98w_pll_not_locked: FakeSpiDev
+    ) -> None:
+        """PLL does not lock in LoRa mode at low frequency (410 MHz)."""
+        module = LoRaModule(ce_pin=1, spi_factory=lambda: fake_spi_rfm98w_pll_not_locked)
+        result: bool | None = module._test_for_pll_lock(True, 410000)
+        assert result is False
+
+    # ------------------------------------------------------------------
+    # PLL lock returns None — SPI failure paths
+    # ------------------------------------------------------------------
+
+    def test_pll_lock_returns_none_spi_failure_lora_set(
+        self, fake_spi_rfm95w: FakeSpiDev
+    ) -> None:
+        """SPI read fails during _set_access_shared_reg_only_if_in_lora_mode → returns None."""
+        module = LoRaModule(ce_pin=0, spi_factory=lambda: fake_spi_rfm95w)
+        # Patch read_register to always return None so that the SPI read inside
+        # _get_is_in_lora_mode (called by _set_access_shared_reg_only_if_in_lora_mode)
+        # returns None.
+        with patch.object(module, 'read_register', return_value=None):
+            result: bool | None = module._test_for_pll_lock(True, 915000)
+        assert result is None
+
+    def test_pll_lock_returns_none_spi_failure_lora_clear(
+        self, fake_spi_rfm95w: FakeSpiDev
+    ) -> None:
+        """SPI read fails during _clear_access_shared_reg_only_if_in_lora_mode → returns None."""
+        module = LoRaModule(ce_pin=0, spi_factory=lambda: fake_spi_rfm95w)
+        # First call succeeds (PLL already locked), then enable failure for the clear path.
+        # We patch read_register to fail only on the second loop iteration.
+        original_read = module.read_register
+        call_count: list[int] = [0]
+
+        def failing_read(reg_addr: int) -> int | None:
+            call_count[0] += 1
+            if call_count[0] > 5:  # After PLL lock loop completes, fail on clear path read
+                return None
+            return original_read(reg_addr)
+
+        with patch.object(module, 'read_register', side_effect=failing_read):
+            result: bool | None = module._test_for_pll_lock(True, 915000)
+        assert result is None
+
+    def test_pll_lock_returns_none_spi_read_all_fail(
+        self, fake_spi_rfm95w: FakeSpiDev
+    ) -> None:
+        """Every read_register call returns None → PLL never locks → returns False."""
+        module = LoRaModule(ce_pin=0, spi_factory=lambda: fake_spi_rfm95w)
+        # Enable failure on the very first read so all subsequent reads fail.
+        fake_spi_rfm95w.enable_failure_read()
+        result: bool | None = module._test_for_pll_lock(False, 915000)
+        assert result is False
+
+    def test_pll_lock_returns_none_write_failure(
+        self, rfm95w_factory: FakeSpiDev
+    ) -> None:
+        """_write_frequency_for_khz returns (None, None, None) → returns None."""
+        module = LoRaModule(ce_pin=0, spi_factory=lambda: rfm95w_factory)
+        with patch.object(module, '_write_frequency_for_khz', return_value=(None, None, None)):
+            result: bool | None = module._test_for_pll_lock(False, 915000)
+        assert result is None
+
+    # ------------------------------------------------------------------
+    # PLL lock state cleanup — sleep mode / LoRa bit
+    # ------------------------------------------------------------------
+
+    def test_pll_lock_exits_sleep_clears_lora(
+        self, rfm95w_factory: FakeSpiDev
+    ) -> None:
+        """After _test_for_pll_lock(True), RegOpMode is SLEEP with LoRa bit cleared."""
+        module = LoRaModule(ce_pin=0, spi_factory=lambda: rfm95w_factory)
+        _ = module._test_for_pll_lock(True, 915000)
+        op_mode: int = rfm95w_factory.get_register(REG_OP_MODE)
+        assert (op_mode & 0x07) == LoRaModuleMode.SLEEP
+        assert (op_mode & BIT_LORA_MODE_ON) == 0x00
+
+    def test_pll_lock_preserves_lora_off_when_not_enabled(
+        self, rfm95w_factory: FakeSpiDev
+    ) -> None:
+        """When enable_lora_mode=False, LoRa bit is never set during execution."""
+        module = LoRaModule(ce_pin=0, spi_factory=lambda: rfm95w_factory)
+        # Track whether LoRa bit was ever set by monitoring register writes.
+        original_write = module.write_register
+        lora_bit_was_set: list[bool] = [False]
+
+        def tracking_write(reg_addr: int, value: int) -> int | None:
+            if reg_addr == REG_OP_MODE and (value & BIT_LORA_MODE_ON):
+                lora_bit_was_set[0] = True
+            return original_write(reg_addr, value)
+
+        with patch.object(module, 'write_register', side_effect=tracking_write):
+            _ = module._test_for_pll_lock(False, 915000)
+        assert lora_bit_was_set[0] is False
+
+    # ------------------------------------------------------------------
+    # PLL lock early exit / timing
+    # ------------------------------------------------------------------
+
+    @pytest.mark.slow
+    def test_pll_lock_early_exit_minimal_iterations(
+        self, rfm95w_factory: FakeSpiDev
+    ) -> None:
+        """Patch read_register to count 0x3E reads; verify early exit triggers within 2 iterations."""
+        rfm95w_factory.set_pll_lock_state(True)
+        module = LoRaModule(ce_pin=0, spi_factory=lambda: rfm95w_factory)
+
+        irq_flags1_read_count: list[int] = [0]
+
+        def counting_read(reg_addr: int) -> int | None:
+            if reg_addr == 0x3E:
+                irq_flags1_read_count[0] += 1
+                return 0x10  # PLL locked bit set → triggers early exit
+            return 0x00
+
+        with patch.object(module, 'read_register', side_effect=counting_read):
+            _ = module._test_for_pll_lock(False, 915000)
+        assert irq_flags1_read_count[0] <= 2
+
+    # ------------------------------------------------------------------
+    # LF mode bit boundary logic
+    # ------------------------------------------------------------------
+
+    def test_pll_lock_hf_clears_lf_bit(
+        self, rfm95w_factory: FakeSpiDev
+    ) -> None:
+        """Call with frequency_khz=915000 → LF bit (bit 3) is 0 after."""
+        module = LoRaModule(ce_pin=0, spi_factory=lambda: rfm95w_factory)
+        _ = module._test_for_pll_lock(False, 915000)
+        op_mode: int = rfm95w_factory.get_register(REG_OP_MODE)
+        assert (op_mode & BIT_LF_MODE_ON) == 0x00
+
+    def test_pll_lock_lf_sets_lf_bit(
+        self, rfm95w_factory: FakeSpiDev
+    ) -> None:
+        """Call with frequency_khz=410000 → LF bit (bit 3) is 1 after."""
+        module = LoRaModule(ce_pin=0, spi_factory=lambda: rfm95w_factory)
+        _ = module._test_for_pll_lock(False, 410000)
+        op_mode: int = rfm95w_factory.get_register(REG_OP_MODE)
+        assert (op_mode & BIT_LF_MODE_ON) == BIT_LF_MODE_ON
+
+    @pytest.mark.slow
+    def test_pll_lock_boundary_at_700000(
+        self, rfm95w_factory: FakeSpiDev
+    ) -> None:
+        """Call with frequency_khz=700000 → LF bit is set (700000 is NOT > 700000)."""
+        module = LoRaModule(ce_pin=0, spi_factory=lambda: rfm95w_factory)
+        _ = module._test_for_pll_lock(False, 700000)
+        op_mode: int = rfm95w_factory.get_register(REG_OP_MODE)
+        assert (op_mode & BIT_LF_MODE_ON) == BIT_LF_MODE_ON
+
+    @pytest.mark.slow
+    def test_pll_lock_boundary_above_700000(
+        self, rfm95w_factory: FakeSpiDev
+    ) -> None:
+        """Call with frequency_khz=700001 → LF bit is cleared (700001 > 700000)."""
+        module = LoRaModule(ce_pin=0, spi_factory=lambda: rfm95w_factory)
+        _ = module._test_for_pll_lock(False, 700001)
+        op_mode: int = rfm95w_factory.get_register(REG_OP_MODE)
+        assert (op_mode & BIT_LF_MODE_ON) == 0x00
 
 
 
