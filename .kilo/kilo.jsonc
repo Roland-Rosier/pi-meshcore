@@ -16,7 +16,8 @@
       ]
     },
     "plan": {
-      "model": "local_lm_studio/qwen3.6-35b-a3b-mtp@q3_k_m",
+      // "model": "local_lm_studio/qwen3.6-35b-a3b-mtp@q3_k_m",
+      "model": "local_lm_studio/qwen3.8-27b@iq3_xxs",
       "temperature": 1.0,
       "instructions": [
         "./kilo/rules/03-plan-execution-protocol.md"
