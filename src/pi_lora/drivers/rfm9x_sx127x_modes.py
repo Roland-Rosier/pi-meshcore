@@ -95,26 +95,26 @@ class _ConstantsMeta(type):
 
     @property
     def STATE_BITS(cls) -> StateBits:
-        raw = cls._Constants.STATE_BITS.value
+        raw = getattr(cls, '_Constants').STATE_BITS.value  # noqa: B009
         return StateBits(raw.value if isinstance(raw, StateBits) else raw)
 
     @property
     def MODE_BITS(cls) -> ModeBits:
-        raw = cls._Constants.STATE_BITS.value
+        raw = getattr(cls, '_Constants').STATE_BITS.value  # noqa: B009
         bits = raw.value if isinstance(raw, StateBits) else raw
         raw_mode: int = bits & 0x07
         return ModeBits(raw_mode)
 
     @property
     def META_MODE_BITS(cls) -> MetaModeBits:
-        raw = cls._Constants.STATE_BITS.value
+        raw = getattr(cls, '_Constants').STATE_BITS.value  # noqa: B009
         bits = raw.value if isinstance(raw, StateBits) else raw
         raw_meta: int = (bits & 0x70) >> 4
         return MetaModeBits(raw_meta)
 
     @property
     def LORA_MODE(cls) -> LoraMode:
-        raw = cls._Constants.STATE_BITS.value
+        raw = getattr(cls, '_Constants').STATE_BITS.value  # noqa: B009
         bits = raw.value if isinstance(raw, StateBits) else raw
         mask_result: int = bits & 0x08
         return LoraMode.LORA if mask_result else LoraMode.FSK_OOK

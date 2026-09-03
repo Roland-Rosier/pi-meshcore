@@ -254,22 +254,18 @@ class TestImmutability:
     """Test that state constants are truly immutable at the class level."""
 
     def test_state_bits_immutable(self) -> None:
-        original = UnknownState.STATE_BITS
         with pytest.raises(AttributeError):
             UnknownState.STATE_BITS = StateBits.RESET  # type: ignore[assignment]
 
     def test_mode_bits_immutable(self) -> None:
-        original = FskOokSleepState.MODE_BITS
         with pytest.raises(AttributeError):
             FskOokSleepState.MODE_BITS = ModeBits.STANDBY  # type: ignore[assignment]
 
     def test_lora_mode_immutable(self) -> None:
-        original = FskOokSleepState.LORA_MODE
         with pytest.raises(AttributeError):
             FskOokSleepState.LORA_MODE = LoraMode.LORA  # type: ignore[assignment]
 
     def test_meta_mode_bits_immutable(self) -> None:
-        original = FskOokSleepState.META_MODE_BITS
         with pytest.raises(AttributeError):
             FskOokSleepState.META_MODE_BITS = MetaModeBits.DEVICE_IN_KNOWN_MODE  # type: ignore[assignment]
 
