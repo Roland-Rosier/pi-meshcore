@@ -90,6 +90,15 @@ uv run ruff check src/ tests/
 uv run ruff check src/ tests/ --fix
 ```
 
+### Security Scanning
+
+This project uses [`semgrep`](https://semgrep.dev/) for SAST-based security and supply-chain scanning. Configuration lives in `[tool.semgrep]` inside `pyproject.toml`.
+
+```bash
+# Run semgrep security scan on source code
+uv run semgrep --config semgrep-rules/ src/ tests/
+```
+
 ### Adding Dependencies
 
 ```bash
