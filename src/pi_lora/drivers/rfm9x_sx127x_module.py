@@ -21,55 +21,14 @@ using a shared ``state_instances`` dictionary to avoid redundant object creation
 
 
 from .rfm9x_sx127x_modes import (
-    ErrorState,
-    FskOokFsrxState,
-    FskOokFstxState,
-    FskOokRxState,
-    FskOokSleepState,
-    FskOokStandbyState,
-    FskOokTxState,
-    LoraCadState,
-    LoraFsrxState,
-    LoraFstxState,
     LoraMode,
-    LoraRxcontinuousState,
-    LoraRxingleState,
-    LoraSleepState,
-    LoraStandbyState,
-    LoraTxState,
-    NotARfm9xSx127xDeviceState,
-    ResetState,
     Rfm9xSx127xMode,
     StateBits,
-    UndefinedState,
-    UnknownState,
+    StateBitsMapping,
 )
 
 
 class Rfm9xSx127xModule:
-
-    _STATE_MAP: dict[StateBits, type[Rfm9xSx127xMode]] = {
-        StateBits.FSK_OOK_SLEEP: FskOokSleepState,
-        StateBits.LORA_SLEEP: LoraSleepState,
-        StateBits.FSK_OOK_STANDBY: FskOokStandbyState,
-        StateBits.LORA_STANDBY: LoraStandbyState,
-        StateBits.FSK_OOK_FSTX: FskOokFstxState,
-        StateBits.LORA_FSTX: LoraFstxState,
-        StateBits.FSK_OOK_FSRX: FskOokFsrxState,
-        StateBits.LORA_FSRX: LoraFsrxState,
-        StateBits.FSK_OOK_TX: FskOokTxState,
-        StateBits.LORA_TX: LoraTxState,
-        StateBits.FSK_OOK_RX: FskOokRxState,
-        StateBits.LORA_RXCONTINUOUS: LoraRxcontinuousState,
-        StateBits.LORA_RXSINGLE: LoraRxingleState,
-        StateBits.LORA_CAD: LoraCadState,
-        StateBits.ERROR_STATE: ErrorState,
-        StateBits.NOT_A_RFM9X_SX127X_DEVICE: NotARfm9xSx127xDeviceState,
-        StateBits.UNDEFINED_STATE: UndefinedState,
-        StateBits.UNKNOWN_STATE: UnknownState,
-        StateBits.RESET_STATE: ResetState,
-    }
-
     """State management context for a RFM9x/SX127x radio module.
 
     Stores one active ``Rfm9xSx127xMode`` instance in ``current_state_instance``
@@ -90,7 +49,7 @@ class Rfm9xSx127xModule:
     @staticmethod
     def _create_state_instance(state: StateBits) -> Rfm9xSx127xMode:
         """Map a ``StateBits`` enum to its corresponding mode class and instantiate it."""
-        mode_class = Rfm9xSx127xModule._STATE_MAP.get(state, UnknownState)
+        mode_class: type[Rfm9xSx127xMode] = StateBitsMapping.from_bits(state).value
         return mode_class()
 
     def _create_instances(self) -> dict[type[Rfm9xSx127xMode], Rfm9xSx127xMode]:
@@ -123,7 +82,7 @@ class Rfm9xSx127xModule:
 
     def is_in_state(self, state: StateBits) -> bool:
         """Return ``True`` when the current active instance matches *state*."""
-        expected_cls = Rfm9xSx127xModule._STATE_MAP.get(state)
+        expected_cls = StateBitsMapping.from_bits(state).value
         if expected_cls is None:
             return False
         return type(self.current_state_instance) is expected_cls

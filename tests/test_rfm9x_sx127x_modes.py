@@ -27,8 +27,8 @@ from src.pi_lora.drivers.rfm9x_sx127x_modes import (
     LoraFsrxState,
     LoraFstxState,
     LoraMode,
-    LoraRxcontinuousState,
-    LoraRxingleState,
+    LoraRxContinuousState,
+    LoraRxSingleState,
     LoraSleepState,
     LoraStandbyState,
     LoraTxState,
@@ -135,7 +135,7 @@ class TestMetaModeBitsExtraction:
             FskOokFstxState, LoraFstxState,
             FskOokFsrxState, LoraFsrxState,
             FskOokTxState, LoraTxState,
-            FskOokRxState, LoraRxcontinuousState, LoraRxingleState,
+            FskOokRxState, LoraRxContinuousState, LoraRxSingleState,
             LoraCadState,
         ]
         for cls in real_mode_classes:
@@ -232,16 +232,16 @@ class TestLoraModes:
         assert LoraTxState.LORA_MODE.value is True
 
     def test_lora_rx_continuous(self) -> None:
-        assert type(LoraRxcontinuousState.STATE_BITS) is StateBits
-        assert LoraRxcontinuousState.STATE_BITS.value == 0x0D
-        assert LoraRxcontinuousState.MODE_BITS.value == 0x05
-        assert LoraRxcontinuousState.LORA_MODE.value is True
+        assert type(LoraRxContinuousState.STATE_BITS) is StateBits
+        assert LoraRxContinuousState.STATE_BITS.value == 0x0D
+        assert LoraRxContinuousState.MODE_BITS.value == 0x05
+        assert LoraRxContinuousState.LORA_MODE.value is True
 
     def test_lora_rx_single(self) -> None:
-        assert type(LoraRxingleState.STATE_BITS) is StateBits
-        assert LoraRxingleState.STATE_BITS.value == 0x0E
-        assert LoraRxingleState.MODE_BITS.value == 0x06
-        assert LoraRxingleState.LORA_MODE.value is True
+        assert type(LoraRxSingleState.STATE_BITS) is StateBits
+        assert LoraRxSingleState.STATE_BITS.value == 0x0E
+        assert LoraRxSingleState.MODE_BITS.value == 0x06
+        assert LoraRxSingleState.LORA_MODE.value is True
 
     def test_lora_cad(self) -> None:
         assert type(LoraCadState.STATE_BITS) is StateBits
@@ -303,8 +303,8 @@ class TestBaseClassBehavior:
             FskOokTxState,
             LoraTxState,
             FskOokRxState,
-            LoraRxcontinuousState,
-            LoraRxingleState,
+            LoraRxContinuousState,
+            LoraRxSingleState,
             LoraCadState,
         ]
         for cls in expected_classes:
