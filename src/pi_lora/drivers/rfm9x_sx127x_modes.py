@@ -258,14 +258,14 @@ class FskOokRxState(Rfm9xSx127xMode):
         STATE_BITS = StateBits.FSK_OOK_RX
 
 
-class LoraRxcontinuousState(Rfm9xSx127xMode):
+class LoraRxContinuousState(Rfm9xSx127xMode):
     """LoRa RX continuous mode (0x0D)."""
 
     class _Constants(Enum):
         STATE_BITS = StateBits.LORA_RXCONTINUOUS
 
 
-class LoraRxingleState(Rfm9xSx127xMode):
+class LoraRxSingleState(Rfm9xSx127xMode):
     """LoRa RX single mode (0x0E)."""
 
     class _Constants(Enum):
@@ -277,3 +277,30 @@ class LoraCadState(Rfm9xSx127xMode):
 
     class _Constants(Enum):
         STATE_BITS = StateBits.LORA_CAD
+
+
+class StateBitsMapping(Enum):
+    FSK_OOK_SLEEP = FskOokSleepState
+    LORA_SLEEP = LoraSleepState
+    FSK_OOK_STANDBY = FskOokStandbyState
+    LORA_STANDBY = LoraStandbyState
+    FSK_OOK_FSTX = FskOokFstxState
+    LORA_FSTX = LoraFstxState
+    FSK_OOK_FSRX = FskOokFsrxState
+    LORA_FSRX = LoraFsrxState
+    FSK_OOK_TX = FskOokTxState
+    LORA_TX = LoraTxState
+    FSK_OOK_RX = FskOokRxState
+    LORA_RXCONTINUOUS = LoraRxContinuousState
+    LORA_RXSINGLE = LoraRxSingleState
+    LORA_CAD = LoraCadState
+    ERROR_STATE = ErrorState
+    NOT_A_RFM9X_SX127X_DEVICE = NotARfm9xSx127xDeviceState
+    UNDEFINED_STATE = UndefinedState
+    UNKNOWN_STATE = UnknownState
+    RESET_STATE = ResetState
+
+    @classmethod
+    def from_bits(cls, bits: StateBits) -> "StateBitsMapping":
+        # mypy accepts looking up by .name string safely
+        return cls[bits.name]

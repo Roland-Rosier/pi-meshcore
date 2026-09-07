@@ -209,7 +209,9 @@ uv remove <package-name>
 │   └── drivers/
 │       ├── __init__.py               # Drivers sub-package initialization
 │       ├── lora_detection.py          # LoRa module auto-detection logic (RFM95W/RFM98W)
-│       └── lora_module.py             # RFM95W/RFM98W radio driver implementation (SX1276/SX1278)
+│       ├── lora_module.py             # RFM95W/RFM98W radio driver implementation (SX1276/SX1278)
+│       ├── rfm9x_sx127x_modes.py     # RFM95W/RFM98W frequency mode definitions and constants
+│       └── rfm9x_sx127x_module.py    # RFM95W/RFM98W radio module abstraction layer
 └── tests/                            # Test suite
     ├── __init__.py                   # Tests package initialization
     ├── conftest.py                   # pytest fixtures and shared test configuration
@@ -218,7 +220,9 @@ uv remove <package-name>
     ├── test_fakes.py                 # Unit tests for fake/mock objects
     ├── test_lora_module.py           # Unit tests for LoRa radio module operations
     ├── test_lora_module_detection.py # Tests for hardware detection logic
-    └── test_lora_module_detector.py  # Tests for the detector subsystem component
+    ├── test_lora_module_detector.py  # Tests for the detector subsystem component
+    ├── test_rfm9x_sx127x_modes.py    # Unit tests for RFM95W/RFM98W mode definitions
+    └── test_rfm9x_sx127x_module.py   # Unit tests for RFM95W/RFM98W radio module implementation
 ```
 
 ---
