@@ -20,6 +20,7 @@ using a shared ``state_instances`` dictionary to avoid redundant object creation
 """
 
 
+from .rfm9x_sx127x_handler import Rfm9xSx127xHandler
 from .rfm9x_sx127x_modes import (
     LoraMode,
     Rfm9xSx127xMode,
@@ -41,6 +42,7 @@ class Rfm9xSx127xModule:
         self.state_instances: dict[type[Rfm9xSx127xMode], Rfm9xSx127xMode] = (
             self._create_instances()
         )
+        self.handler: Rfm9xSx127xHandler = Rfm9xSx127xHandler()
 
     # ------------------------------------------------------------------
     # Internal helpers
