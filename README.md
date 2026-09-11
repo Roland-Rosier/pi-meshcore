@@ -266,6 +266,7 @@ uv remove <package-name>
 - [SX1276/SX1278 Datasheet](https://semtech.my.salesforce.com/sfc/p/#E0000000JelG/a/2R0000001Rbr/6EfVZUorrpoKFfvaF_Fkpgp5kzjiNyiAbqcpqh9qSjE)
 - [MeshCore Python Library](https://github.com/meshcore-dev/meshcore_py)
 - [Uptronics Datasheet](https://pinout.xyz/pinout/uputronics_lora_expansion_board)
+- [Uptronics store (showing different variants)](https://store.uputronics.com/products/raspberry-pi-loratm-expansion-board)
 
 
 

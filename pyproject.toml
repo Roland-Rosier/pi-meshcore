@@ -62,6 +62,10 @@ dependencies = [
     # CLI framework (Typer, with Click/Rich/Shellingame extras)
     "typer[all]>=0.19",
 
+    # Configuration system — Pydantic models + YAML parsing
+    "pydantic>=2.8",
+    "ruamel.yaml>=0.6",
+
     # --- Optional: MeshCore protocol library ---
     # Uncomment the line below if you need MeshCore client/repeater functionality.
     # This package is optional because it may not be ultimately needed, and some
