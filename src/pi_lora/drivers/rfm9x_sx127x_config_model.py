@@ -82,6 +82,32 @@ class FamilyConfig(BaseModel):
     exclusions: Sequence[FamilyDeviceExclusion] = Field(..., min_length=1)
 
 
+class AntennaConfig(BaseModel):
+    """Antenna configuration for a device in an assembly.
+
+    Optional:
+        antenna_type: Type of antenna (e.g., "parabolic").
+        antenna_gain_db: Gain in decibels (can be negative, positive, or zero).
+    """
+
+    antenna_type: str | None = None
+    antenna_gain_db: float | None = None
+
+
+class AssemblyConfig(BaseModel):
+    """An assembly linking a module to antenna configurations for its devices.
+
+    Required:
+        assembly_name: Identifier for the assembly (e.g., "default").
+        module_name: Name of the module this assembly belongs to (must exist in modules).
+        devices: Mapping from device_id (format "spi_device_id:ce_number") to AntennaConfig.
+    """
+
+    assembly_name: str = Field(..., min_length=1)
+    module_name: str = Field(..., min_length=1)
+    devices: dict[str, AntennaConfig] = Field(default_factory=dict)
+
+
 class DeviceModuleAttachment(BaseModel):
     """A device attached to a module with SPI/CE and GPIO pin mappings.
 
@@ -91,16 +117,12 @@ class DeviceModuleAttachment(BaseModel):
         ce_number: CE slot number (e.g., 0 or 1).
 
     Optional:
-        antenna_type: Type of antenna (e.g., "parabolic").
-        antenna_gain_db: Gain in decibels (can be negative, positive, or zero).
         dio_gpio_mappings: List of "DIOx:GPIOy" mappings.
     """
 
     device_name: str = Field(..., min_length=1)
     spi_device_id: int = Field(..., ge=0)
     ce_number: int = Field(..., ge=0)
-    antenna_type: str | None = None
-    antenna_gain_db: float | None = None
     dio_gpio_mappings: Sequence[str] | None = None
 
 
@@ -117,17 +139,21 @@ class ModuleConfig(BaseModel):
 
 
 class Rfm9xSx127xConfig(BaseModel):
-    """Top-level configuration containing device, family, and module configs.
+    """Top-level configuration containing device, family, module, and assembly configs.
 
     Required:
         devices: Mapping of device name to DeviceConfig.
         families: Mapping of family name to FamilyConfig.
         modules: Mapping of module name to ModuleConfig.
+
+    Optional:
+        assemblies: Mapping of assembly name to AssemblyConfig.
     """
 
     devices: dict[str, DeviceConfig] = Field(default_factory=dict)
     families: dict[str, FamilyConfig] = Field(default_factory=dict)
     modules: dict[str, ModuleConfig] = Field(default_factory=dict)
+    assemblies: dict[str, AssemblyConfig] = Field(default_factory=dict)
 
 
 class Rfm9xSx127xFamilyConfig(BaseModel):

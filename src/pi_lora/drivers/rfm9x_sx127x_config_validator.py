@@ -16,9 +16,12 @@
 
 from __future__ import annotations
 
+import re
+
 from pydantic import ValidationError
 
 from pi_lora.drivers.rfm9x_sx127x_config_model import (
+    AssemblyConfig,
     DeviceConfig,
     FamilyConfig,
     ModuleConfig,
@@ -131,7 +134,6 @@ def validate_module_config(module: ModuleConfig) -> bool:
         - module_name is non-empty.
         - devices list is non-empty.
         - Each device has valid spi_device_id >= 0 and ce_number >= 0.
-        - antenna_gain_db type is enforced by Pydantic (float | None).
         - DIO GPIO mappings follow "DIOx:GPIOy" format (if provided).
 
     Args:
@@ -152,7 +154,6 @@ def validate_module_config(module: ModuleConfig) -> bool:
         errors.append("Module devices list must be non-empty.")
 
     dio_pattern: str = r"^DIO[0-5]:GPIO\d+$"
-    import re
 
     for attachment in module.devices:
         if not attachment.device_name or not attachment.device_name.strip():
@@ -186,10 +187,75 @@ def validate_module_config(module: ModuleConfig) -> bool:
     return True
 
 
+def validate_assembly_config(assembly: AssemblyConfig, modules: dict[str, ModuleConfig]) -> bool:
+    """Validate a single assembly configuration.
+
+    Checks:
+        - assembly_name is non-empty.
+        - module_name is non-empty and exists in modules.
+        - Each device_id key matches pattern backtick-circumflex-d-plus-colon-d-plus-backtick (non-negative integers).
+        - Each device_id corresponds to a device actually present in the referenced
+          module's devices list (by matching spi_device_id and ce_number).
+
+    Args:
+        assembly: AssemblyConfig to validate.
+        modules: Dictionary of module name to ModuleConfig.
+
+    Returns:
+        True if valid.
+
+    Raises:
+        ValueError: If validation fails.
+    """
+    errors: list[str] = []
+    device_id_pattern: str = r"^\d+:\d+$"
+
+    if not assembly.assembly_name or not assembly.assembly_name.strip():
+        errors.append("Assembly name must be non-empty.")
+
+    if not assembly.module_name or not assembly.module_name.strip():
+        errors.append("Assembly module_name must be non-empty.")
+    elif not any(m.module_name == assembly.module_name for m in modules.values()):
+        errors.append(
+            f"Assembly '{assembly.assembly_name}': module_name '{assembly.module_name}' "
+            f"not found in modules."
+        )
+
+    if assembly.module_name and any(m.module_name == assembly.module_name for m in modules.values()):
+        module: ModuleConfig | None = None
+        for m in modules.values():
+            if m.module_name == assembly.module_name:
+                module = m
+                break
+        if module is None:
+            return True
+        module_device_keys: set[str] = set()
+        for attachment in module.devices:
+            key: str = f"{attachment.spi_device_id}:{attachment.ce_number}"
+            module_device_keys.add(key)
+
+        for device_id, _antenna_config in assembly.devices.items():
+            if not re.match(device_id_pattern, device_id):
+                errors.append(
+                    f"Assembly '{assembly.assembly_name}': invalid device_id format '{device_id}'. "
+                    f"Expected 'spi_device_id:ce_number' (non-negative integers)."
+                )
+            elif device_id not in module_device_keys:
+                errors.append(
+                    f"Assembly '{assembly.assembly_name}': device_id '{device_id}' "
+                    f"not found in module '{assembly.module_name}' devices."
+                )
+
+    if errors:
+        raise ValueError("; ".join(errors))
+
+    return True
+
+
 def validate_full_config(config: Rfm9xSx127xConfig) -> bool:
     """Validate a complete Rfm9x/SX127x configuration.
 
-    Validates all devices, families, and modules.
+    Validates all devices, families, modules, and assemblies.
 
     Args:
         config: Rfm9xSx127xConfig to validate.
@@ -219,6 +285,12 @@ def validate_full_config(config: Rfm9xSx127xConfig) -> bool:
             validate_module_config(module)
         except ValidationError as exc:
             all_errors.append(f"Module '{module_name}': {exc}")
+
+    for assembly_name, assembly in config.assemblies.items():
+        try:
+            validate_assembly_config(assembly, config.modules)
+        except ValueError as exc:
+            all_errors.append(f"Assembly '{assembly_name}': {exc}")
 
     if all_errors:
         raise ValueError("; ".join(all_errors))

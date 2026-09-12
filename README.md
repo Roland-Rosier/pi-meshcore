@@ -197,6 +197,7 @@ uv remove <package-name>
 ├── configs/                          # Configuration files directory
 │   ├── continue/
 │   │   └── config_lmstudio.yaml      # LM Studio configuration for Continue.dev agent workflows
+│   ├── rfm9x_sx127x_config.yaml        # YAML config file for RFM95W/RFM98W module parameters (pins, freq)
 │   └── ruff-lint-workflow.yml.disabled  # Disabled ruff lint workflow configuration file
 ├── pyproject.toml                    # Python project metadata, pytest & coverage configuration
 ├── requirements.txt                  # Python dependency list (FastAPI, meshcore, pytest, etc.)
@@ -210,8 +211,12 @@ uv remove <package-name>
 │       ├── __init__.py               # Drivers sub-package initialization
 │       ├── lora_detection.py          # LoRa module auto-detection logic (RFM95W/RFM98W)
 │       ├── lora_module.py             # RFM95W/RFM98W radio driver implementation (SX1276/SX1278)
-│       ├── rfm9x_sx127x_modes.py     # RFM95W/RFM98W frequency mode definitions and constants
-│       └── rfm9x_sx127x_module.py    # RFM95W/RFM98W radio module abstraction layer
+│       ├── rfm9x_sx127x_config_model.py  # Config data models for RFM95W/RFM98W module settings
+│       ├── rfm9x_sx127x_config_loader.py  # YAML config loader for RFM95W/RFM98W parameters
+│       ├── rfm9x_sx127x_config_validator.py  # Config validation for RFM module settings
+│       ├── rfm9x_sx127x_handler.py      # High-level handler for RFM95W/RFM98W operations
+│       ├── rfm9x_sx127x_modes.py         # RFM95W/RFM98W frequency mode definitions and constants
+│       └── rfm9x_sx127x_module.py        # RFM95W/RFM98W radio module abstraction layer
 └── tests/                            # Test suite
     ├── __init__.py                   # Tests package initialization
     ├── conftest.py                   # pytest fixtures and shared test configuration
@@ -222,6 +227,10 @@ uv remove <package-name>
     ├── test_lora_module_detection.py # Tests for hardware detection logic
     ├── test_lora_module_detector.py  # Tests for the detector subsystem component
     ├── test_rfm9x_sx127x_modes.py    # Unit tests for RFM95W/RFM98W mode definitions
+    ├── test_rfm9x_sx127x_config_loader.py  # Tests for config loader subsystem
+    ├── test_rfm9x_sx127x_config_model.py   # Tests for config data models
+    ├── test_rfm9x_sx127x_config_validator.py # Tests for config validation logic
+    ├── test_rfm9x_sx127x_handler.py        # Tests for RFM module handler
     └── test_rfm9x_sx127x_module.py   # Unit tests for RFM95W/RFM98W radio module implementation
 ```
 

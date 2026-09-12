@@ -102,16 +102,25 @@ modules:
       - device_name: "RFM98"
         spi_device_id: 0
         ce_number: 1
-        antenna_type: "parabolic"
-        antenna_gain_db: 24.0
         dio_gpio_mappings:
           - "DIO0:GPIO16"
           - "DIO5:GPIO12"
       - device_name: "RFM95"
         spi_device_id: 0
         ce_number: 0
-        antenna_type: "parabolic"
-        antenna_gain_db: 25.0
         dio_gpio_mappings:
           - "DIO0:GPIO25"
           - "DIO5:GPIO24"
+
+# Assembly configurations
+assemblies:
+  default:
+    assembly_name: "default"
+    module_name: "LoRa Pi 434/868"
+    devices:
+      "0:1":
+        antenna_type: "parabolic"
+        antenna_gain_db: 24.0
+      "0:0":
+        antenna_type: "parabolic"
+        antenna_gain_db: 25.0

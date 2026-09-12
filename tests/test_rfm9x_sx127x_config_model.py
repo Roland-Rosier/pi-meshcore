@@ -18,6 +18,8 @@ import pytest
 from pydantic import ValidationError
 
 from pi_lora.drivers.rfm9x_sx127x_config_model import (
+    AntennaConfig,
+    AssemblyConfig,
     DeviceConfig,
     DeviceConfigRoot,
     DeviceModuleAttachment,
@@ -178,39 +180,82 @@ class TestDeviceModuleAttachment:
         )
         assert attachment.dio_gpio_mappings is None
 
-    def test_attachment_with_antenna_fields(self) -> None:
-        """Test attachment with antenna type and gain fields."""
-        attachment: DeviceModuleAttachment = DeviceModuleAttachment(
-            device_name="RFM95",
-            spi_device_id=0,
-            ce_number=0,
+
+class TestAntennaConfig:
+    """Tests for AntennaConfig model."""
+
+    def test_valid_antenna_config(self) -> None:
+        """Test valid antenna configuration."""
+        config: AntennaConfig = AntennaConfig(
             antenna_type="parabolic",
             antenna_gain_db=25.0,
         )
-        assert attachment.antenna_type == "parabolic"
-        assert attachment.antenna_gain_db == 25.0
+        assert config.antenna_type == "parabolic"
+        assert config.antenna_gain_db == 25.0
 
-    def test_attachment_with_negative_antenna_gain(self) -> None:
-        """Test attachment with negative antenna gain."""
-        attachment: DeviceModuleAttachment = DeviceModuleAttachment(
-            device_name="RFM95",
-            spi_device_id=0,
-            ce_number=0,
+    def test_antenna_config_no_optional_fields(self) -> None:
+        """Test antenna config without optional fields."""
+        config: AntennaConfig = AntennaConfig()
+        assert config.antenna_type is None
+        assert config.antenna_gain_db is None
+
+    def test_antenna_config_negative_gain(self) -> None:
+        """Test antenna config with negative gain."""
+        config: AntennaConfig = AntennaConfig(
             antenna_type="parabolic",
             antenna_gain_db=-10.0,
         )
-        assert attachment.antenna_gain_db == -10.0
+        assert config.antenna_gain_db == -10.0
 
-    def test_attachment_with_zero_antenna_gain(self) -> None:
-        """Test attachment with zero antenna gain."""
-        attachment: DeviceModuleAttachment = DeviceModuleAttachment(
-            device_name="RFM95",
-            spi_device_id=0,
-            ce_number=0,
+    def test_antenna_config_zero_gain(self) -> None:
+        """Test antenna config with zero gain."""
+        config: AntennaConfig = AntennaConfig(
             antenna_type="parabolic",
             antenna_gain_db=0.0,
         )
-        assert attachment.antenna_gain_db == 0.0
+        assert config.antenna_gain_db == 0.0
+
+
+class TestAssemblyConfig:
+    """Tests for AssemblyConfig model."""
+
+    def test_valid_assembly_config(self) -> None:
+        """Test valid assembly configuration."""
+        devices: dict[str, AntennaConfig] = {
+            "0:0": AntennaConfig(antenna_type="parabolic", antenna_gain_db=25.0),
+        }
+        assembly: AssemblyConfig = AssemblyConfig(
+            assembly_name="default",
+            module_name="LoRa Pi 434/868",
+            devices=devices,
+        )
+        assert assembly.assembly_name == "default"
+        assert assembly.module_name == "LoRa Pi 434/868"
+        assert len(assembly.devices) == 1
+
+    def test_assembly_config_empty_devices(self) -> None:
+        """Test assembly with empty devices dict."""
+        assembly: AssemblyConfig = AssemblyConfig(
+            assembly_name="empty",
+            module_name="LoRa Pi 434/868",
+        )
+        assert assembly.devices == {}
+
+    def test_assembly_config_empty_assembly_name(self) -> None:
+        """Test that assembly_name must be non-empty."""
+        with pytest.raises(ValidationError):
+            AssemblyConfig(
+                assembly_name="",
+                module_name="LoRa Pi 434/868",
+            )
+
+    def test_assembly_config_empty_module_name(self) -> None:
+        """Test that module_name must be non-empty."""
+        with pytest.raises(ValidationError):
+            AssemblyConfig(
+                assembly_name="default",
+                module_name="",
+            )
 
 
 class TestModuleConfig:
@@ -250,6 +295,7 @@ class TestRfm9xSx127xConfig:
             devices={"rfm95": DeviceConfig(name="RFM95", min_radio_freq_hz=868000000, max_radio_freq_hz=915000000)},
             families={},
             modules={},
+            assemblies={},
         )
         assert "rfm95" in config.devices
 
@@ -259,6 +305,7 @@ class TestRfm9xSx127xConfig:
         assert config.devices == {}
         assert config.families == {}
         assert config.modules == {}
+        assert config.assemblies == {}
 
 
 class TestRfm9xSx127xFamilyConfig:

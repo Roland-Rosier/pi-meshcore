@@ -18,6 +18,8 @@ import pytest
 from pydantic import ValidationError
 
 from pi_lora.drivers.rfm9x_sx127x_config_model import (
+    AntennaConfig,
+    AssemblyConfig,
     DeviceConfig,
     DeviceModuleAttachment,
     FamilyConfig,
@@ -26,6 +28,7 @@ from pi_lora.drivers.rfm9x_sx127x_config_model import (
     Rfm9xSx127xConfig,
 )
 from pi_lora.drivers.rfm9x_sx127x_config_validator import (
+    validate_assembly_config,
     validate_device_config,
     validate_family_config,
     validate_full_config,
@@ -168,14 +171,14 @@ class TestValidateModuleConfig:
         with pytest.raises(_VALIDATION_ERRORS):
             validate_module_config(module)
 
-    def test_valid_antenna_gain_positive(self) -> None:
-        """Test valid antenna_gain_db with positive value."""
+    def test_valid_dio_mapping_format(self) -> None:
+        """Test valid DIO GPIO mapping format passes validation."""
         devices: list[DeviceModuleAttachment] = [
             DeviceModuleAttachment(
                 device_name="RFM95",
                 spi_device_id=0,
                 ce_number=0,
-                antenna_gain_db=25.0,
+                dio_gpio_mappings=["DIO0:GPIO25", "DIO5:GPIO24"],
             ),
         ]
         module: ModuleConfig = ModuleConfig(
@@ -183,70 +186,204 @@ class TestValidateModuleConfig:
             devices=devices,
         )
         assert validate_module_config(module) is True
+
+
+class TestValidateAssemblyConfig:
+    """Tests for validate_assembly_config function."""
+
+    def test_valid_assembly(self) -> None:
+        """Test valid assembly config passes validation."""
+        modules: dict[str, ModuleConfig] = {
+            "LoRa Pi 434/868": ModuleConfig(
+                module_name="LoRa Pi 434/868",
+                devices=[
+                    DeviceModuleAttachment(
+                        device_name="RFM95",
+                        spi_device_id=0,
+                        ce_number=0,
+                    ),
+                    DeviceModuleAttachment(
+                        device_name="RFM98",
+                        spi_device_id=0,
+                        ce_number=1,
+                    ),
+                ],
+            ),
+        }
+        assembly: AssemblyConfig = AssemblyConfig(
+            assembly_name="default",
+            module_name="LoRa Pi 434/868",
+            devices={
+                "0:0": AntennaConfig(antenna_type="parabolic", antenna_gain_db=25.0),
+                "0:1": AntennaConfig(antenna_type="parabolic", antenna_gain_db=24.0),
+            },
+        )
+        assert validate_assembly_config(assembly, modules) is True
+
+    def test_invalid_assembly_name(self) -> None:
+        """Test assembly with empty assembly_name fails validation."""
+        modules: dict[str, ModuleConfig] = {
+            "LoRa Pi 434/868": ModuleConfig(
+                module_name="LoRa Pi 434/868",
+                devices=[
+                    DeviceModuleAttachment(
+                        device_name="RFM95",
+                        spi_device_id=0,
+                        ce_number=0,
+                    ),
+                ],
+            ),
+        }
+        with pytest.raises(_VALIDATION_ERRORS):
+            validate_assembly_config(
+                AssemblyConfig(
+                    assembly_name="",
+                    module_name="LoRa Pi 434/868",
+                    devices={"0:0": AntennaConfig()},
+                ),
+                modules,
+            )
+
+    def test_invalid_module_name_missing(self) -> None:
+        """Test assembly with missing module_name fails validation."""
+        modules: dict[str, ModuleConfig] = {
+            "Other Module": ModuleConfig(
+                module_name="Other Module",
+                devices=[
+                    DeviceModuleAttachment(
+                        device_name="RFM95",
+                        spi_device_id=0,
+                        ce_number=0,
+                    ),
+                ],
+            ),
+        }
+        with pytest.raises(_VALIDATION_ERRORS):
+            validate_assembly_config(
+                AssemblyConfig(
+                    assembly_name="default",
+                    module_name="Nonexistent",
+                    devices={},
+                ),
+                modules,
+            )
+
+    def test_invalid_device_id_format(self) -> None:
+        """Test assembly with invalid device_id format fails validation."""
+        modules: dict[str, ModuleConfig] = {
+            "LoRa Pi 434/868": ModuleConfig(
+                module_name="LoRa Pi 434/868",
+                devices=[
+                    DeviceModuleAttachment(
+                        device_name="RFM95",
+                        spi_device_id=0,
+                        ce_number=0,
+                    ),
+                ],
+            ),
+        }
+        with pytest.raises(_VALIDATION_ERRORS):
+            validate_assembly_config(
+                AssemblyConfig(
+                    assembly_name="default",
+                    module_name="LoRa Pi 434/868",
+                    devices={"invalid": AntennaConfig()},
+                ),
+                modules,
+            )
+
+    def test_device_id_not_found_in_module(self) -> None:
+        """Test assembly with device_id not in module fails validation."""
+        modules: dict[str, ModuleConfig] = {
+            "LoRa Pi 434/868": ModuleConfig(
+                module_name="LoRa Pi 434/868",
+                devices=[
+                    DeviceModuleAttachment(
+                        device_name="RFM95",
+                        spi_device_id=0,
+                        ce_number=0,
+                    ),
+                ],
+            ),
+        }
+        with pytest.raises(_VALIDATION_ERRORS):
+            validate_assembly_config(
+                AssemblyConfig(
+                    assembly_name="default",
+                    module_name="LoRa Pi 434/868",
+                    devices={"1:0": AntennaConfig()},
+                ),
+                modules,
+            )
 
     def test_valid_antenna_gain_negative(self) -> None:
         """Test valid antenna_gain_db with negative value."""
-        devices: list[DeviceModuleAttachment] = [
-            DeviceModuleAttachment(
-                device_name="RFM95",
-                spi_device_id=0,
-                ce_number=0,
-                antenna_gain_db=-10.0,
+        modules: dict[str, ModuleConfig] = {
+            "LoRa Pi 434/868": ModuleConfig(
+                module_name="LoRa Pi 434/868",
+                devices=[
+                    DeviceModuleAttachment(
+                        device_name="RFM95",
+                        spi_device_id=0,
+                        ce_number=0,
+                    ),
+                ],
             ),
-        ]
-        module: ModuleConfig = ModuleConfig(
+        }
+        assembly: AssemblyConfig = AssemblyConfig(
+            assembly_name="default",
             module_name="LoRa Pi 434/868",
-            devices=devices,
+            devices={
+                "0:0": AntennaConfig(antenna_gain_db=-10.0),
+            },
         )
-        assert validate_module_config(module) is True
+        assert validate_assembly_config(assembly, modules) is True
 
     def test_valid_antenna_gain_zero(self) -> None:
         """Test valid antenna_gain_db with zero value."""
-        devices: list[DeviceModuleAttachment] = [
-            DeviceModuleAttachment(
-                device_name="RFM95",
-                spi_device_id=0,
-                ce_number=0,
-                antenna_gain_db=0.0,
+        modules: dict[str, ModuleConfig] = {
+            "LoRa Pi 434/868": ModuleConfig(
+                module_name="LoRa Pi 434/868",
+                devices=[
+                    DeviceModuleAttachment(
+                        device_name="RFM95",
+                        spi_device_id=0,
+                        ce_number=0,
+                    ),
+                ],
             ),
-        ]
-        module: ModuleConfig = ModuleConfig(
+        }
+        assembly: AssemblyConfig = AssemblyConfig(
+            assembly_name="default",
             module_name="LoRa Pi 434/868",
-            devices=devices,
+            devices={
+                "0:0": AntennaConfig(antenna_gain_db=0.0),
+            },
         )
-        assert validate_module_config(module) is True
+        assert validate_assembly_config(assembly, modules) is True
 
     def test_valid_antenna_gain_none(self) -> None:
         """Test antenna_gain_db with None value passes validation."""
-        devices: list[DeviceModuleAttachment] = [
-            DeviceModuleAttachment(
-                device_name="RFM95",
-                spi_device_id=0,
-                ce_number=0,
-                antenna_gain_db=None,
+        modules: dict[str, ModuleConfig] = {
+            "LoRa Pi 434/868": ModuleConfig(
+                module_name="LoRa Pi 434/868",
+                devices=[
+                    DeviceModuleAttachment(
+                        device_name="RFM95",
+                        spi_device_id=0,
+                        ce_number=0,
+                    ),
+                ],
             ),
-        ]
-        module: ModuleConfig = ModuleConfig(
+        }
+        assembly: AssemblyConfig = AssemblyConfig(
+            assembly_name="default",
             module_name="LoRa Pi 434/868",
-            devices=devices,
+            devices={
+                "0:0": AntennaConfig(antenna_gain_db=None),
+            },
         )
-        assert validate_module_config(module) is True
-
-    def test_valid_antenna_gain_integer(self) -> None:
-        """Test antenna_gain_db with integer value passes validation."""
-        devices: list[DeviceModuleAttachment] = [
-            DeviceModuleAttachment(
-                device_name="RFM95",
-                spi_device_id=0,
-                ce_number=0,
-                antenna_gain_db=25,
-            ),
-        ]
-        module: ModuleConfig = ModuleConfig(
-            module_name="LoRa Pi 434/868",
-            devices=devices,
-        )
-        assert validate_module_config(module) is True
+        assert validate_assembly_config(assembly, modules) is True
 
 
 class TestValidateFullConfig:
@@ -282,6 +419,15 @@ class TestValidateFullConfig:
                     ],
                 ),
             },
+            assemblies={
+                "default": AssemblyConfig(
+                    assembly_name="default",
+                    module_name="LoRa Pi 434/868",
+                    devices={
+                        "0:0": AntennaConfig(antenna_type="parabolic", antenna_gain_db=25.0),
+                    },
+                ),
+            },
         )
         assert validate_full_config(config) is True
 
@@ -297,6 +443,7 @@ class TestValidateFullConfig:
             },
             families={},
             modules={},
+            assemblies={},
         )
         with pytest.raises(_VALIDATION_ERRORS):
             validate_full_config(config)
