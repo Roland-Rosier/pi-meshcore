@@ -35,7 +35,6 @@ def validate_device_config(device: DeviceConfig) -> bool:
         - max_radio_freq_hz > 0.
         - max_radio_freq_hz > min_radio_freq_hz.
         - osc_freq_hz > 0 (if provided).
-        - antenna_gain_db >= 0 (if provided).
 
     Args:
         device: DeviceConfig to validate.
@@ -65,9 +64,6 @@ def validate_device_config(device: DeviceConfig) -> bool:
 
     if device.osc_freq_hz is not None and device.osc_freq_hz <= 0:
         errors.append(f"Device '{device.name}': osc_freq_hz must be > 0.")
-
-    if device.antenna_gain_db is not None and device.antenna_gain_db < 0:
-        errors.append(f"Device '{device.name}': antenna_gain_db must be >= 0.")
 
     if errors:
         raise ValueError("; ".join(errors))
@@ -135,6 +131,7 @@ def validate_module_config(module: ModuleConfig) -> bool:
         - module_name is non-empty.
         - devices list is non-empty.
         - Each device has valid spi_device_id >= 0 and ce_number >= 0.
+        - antenna_gain_db type is enforced by Pydantic (float | None).
         - DIO GPIO mappings follow "DIOx:GPIOy" format (if provided).
 
     Args:

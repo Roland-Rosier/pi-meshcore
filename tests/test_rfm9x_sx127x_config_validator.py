@@ -45,8 +45,6 @@ class TestValidateDeviceConfig:
             min_radio_freq_hz=868000000,
             max_radio_freq_hz=915000000,
             osc_freq_hz=32000000,
-            antenna_type="parabolic",
-            antenna_gain_db=25.0,
         )
         assert validate_device_config(device) is True
 
@@ -78,17 +76,6 @@ class TestValidateDeviceConfig:
                 max_radio_freq_hz=915000000,
                 osc_freq_hz=-1,
             )
-
-    def test_invalid_negative_antenna_gain(self) -> None:
-        """Test device with negative antenna_gain_db fails validation."""
-        device: DeviceConfig = DeviceConfig(
-            name="INVALID",
-            min_radio_freq_hz=868000000,
-            max_radio_freq_hz=915000000,
-            antenna_gain_db=-1.0,
-        )
-        with pytest.raises(_VALIDATION_ERRORS):
-            validate_device_config(device)
 
 
 class TestValidateFamilyConfig:
@@ -180,6 +167,86 @@ class TestValidateModuleConfig:
         )
         with pytest.raises(_VALIDATION_ERRORS):
             validate_module_config(module)
+
+    def test_valid_antenna_gain_positive(self) -> None:
+        """Test valid antenna_gain_db with positive value."""
+        devices: list[DeviceModuleAttachment] = [
+            DeviceModuleAttachment(
+                device_name="RFM95",
+                spi_device_id=0,
+                ce_number=0,
+                antenna_gain_db=25.0,
+            ),
+        ]
+        module: ModuleConfig = ModuleConfig(
+            module_name="LoRa Pi 434/868",
+            devices=devices,
+        )
+        assert validate_module_config(module) is True
+
+    def test_valid_antenna_gain_negative(self) -> None:
+        """Test valid antenna_gain_db with negative value."""
+        devices: list[DeviceModuleAttachment] = [
+            DeviceModuleAttachment(
+                device_name="RFM95",
+                spi_device_id=0,
+                ce_number=0,
+                antenna_gain_db=-10.0,
+            ),
+        ]
+        module: ModuleConfig = ModuleConfig(
+            module_name="LoRa Pi 434/868",
+            devices=devices,
+        )
+        assert validate_module_config(module) is True
+
+    def test_valid_antenna_gain_zero(self) -> None:
+        """Test valid antenna_gain_db with zero value."""
+        devices: list[DeviceModuleAttachment] = [
+            DeviceModuleAttachment(
+                device_name="RFM95",
+                spi_device_id=0,
+                ce_number=0,
+                antenna_gain_db=0.0,
+            ),
+        ]
+        module: ModuleConfig = ModuleConfig(
+            module_name="LoRa Pi 434/868",
+            devices=devices,
+        )
+        assert validate_module_config(module) is True
+
+    def test_valid_antenna_gain_none(self) -> None:
+        """Test antenna_gain_db with None value passes validation."""
+        devices: list[DeviceModuleAttachment] = [
+            DeviceModuleAttachment(
+                device_name="RFM95",
+                spi_device_id=0,
+                ce_number=0,
+                antenna_gain_db=None,
+            ),
+        ]
+        module: ModuleConfig = ModuleConfig(
+            module_name="LoRa Pi 434/868",
+            devices=devices,
+        )
+        assert validate_module_config(module) is True
+
+    def test_valid_antenna_gain_integer(self) -> None:
+        """Test antenna_gain_db with integer value passes validation."""
+        devices: list[DeviceModuleAttachment] = [
+            DeviceModuleAttachment(
+                device_name="RFM95",
+                spi_device_id=0,
+                ce_number=0,
+                antenna_gain_db=25,
+            ),
+        ]
+        module: ModuleConfig = ModuleConfig(
+            module_name="LoRa Pi 434/868",
+            devices=devices,
+        )
+        assert validate_module_config(module) is True
 
 
 class TestValidateFullConfig:

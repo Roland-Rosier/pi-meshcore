@@ -31,16 +31,12 @@ class DeviceConfig(BaseModel):
 
     Optional:
         osc_freq_hz: Oscillator/crystal frequency in Hz (e.g., 32 MHz).
-        antenna_type: Type of antenna (e.g., "parabolic").
-        antenna_gain_db: Gain in decibels.
     """
 
     name: str = Field(..., min_length=1)
     min_radio_freq_hz: int = Field(..., gt=0)
     max_radio_freq_hz: int = Field(..., gt=0)
     osc_freq_hz: int | None = Field(None, gt=0)
-    antenna_type: str | None = None
-    antenna_gain_db: float | None = None
 
 
 class DeviceConfigRoot(BaseModel):
@@ -95,12 +91,16 @@ class DeviceModuleAttachment(BaseModel):
         ce_number: CE slot number (e.g., 0 or 1).
 
     Optional:
+        antenna_type: Type of antenna (e.g., "parabolic").
+        antenna_gain_db: Gain in decibels (can be negative, positive, or zero).
         dio_gpio_mappings: List of "DIOx:GPIOy" mappings.
     """
 
     device_name: str = Field(..., min_length=1)
     spi_device_id: int = Field(..., ge=0)
     ce_number: int = Field(..., ge=0)
+    antenna_type: str | None = None
+    antenna_gain_db: float | None = None
     dio_gpio_mappings: Sequence[str] | None = None
 
 

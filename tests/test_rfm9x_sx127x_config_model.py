@@ -39,8 +39,6 @@ class TestDeviceConfig:
             min_radio_freq_hz=868000000,
             max_radio_freq_hz=915000000,
             osc_freq_hz=32000000,
-            antenna_type="parabolic",
-            antenna_gain_db=25.0,
         )
         assert device.name == "RFM95"
         assert device.min_radio_freq_hz == 868000000
@@ -55,7 +53,6 @@ class TestDeviceConfig:
         )
         assert device.name == "SX1276"
         assert device.osc_freq_hz is None
-        assert device.antenna_type is None
 
     def test_device_config_invalid_zero_min_freq(self) -> None:
         """Test that min_radio_freq_hz must be > 0."""
@@ -180,6 +177,40 @@ class TestDeviceModuleAttachment:
             ce_number=0,
         )
         assert attachment.dio_gpio_mappings is None
+
+    def test_attachment_with_antenna_fields(self) -> None:
+        """Test attachment with antenna type and gain fields."""
+        attachment: DeviceModuleAttachment = DeviceModuleAttachment(
+            device_name="RFM95",
+            spi_device_id=0,
+            ce_number=0,
+            antenna_type="parabolic",
+            antenna_gain_db=25.0,
+        )
+        assert attachment.antenna_type == "parabolic"
+        assert attachment.antenna_gain_db == 25.0
+
+    def test_attachment_with_negative_antenna_gain(self) -> None:
+        """Test attachment with negative antenna gain."""
+        attachment: DeviceModuleAttachment = DeviceModuleAttachment(
+            device_name="RFM95",
+            spi_device_id=0,
+            ce_number=0,
+            antenna_type="parabolic",
+            antenna_gain_db=-10.0,
+        )
+        assert attachment.antenna_gain_db == -10.0
+
+    def test_attachment_with_zero_antenna_gain(self) -> None:
+        """Test attachment with zero antenna gain."""
+        attachment: DeviceModuleAttachment = DeviceModuleAttachment(
+            device_name="RFM95",
+            spi_device_id=0,
+            ce_number=0,
+            antenna_type="parabolic",
+            antenna_gain_db=0.0,
+        )
+        assert attachment.antenna_gain_db == 0.0
 
 
 class TestModuleConfig:
