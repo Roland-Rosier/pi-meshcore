@@ -74,7 +74,7 @@ class Rfm9xSx127xModule:
             if cached is not None and isinstance(cached, Rfm9xSx127xMode):
                 cached.on_exit()
 
-        new_instance = self.state_instances.get(type(self._create_state_instance(state)))
+        new_instance = self.state_instances.get(StateBitsMapping.from_bits(state).value)
         if new_instance is None:
             new_instance = self._create_state_instance(state)
             self.state_instances[type(new_instance)] = new_instance
