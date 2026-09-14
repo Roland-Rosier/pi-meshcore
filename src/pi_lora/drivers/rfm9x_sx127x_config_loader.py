@@ -16,8 +16,10 @@
 
 from __future__ import annotations
 
+import importlib.resources
 from pathlib import Path
 
+import aiologic
 from pydantic import ValidationError
 from ruamel.yaml import YAML
 
@@ -26,8 +28,25 @@ from pi_lora.drivers.rfm9x_sx127x_config_model import (
     Rfm9xSx127xFamilyConfig,
 )
 
-# Pre-loaded default configuration path.
-_DEFAULT_CONFIG_PATH: Path = Path(__file__).parent.parent.parent.parent / "configs" / "rfm9x_sx127x_config.yaml"
+# Default config resource path as configuration string (not magic).
+_DEFAULT_CONFIG_RESOURCE: str = "pi_lora.drivers.configs:rfm9x_sx127x_config.yaml"
+
+# Lazy singleton cache and lock.
+_config_cache: Rfm9xSx127xConfig | None = None
+_config_lock: aiologic.Lock = aiologic.Lock()
+
+
+def _resolve_default_path() -> Path:
+    """Resolve the default config path via importlib.resources from package data.
+
+    Returns:
+        The resolved Path to the default configuration YAML file.
+    """
+    pkg_name: str = _DEFAULT_CONFIG_RESOURCE.split(":")[0]
+    resource_name: str = _DEFAULT_CONFIG_RESOURCE.split(":")[1]
+    return Path(str(
+        importlib.resources.files(pkg_name).joinpath(resource_name)
+    ))
 
 
 def load_config(
@@ -48,7 +67,7 @@ def load_config(
         FileNotFoundError: If the config file does not exist.
         ValueError: If config_name is provided but not found in YAML.
     """
-    path: Path = config_path or _DEFAULT_CONFIG_PATH
+    path: Path = config_path or _resolve_default_path()
     if not path.exists():
         raise FileNotFoundError(f"Configuration file not found: {path}")
 
@@ -92,7 +111,7 @@ def load_family_config(
         ValidationError: If the configuration data fails Pydantic validation.
         FileNotFoundError: If the config file does not exist.
     """
-    path: Path = config_path or _DEFAULT_CONFIG_PATH
+    path: Path = config_path or _resolve_default_path()
     if not path.exists():
         raise FileNotFoundError(f"Configuration file not found: {path}")
 
@@ -110,14 +129,34 @@ def load_family_config(
     return config
 
 
-def get_preloaded_config() -> Rfm9xSx127xConfig:
-    """Return the pre-loaded default configuration.
+def get_preloaded_config(
+    force_reload: bool = False,
+    config_path: Path | None = None,
+) -> Rfm9xSx127xConfig:
+    """Return the pre-loaded default configuration with lazy singleton support.
+
+    Args:
+        force_reload: If True, forces re-reading from disk regardless of cache.
+        config_path: If provided, bypasses cache and loads from this path.
 
     Returns:
-        The cached Rfm9xSx127xConfig instance loaded at module init time.
+        A validated Rfm9xSx127xConfig instance.
     """
-    return _preloaded_default_config
+    # Override path bypasses cache entirely.
+    if config_path is not None:
+        return load_config(config_path=config_path)
 
+    # Force reload bypasses cache.
+    if force_reload:
+        return load_config()
 
-# Pre-load the default config on module import.
-_preloaded_default_config: Rfm9xSx127xConfig = load_config()
+    # Lazy singleton: load on first call, cache thereafter.
+    global _config_cache
+    if _config_cache is not None:
+        return _config_cache
+
+    with _config_lock:
+        if _config_cache is not None:
+            return _config_cache  # type: ignore[unreachable]  # pragma: no cover
+        _config_cache = load_config()
+    return _config_cache
