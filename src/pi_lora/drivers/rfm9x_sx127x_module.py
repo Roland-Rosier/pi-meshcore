@@ -23,6 +23,7 @@ using a shared ``state_instances`` dictionary to avoid redundant object creation
 from .rfm9x_sx127x_handler import Rfm9xSx127xHandler
 from .rfm9x_sx127x_modes import (
     LoraMode,
+    ModeBits,
     Rfm9xSx127xMode,
     StateBits,
     StateBitsMapping,
@@ -108,6 +109,6 @@ class Rfm9xSx127xModule:
         standby are permitted to proceed with frequency writes.
         """
         mode_bits = type(self.current_state_instance).MODE_BITS
-        if mode_bits.value in (0x00, 0x01):
+        if mode_bits in (ModeBits.SLEEP_OR_ERROR_OR_NOT_A_DEVICE_OR_UNKNOWN_OR_RESET, ModeBits.STANDBY):
             return True
         return None
