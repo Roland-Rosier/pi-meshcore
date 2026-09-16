@@ -39,7 +39,7 @@ class Rfm9xSx127xModule:
     """
 
     def __init__(self, state: StateBits) -> None:
-        self.current_state_instance: Rfm9xSx127xMode = self._create_state_instance(state)
+        self.current_state_instance: Rfm9xSx127xMode|None = self._create_state_instance(state)
         self.state_instances: dict[type[Rfm9xSx127xMode], Rfm9xSx127xMode] = (
             self._create_instances()
         )
@@ -92,8 +92,11 @@ class Rfm9xSx127xModule:
 
     def is_in_lora_mode(self) -> bool:
         """Return ``True`` when the current state's ``LORA_MODE`` is ``LoraMode.LORA``."""
-        lora_mode = type(self.current_state_instance).LORA_MODE
-        return lora_mode == LoraMode.LORA
+        if self.current_state_instance is not None:
+            lora_mode = type(self.current_state_instance).LORA_MODE
+            return lora_mode == LoraMode.LORA
+        else:
+            return False
 
     def is_in_fsk_ook_mode(self) -> bool:
         """Return ``True`` when the module is **not** in LoRa mode."""
@@ -108,7 +111,8 @@ class Rfm9xSx127xModule:
         the SPI driver layer.  Only states whose ``MODE_BITS`` indicate sleep or
         standby are permitted to proceed with frequency writes.
         """
-        mode_bits = type(self.current_state_instance).MODE_BITS
-        if mode_bits in (ModeBits.SLEEP_OR_ERROR_OR_NOT_A_DEVICE_OR_UNKNOWN_OR_RESET, ModeBits.STANDBY):
-            return True
+        if self.current_state_instance is not None:
+            mode_bits = type(self.current_state_instance).MODE_BITS
+            if mode_bits in (ModeBits.SLEEP_OR_ERROR_OR_NOT_A_DEVICE_OR_UNKNOWN_OR_RESET, ModeBits.STANDBY):
+                return True
         return None
