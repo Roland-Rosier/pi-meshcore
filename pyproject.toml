@@ -20,6 +20,7 @@ build-backend = "uv_build"
 
 [tool.uv.build-backend]
 module-name = "pi_lora"
+package-data = { "pi_lora.drivers" = ["configs/*"] }
 
 # -----------------------------------------------------------------------------
 # Project metadata
@@ -61,6 +62,13 @@ dependencies = [
 
     # CLI framework (Typer, with Click/Rich/Shellingame extras)
     "typer[all]>=0.19",
+
+    # Configuration system — Pydantic models + YAML parsing
+    "pydantic>=2.8",
+    "ruamel.yaml>=0.6",
+
+    # Async/sync locking primitives (works in both contexts)
+    "aiologic>=0.1",
 
     # --- Optional: MeshCore protocol library ---
     # Uncomment the line below if you need MeshCore client/repeater functionality.

@@ -35,6 +35,7 @@ from src.pi_lora.drivers.rfm9x_sx127x_modes import (
     MetaModeBits,
     ModeBits,
     NotARfm9xSx127xDeviceState,
+    RegisterLayout,
     ResetState,
     Rfm9xSx127xMode,
     StateBits,
@@ -369,3 +370,135 @@ class TestLoraModeEnum:
     def test_lora_mode_values(self) -> None:
         assert LoraMode.FSK_OOK.value is False
         assert LoraMode.LORA.value is True
+
+
+class TestRegisterLayout:
+    """Test suite for RegisterLayout enum and its nested register classes."""
+
+    def test_reg_opmode_masks(self) -> None:
+        assert RegisterLayout.RegOpMode.MASK_MODE == 0x07
+        assert RegisterLayout.RegOpMode.MASK_META == 0x70
+        assert RegisterLayout.RegOpMode.MASK_LORA == 0x80
+        assert RegisterLayout.RegOpMode.BIT_LF == 0x08
+
+    def test_reg_frf_mask(self) -> None:
+        assert RegisterLayout.RegFrf.MASK_FRF == 0xFFFFFFFF
+
+    def test_reg_pa_config_mask(self) -> None:
+        assert RegisterLayout.RegPaConfig.MASK_PA == 0xFFFF
+
+    def test_reg_version_mask(self) -> None:
+        assert RegisterLayout.RegVersion.MASK_VER == 0xFFFF
+
+    def test_reg_dio_mapping_masks(self) -> None:
+        assert RegisterLayout.RegDioMapping1.MASK_MAP == 0xFFFFFFFF
+        assert RegisterLayout.RegDioMapping2.MASK_MAP == 0xFFFFFFFF
+
+    def test_reg_detect_optimize_mask(self) -> None:
+        assert RegisterLayout.RegDetectOptimize.MASK_OPT == 0xFFFF
+
+    def test_reg_invert_iq_mask(self) -> None:
+        assert RegisterLayout.RegInvertIQ.MASK_INVERT == 0x01
+
+    def test_reg_detection_threshold_mask(self) -> None:
+        assert RegisterLayout.RegDetectionThreshold.MASK_THRESH == 0xFFFFFFFF
+
+    def test_reg_sync_word_mask(self) -> None:
+        assert RegisterLayout.RegSyncWord.MASK_WORD == 0xFFFFFFFF
+
+    def test_reg_payload_length_mask(self) -> None:
+        assert RegisterLayout.RegPayloadLength.MASK_LEN == 0xFFFF
+
+    def test_reg_max_payload_length_mask(self) -> None:
+        assert RegisterLayout.RegMaxPayloadLength.MASK_MAX_LEN == 0xFFFF
+
+    def test_reg_hop_period_mask(self) -> None:
+        assert RegisterLayout.RegHopPeriod.MASK_PERIOD == 0xFFFFFFFF
+
+    def test_reg_bit_rate_frac_mask(self) -> None:
+        assert RegisterLayout.RegBitRateFrac.MASK_RATE == 0xFFFF
+
+    def test_reg_agc_thresh_masks(self) -> None:
+        assert RegisterLayout.RegAgcThresh1.MASK_THRESH == 0xFFFFFFFF
+        assert RegisterLayout.RegAgcThresh2.MASK_THRESH == 0xFFFFFFFF
+        assert RegisterLayout.RegAgcThresh3.MASK_THRESH == 0xFFFFFFFF
+
+    def test_reg_agc_ref_mask(self) -> None:
+        assert RegisterLayout.RegAgcRef.MASK_REF == 0xFFFFFFFF
+
+    def test_reg_fei_masks(self) -> None:
+        assert RegisterLayout.RegFeiMsb.MASK_MSB == 0xFFFF
+        assert RegisterLayout.RegFeiMib.MASK_MIB == 0xFFFF
+        assert RegisterLayout.RegFeiLsb.MASK_LSB == 0xFFFF
+
+    def test_reg_rx_nb_bytes_mask(self) -> None:
+        assert RegisterLayout.RegRxNbBytes.MASK_NB_BYTES == 0xFFFF
+
+    def test_reg_pkt_snr_value_mask(self) -> None:
+        assert RegisterLayout.RegPktSnrValue.MASK_SNR == 0xFFFFFFFF
+
+    def test_reg_pkt_rssi_value_mask(self) -> None:
+        assert RegisterLayout.RegPktRssiValue.MASK_RSSI == 0xFFFFFFFF
+
+    def test_reg_rssi_value_mask(self) -> None:
+        assert RegisterLayout.RegRssiValue.MASK_RSSI == 0xFFFFFFFF
+
+    def test_reg_hop_channel_mask(self) -> None:
+        assert RegisterLayout.RegHopChannel.MASK_CHANNEL == 0xFFFF
+
+    def test_reg_modem_config_masks(self) -> None:
+        assert RegisterLayout.RegModemConfig1.MASK_CFG == 0xFFFFFFFF
+        assert RegisterLayout.RegModemConfig2.MASK_CFG == 0xFFFFFFFF
+        assert RegisterLayout.RegModemConfig3.MASK_CFG == 0xFFFFFFFF
+
+    def test_reg_symb_timeout_mask(self) -> None:
+        assert RegisterLayout.RegSymbTimeoutLsb.MASK_LSB == 0xFFFF
+
+    def test_reg_preamble_masks(self) -> None:
+        assert RegisterLayout.RegPreambleMsb.MASK_MSB == 0xFFFF
+        assert RegisterLayout.RegPreambleLsb.MASK_LSB == 0xFFFF
+
+    def test_reg_fifo_addr_ptr_mask(self) -> None:
+        assert RegisterLayout.RegFifoAddrPtr.MASK_PTR == 0xFFFF
+
+    def test_reg_fifo_tx_base_addr_mask(self) -> None:
+        assert RegisterLayout.RegFifoTxBaseAddr.MASK_BASE == 0xFFFFFFFF
+
+    def test_reg_fifo_rx_base_addr_mask(self) -> None:
+        assert RegisterLayout.RegFifoRxBaseAddr.MASK_BASE == 0xFFFFFFFF
+
+    def test_reg_fifo_rx_byte_addr_mask(self) -> None:
+        assert RegisterLayout.RegFifoRxByteAddr.MASK_ADDR == 0xFFFFFFFF
+
+    def test_reg_tcxo_mask(self) -> None:
+        assert RegisterLayout.RegTcxo.MASK_TCXO == 0xFFFFFFFF
+
+    def test_reg_pa_dac_mask(self) -> None:
+        assert RegisterLayout.RegPaDac.MASK_DAC == 0xFFFFFFFF
+
+    def test_reg_former_temp_mask(self) -> None:
+        assert RegisterLayout.RegFormerTemp.MASK_TEMP == 0xFFFFFFFF
+
+    def test_reg_pll_mask(self) -> None:
+        assert RegisterLayout.RegPll.MASK_PLL == 0xFFFFFFFF
+
+    def test_reg_ocp_mask(self) -> None:
+        assert RegisterLayout.RegOcp.MASK_OCP == 0xFFFF
+
+    def test_reg_lna_mask(self) -> None:
+        assert RegisterLayout.RegLna.MASK_LNA == 0xFFFF
+
+    def test_reg_irq_flags_mask(self) -> None:
+        assert RegisterLayout.RegIrqFlagsMask.MASK_IRQ == 0xFFFF
+        assert RegisterLayout.RegIrqFlags.MASK_IRQ == 0xFFFF
+
+    def test_reg_rx_header_cnt_masks(self) -> None:
+        assert RegisterLayout.RegRxHeaderCntValueMsb.MASK_MSB == 0xFFFF
+        assert RegisterLayout.RegRxHeaderCntValueLsb.MASK_LSB == 0xFFFF
+
+    def test_reg_rx_packet_cnt_masks(self) -> None:
+        assert RegisterLayout.RegRxPacketCntValueMsb.MASK_MSB == 0xFFFF
+        assert RegisterLayout.RegRxPacketCntValueLsb.MASK_LSB == 0xFFFF
+
+    def test_reg_modem_stat_mask(self) -> None:
+        assert RegisterLayout.RegModemStat.MASK_STAT == 0xFFFF

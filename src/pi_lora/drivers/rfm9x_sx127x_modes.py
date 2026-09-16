@@ -25,8 +25,269 @@ Bit layout of RegOpMode:
   - Bit 7: LoRa mode flag (0x80 = LoRa, 0x00 = FSK/OOK)
 """
 
-from enum import Enum
+from enum import Enum, IntFlag
 from typing import Any
+
+
+class RegisterLayout:
+    """Comprehensive SX127x register map per datasheet.
+
+    Each nested class is an IntFlag defining bit fields for one hardware register.
+    Values are masks/shift targets matching the Semtech/SX127x spec.
+    """
+
+    class RegOpMode(IntFlag):
+        """Register OpMode -- bits 0-7 of the operation mode register."""
+
+        MASK_MODE = 0x07
+        MASK_META = 0x70
+        MASK_LORA = 0x80
+        BIT_LF = 0x08
+
+    class RegFrf(IntFlag):
+        """Register Frf -- frequency configuration."""
+
+        MASK_FRF = 0xFFFFFFFF
+
+    class RegPaConfig(IntFlag):
+        """Register PaConfig -- pause configuration."""
+
+        MASK_PA = 0xFFFF
+
+    class RegOcp(IntFlag):
+        """Register Ocp -- operating control parameter."""
+
+        MASK_OCP = 0xFFFF
+
+    class RegLna(IntFlag):
+        """Register Lna -- line number address."""
+
+        MASK_LNA = 0xFFFF
+
+    class RegFifoAddrPtr(IntFlag):
+        """Register FifoAddrPtr -- FIFO address pointer."""
+
+        MASK_PTR = 0xFFFF
+
+    class RegFifoTxBaseAddr(IntFlag):
+        """Register FifoTxBaseAddr -- TX base address."""
+
+        MASK_BASE = 0xFFFFFFFF
+
+    class RegFifoRxBaseAddr(IntFlag):
+        """Register FifoRxBaseAddr -- RX base address."""
+
+        MASK_BASE = 0xFFFFFFFF
+
+    class RegFifoRxCurrentAddr(IntFlag):
+        """Register FifoRxCurrentAddr -- RX current address."""
+
+        MASK_CURR_ADDR = 0xFFFFFFFF
+
+    class RegIrqFlagsMask(IntFlag):
+        """Register IrqFlagsMask -- interrupt request flags mask."""
+
+        MASK_IRQ = 0xFFFF
+
+    class RegIrqFlags(IntFlag):
+        """Register IrqFlags -- interrupt request flags."""
+
+        MASK_IRQ = 0xFFFF
+
+    class RegRxNbBytes(IntFlag):
+        """Register RxNbBytes -- RX number of bytes."""
+
+        MASK_NB_BYTES = 0xFFFF
+
+    class RegRxHeaderCntValueMsb(IntFlag):
+        """Register RxHeaderCntValueMsb -- RX header count MSB."""
+
+        MASK_MSB = 0xFFFF
+
+    class RegRxHeaderCntValueLsb(IntFlag):
+        """Register RxHeaderCntValueLsb -- RX header count LSB."""
+
+        MASK_LSB = 0xFFFF
+
+    class RegRxPacketCntValueMsb(IntFlag):
+        """Register RxPacketCntValueMsb -- RX packet count MSB."""
+
+        MASK_MSB = 0xFFFF
+
+    class RegRxPacketCntValueLsb(IntFlag):
+        """Register RxPacketCntValueLsb -- RX packet count LSB."""
+
+        MASK_LSB = 0xFFFF
+
+    class RegModemStat(IntFlag):
+        """Register ModemStat -- modulation status."""
+
+        MASK_STAT = 0xFFFF
+
+    class RegPktSnrValue(IntFlag):
+        """Register PktSnrValue -- packet SNR value."""
+
+        MASK_SNR = 0xFFFFFFFF
+
+    class RegPktRssiValue(IntFlag):
+        """Register PktRssiValue -- packet RSSI value."""
+
+        MASK_RSSI = 0xFFFFFFFF
+
+    class RegRssiValue(IntFlag):
+        """Register RssiValue -- RSSI value."""
+
+        MASK_RSSI = 0xFFFFFFFF
+
+    class RegHopChannel(IntFlag):
+        """Register HopChannel -- hop channel."""
+
+        MASK_CHANNEL = 0xFFFF
+
+    class RegModemConfig1(IntFlag):
+        """Register ModemConfig1 -- modulation config 1."""
+
+        MASK_CFG = 0xFFFFFFFF
+
+    class RegModemConfig2(IntFlag):
+        """Register ModemConfig2 -- modulation config 2."""
+
+        MASK_CFG = 0xFFFFFFFF
+
+    class RegSymbTimeoutLsb(IntFlag):
+        """Register SymbTimeoutLsb -- symbol timeout LSB."""
+
+        MASK_LSB = 0xFFFF
+
+    class RegPreambleMsb(IntFlag):
+        """Register PreambleMsb -- preamble MSB."""
+
+        MASK_MSB = 0xFFFF
+
+    class RegPreambleLsb(IntFlag):
+        """Register PreambleLsb -- preamble LSB."""
+
+        MASK_LSB = 0xFFFF
+
+    class RegPayloadLength(IntFlag):
+        """Register PayloadLength -- payload length."""
+
+        MASK_LEN = 0xFFFF
+
+    class RegMaxPayloadLength(IntFlag):
+        """Register MaxPayloadLength -- max payload length."""
+
+        MASK_MAX_LEN = 0xFFFF
+
+    class RegHopPeriod(IntFlag):
+        """Register HopPeriod -- hop period."""
+
+        MASK_PERIOD = 0xFFFFFFFF
+
+    class RegFifoRxByteAddr(IntFlag):
+        """Register FifoRxByteAddr -- RX byte address."""
+
+        MASK_ADDR = 0xFFFFFFFF
+
+    class RegModemConfig3(IntFlag):
+        """Register ModemConfig3 -- modulation config 3."""
+
+        MASK_CFG = 0xFFFFFFFF
+
+    class RegFeiMsb(IntFlag):
+        """Register FeiMsb -- FEI MSB."""
+
+        MASK_MSB = 0xFFFF
+
+    class RegFeiMib(IntFlag):
+        """Register FeiMib -- FEI MIB."""
+
+        MASK_MIB = 0xFFFF
+
+    class RegFeiLsb(IntFlag):
+        """Register FeiLsb -- FEI LSB."""
+
+        MASK_LSB = 0xFFFF
+
+    class RegDetectOptimize(IntFlag):
+        """Register DetectOptimize -- detection optimize."""
+
+        MASK_OPT = 0xFFFF
+
+    class RegInvertIQ(IntFlag):
+        """Register InvertIQ -- invert IQ."""
+
+        MASK_INVERT = 0x01
+
+    class RegDetectionThreshold(IntFlag):
+        """Register DetectionThreshold -- detection threshold."""
+
+        MASK_THRESH = 0xFFFFFFFF
+
+    class RegSyncWord(IntFlag):
+        """Register SyncWord -- sync word."""
+
+        MASK_WORD = 0xFFFFFFFF
+
+    class RegDioMapping1(IntFlag):
+        """Register DioMapping1 -- DIO mapping 1."""
+
+        MASK_MAP = 0xFFFFFFFF
+
+    class RegDioMapping2(IntFlag):
+        """Register DioMapping2 -- DIO mapping 2."""
+
+        MASK_MAP = 0xFFFFFFFF
+
+    class RegVersion(IntFlag):
+        """Register Version -- device version."""
+
+        MASK_VER = 0xFFFF
+
+    class RegTcxo(IntFlag):
+        """Register Tcxo -- TCXO."""
+
+        MASK_TCXO = 0xFFFFFFFF
+
+    class RegPaDac(IntFlag):
+        """Register PaDac -- PA DAC."""
+
+        MASK_DAC = 0xFFFFFFFF
+
+    class RegFormerTemp(IntFlag):
+        """Register FormerTemp -- former temperature."""
+
+        MASK_TEMP = 0xFFFFFFFF
+
+    class RegBitRateFrac(IntFlag):
+        """Register BitRateFrac -- bit rate fraction."""
+
+        MASK_RATE = 0xFFFF
+
+    class RegAgcRef(IntFlag):
+        """Register AgcRef -- AGC reference."""
+
+        MASK_REF = 0xFFFFFFFF
+
+    class RegAgcThresh1(IntFlag):
+        """Register AgcThresh1 -- AGC threshold 1."""
+
+        MASK_THRESH = 0xFFFFFFFF
+
+    class RegAgcThresh2(IntFlag):
+        """Register AgcThresh2 -- AGC threshold 2."""
+
+        MASK_THRESH = 0xFFFFFFFF
+
+    class RegAgcThresh3(IntFlag):
+        """Register AgcThresh3 -- AGC threshold 3."""
+
+        MASK_THRESH = 0xFFFFFFFF
+
+    class RegPll(IntFlag):
+        """Register Pll -- PLL."""
+
+        MASK_PLL = 0xFFFFFFFF
 
 
 class StateBits(Enum):
@@ -78,10 +339,11 @@ class MetaModeBits(Enum):
 
 
 class LoraMode(Enum):
-    """LoRa mode flag (bit 7 of RegOpMode)."""
+    """LoRa mode flag (bit 3 of internal StateBits representation)."""
 
     FSK_OOK = False
     LORA = True
+    LORA_STATE_BIT = 0x08
 
 
 class _ConstantsMeta(type):
@@ -102,21 +364,21 @@ class _ConstantsMeta(type):
     def MODE_BITS(cls) -> ModeBits:
         raw = getattr(cls, '_Constants').STATE_BITS.value  # noqa: B009
         bits = raw.value if isinstance(raw, StateBits) else raw
-        raw_mode: int = bits & 0x07
+        raw_mode: int = bits & RegisterLayout.RegOpMode.MASK_MODE
         return ModeBits(raw_mode)
 
     @property
     def META_MODE_BITS(cls) -> MetaModeBits:
         raw = getattr(cls, '_Constants').STATE_BITS.value  # noqa: B009
         bits = raw.value if isinstance(raw, StateBits) else raw
-        raw_meta: int = (bits & 0x70) >> 4
+        raw_meta: int = (bits & RegisterLayout.RegOpMode.MASK_META) >> 4
         return MetaModeBits(raw_meta)
 
     @property
     def LORA_MODE(cls) -> LoraMode:
         raw = getattr(cls, '_Constants').STATE_BITS.value  # noqa: B009
         bits = raw.value if isinstance(raw, StateBits) else raw
-        mask_result: int = bits & 0x08
+        mask_result: int = bits & LoraMode.LORA_STATE_BIT.value
         return LoraMode.LORA if mask_result else LoraMode.FSK_OOK
 
     def __setattr__(self, name: str, value: Any) -> None:
