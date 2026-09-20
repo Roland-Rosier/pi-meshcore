@@ -166,23 +166,28 @@ uv remove <package-name>
 │   ├── mcpServers/
 │   │   └── desktop-commander-mcp.yaml  # MCP server config for Desktop Commander integration
 │   └── rules/
-│       ├── 01-system-constraints.md    # Global system constraints and safety modes
-│       ├── 02-execution-protocol.md    # Phase-based execution protocol guidelines
-│       ├── 03-use-desktop-commander-mcp.md  # Desktop Commander MCP tool usage rules
-│       └── 04-use-native-edit-tools.md    # Native file editing tool (single_find_and_replace) rules
-├── .kilo/                            # Kilo agent configuration directory
+│       ├── 01-system-constraints.md      # Global system constraints and safety modes
+│       ├── 02-execution-protocol.md        # Phase-based execution protocol guidelines
+│       ├── 03-use-desktop-commander-mcp.md   # Desktop Commander MCP tool usage rules
+│       └── 04-use-native-edit-tools.md     # Native file editing tool (single_find_and_replace) rules
+├── .kilo/                                # Kilo agent configuration directory
 │   ├── agents/
+│   │   ├── architect_reviewer.md     # Architect reviewer agent configuration
 │   │   └── repo_analyst.md           # Repository analysis agent configuration
 │   ├── kilo.jsonc                    # Kilo main configuration file
-│   └── rules/
-│       ├── 01-strict-tool-calls.md     # Strict tool call enforcement rules
-│       ├── 02-system-constraints.md    # Global system constraints and safety modes
-│       ├── 03-act--execution-protocol.md  # Act phase execution protocol guidelines
-│       ├── 03-plan-execution-protocol.md  # Plan phase execution protocol guidelines
-│       ├── 04-use-desktop-commander-mcp.md  # Desktop Commander MCP tool usage rules
-│       └── 05-use-native-edit-tools.md    # Native file editing tool (single_find_and_replace) rules
+│   ├── rules/
+│   │   ├── 01-strict-tool-calls.md     # Strict tool call enforcement rules
+│   │   ├── 02-system-constraints.md      # Global system constraints and safety modes
+│   │   ├── 03-act--execution-protocol.md   # Act phase execution protocol guidelines
+│   │   ├── 03-plan-execution-protocol.md   # Plan phase execution protocol guidelines
+│   │   ├── 04-use-desktop-commander-mcp.md   # Desktop Commander MCP tool usage rules
+│   │   └── 05-use-native-edit-tools.md     # Native file editing tool (single_find_and_replace) rules
+│   └── skills/                           # Agent skill definitions
+│       ├── grill-me/SKILL.md           # Stress-test interview skill for design validation
+│       └── repo-analyst/SKILL.md     # Repository analysis skill
 ├── .gitattributes                    # Git attribute definitions for line endings, filters
 ├── .gitignore                        # Files and directories excluded from version control
+├── .gitmodules                       # Git submodule definitions
 ├── .pre-commit-config.yaml           # Pre-commit hook configuration for automated linting/formatting checks
 ├── .prompts/                         # Reusable agent prompt templates
 │   └── repo_analyst.prompt           # Repository analysis task prompt template
@@ -201,37 +206,68 @@ uv remove <package-name>
 │   └── ruff-lint-workflow.yml.disabled  # Disabled ruff lint workflow configuration file
 ├── pyproject.toml                    # Python project metadata, pytest & coverage configuration
 ├── requirements.txt                  # Python dependency list (FastAPI, meshcore, pytest, etc.)
+├── scripts/                          # Utility scripts directory
+│   └── sync_semgrep_rules.py         # Sync semgrep rule files from external sources
 ├── uv.lock                           # Lock file pinning exact dependency versions for reproducible builds
+├── .semgrep/                         # Semgrep SAST security/correctness rules engine (40+ rule files)
+│   ├── rules/
+│   │   ├── best-practice/            # Best practice linting rules
+│   │   ├── correctness/              # Correctness linting rules
+│   │   │   └── common-mistakes/      # Common mistake patterns
+│   │   ├── maintaintability/         # Maintainability linting rules
+│   │   └── security/                 # Security scanning rules
+│   │       └── audit/                  # Audit patterns (dangerous calls, injection)
+│   │           ├── insecure-transport/   # Transport security rules
+│   │           └── sqli/               # SQL injection patterns
+│   ├── run.sh                        # Semgrep execution runner
+│   ├── semgrep-semgrep-rules         # External semgrep ruleset
+│   └── trailofbits-semgrep-rules     # External semgrep ruleset
 ├── src/pi_lora/                      # Main source code package
 │   ├── __init__.py                   # Package initialization for pi_lora top-level module
 │   ├── cli/
 │   │   ├── __init__.py               # CLI sub-package initialization
 │   │   └── check_hardware.py         # CLI tool for LoRa hardware detection and status checks
-│   └── drivers/
-│       ├── __init__.py               # Drivers sub-package initialization
-│       ├── lora_detection.py          # LoRa module auto-detection logic (RFM95W/RFM98W)
-│       ├── lora_module.py             # RFM95W/RFM98W radio driver implementation (SX1276/SX1278)
-│       ├── rfm9x_sx127x_config_model.py  # Config data models for RFM95W/RFM98W module settings
-│       ├── rfm9x_sx127x_config_loader.py  # YAML config loader for RFM95W/RFM98W parameters
-│       ├── rfm9x_sx127x_config_validator.py  # Config validation for RFM module settings
-│       ├── rfm9x_sx127x_handler.py      # High-level handler for RFM95W/RFM98W operations
-│       ├── rfm9x_sx127x_modes.py         # RFM95W/RFM98W frequency mode definitions and constants
-│       └── rfm9x_sx127x_module.py        # RFM95W/RFM98W radio module abstraction layer
+│   ├── drivers/
+│   │   ├── __init__.py               # Drivers sub-package initialization
+│   │   ├── configs/                    # Driver config subdirectory
+│   │   │   └── rfm9x_sx127x_config.yaml  # Driver-specific YAML config
+│   │   ├── lora_detection.py           # LoRa module auto-detection logic (RFM95W/RFM98W)
+│   │   ├── lora_module.py              # RFM95W/RFM98W radio driver implementation (SX1276/SX1278)
+│   │   ├── rfm9x_sx127x_config_model.py  # Config data models for RFM95W/RFM98W module settings
+│   │   ├── rfm9x_sx127x_config_loader.py   # YAML config loader for RFM95W/RFM98W parameters
+│   │   ├── rfm9x_sx127x_config_validator.py  # Config validation for RFM module settings
+│   │   ├── rfm9x_sx127x_handler.py         # High-level handler for RFM95W/RFM98W operations
+│   │   ├── rfm9x_sx127x_modes.py         # RFM95W/RFM98W frequency mode definitions and constants
+│   │   └── rfm9x_sx127x_module.py      # RFM95W/RFM98W radio module abstraction layer
+│   └── framework/                    # Framework infrastructure subpackage
+│       ├── __init__.py               # Framework package init
+│       ├── application.py            # Application lifecycle management
+│       ├── command_bus.py            # Command dispatch bus
+│       ├── events.py                 # Event system definitions
+│       ├── module_manager.py         # Module registration and lifecycle management
+│       └── scheduler.py              # Task scheduling engine
 └── tests/                            # Test suite
     ├── __init__.py                   # Tests package initialization
     ├── conftest.py                   # pytest fixtures and shared test configuration
     ├── fakes.py                      # Fake/mock implementations for driver testing
+    ├── framework/                    # Framework test subdirectory
+    │   ├── test_application.py       # Framework application tests
+    │   ├── test_command_bus.py       # Command bus tests
+    │   ├── test_events.py            # Event system tests
+    │   ├── test_module_event_loop.py   # Module event loop tests
+    │   ├── test_module_manager.py    # Module manager tests
+    │   └── test_scheduler.py         # Scheduler tests
     ├── test_check_hardware_cli.py    # Unit tests for CLI hardware check tool
     ├── test_fakes.py                 # Unit tests for fake/mock objects
     ├── test_lora_module.py           # Unit tests for LoRa radio module operations
-    ├── test_lora_module_detection.py # Tests for hardware detection logic
-    ├── test_lora_module_detector.py  # Tests for the detector subsystem component
-    ├── test_rfm9x_sx127x_modes.py    # Unit tests for RFM95W/RFM98W mode definitions
+    ├── test_lora_module_detection.py   # Tests for hardware detection logic
+    ├── test_lora_module_detector.py      # Tests for the detector subsystem component
     ├── test_rfm9x_sx127x_config_loader.py  # Tests for config loader subsystem
     ├── test_rfm9x_sx127x_config_model.py   # Tests for config data models
     ├── test_rfm9x_sx127x_config_validator.py # Tests for config validation logic
     ├── test_rfm9x_sx127x_handler.py        # Tests for RFM module handler
-    └── test_rfm9x_sx127x_module.py   # Unit tests for RFM95W/RFM98W radio module implementation
+    ├── test_rfm9x_sx127x_modes.py        # Unit tests for RFM95W/RFM98W mode definitions
+    └── test_rfm9x_sx127x_module.py     # Unit tests for RFM95W/RFM98W radio module implementation
 ```
 
 ---
