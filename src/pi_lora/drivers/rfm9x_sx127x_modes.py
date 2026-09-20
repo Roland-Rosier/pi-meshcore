@@ -28,6 +28,8 @@ Bit layout of RegOpMode:
 from enum import Enum, IntFlag
 from typing import Any
 
+from ..framework.events import ModuleEvent
+
 
 class RegisterLayout:
     """Comprehensive SX127x register map per datasheet.
@@ -405,6 +407,10 @@ class Rfm9xSx127xMode(metaclass=_ConstantsMeta):
 
     def on_exit(self) -> None:
         """Called when the device is exited from this mode."""
+        pass
+
+    async def on_event(self, event: ModuleEvent) -> None:
+        """Default no-op handler. Concrete states override."""
         pass
 
 

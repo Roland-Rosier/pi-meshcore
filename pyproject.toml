@@ -114,6 +114,7 @@ dev = [
 
     # Testing and coverage
     "pytest-cov>=4.1",
+    "pytest-asyncio>=0.24",
     "coverage[toml]>=7.0",
 
     # Linting (Rust-based, ~100x faster than flake8)
@@ -142,8 +143,10 @@ testpaths = ["tests"]
 markers = [
     "slow: marks tests as slow (deselect with '-m \"not slow\"')",
     "integration: marks tests as integration tests",
+    "asyncio: marks tests as async tests",
 ]
 pythonpath = ["src"]
+asyncio_mode = "strict"
 
 [tool.coverage.run]
 source = ["src", "tests"]

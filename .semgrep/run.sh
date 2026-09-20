@@ -10,5 +10,7 @@ uv run semgrep scan --verbose \
        ".semgrep/rules/correctness/" \
        ".semgrep/rules/maintainability/" \
   src/pi_lora/drivers/rfm9x_sx127x*.py \
-  tests/test_rfm9x_sx127x*.py
+  tests/test_rfm9x_sx127x*.py \
+  src/pi_lora/framework/*.py \
+  tests/framework/*.py
 

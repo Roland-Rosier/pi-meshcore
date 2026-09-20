@@ -20,6 +20,9 @@ using a shared ``state_instances`` dictionary to avoid redundant object creation
 """
 
 
+import asyncio
+from contextlib import suppress
+
 from .rfm9x_sx127x_handler import Rfm9xSx127xHandler
 from .rfm9x_sx127x_modes import (
     LoraMode,
@@ -28,6 +31,7 @@ from .rfm9x_sx127x_modes import (
     StateBits,
     StateBitsMapping,
 )
+from ..framework.events import ModuleEvent, StopMode
 
 
 class Rfm9xSx127xModule:
@@ -44,6 +48,16 @@ class Rfm9xSx127xModule:
             self._create_instances()
         )
         self.handler: Rfm9xSx127xHandler = Rfm9xSx127xHandler()
+
+        # Event loop infrastructure
+        self.event_queue: asyncio.Queue[ModuleEvent] = asyncio.Queue()
+        self.event_loop_task: asyncio.Task[None] | None = None
+        self._stop_mode: StopMode = StopMode.DRAIN
+        self._paused: bool = False
+
+        # Module identity (set via setters after construction)
+        self.spi_device_id: int | None = None
+        self.ce_number: int | None = None
 
     # ------------------------------------------------------------------
     # Internal helpers
@@ -116,3 +130,74 @@ class Rfm9xSx127xModule:
             if mode_bits in (ModeBits.SLEEP_OR_ERROR_OR_NOT_A_DEVICE_OR_UNKNOWN_OR_RESET, ModeBits.STANDBY):
                 return True
         return None
+
+    # Identity setters (called by ModuleManager after construction)
+    def set_spi_device_id(self, spi_device_id: int) -> None:
+        self.spi_device_id = spi_device_id
+
+    def set_ce_number(self, ce_number: int) -> None:
+        self.ce_number = ce_number
+
+    # Encapsulation getters (for Application.get_status())
+    def get_current_state_name(self) -> str:
+        if self.current_state_instance is not None:
+            return type(self.current_state_instance).__name__
+        return "None"
+
+    def get_event_queue_size(self) -> int:
+        return self.event_queue.qsize()
+
+    def get_spi_device_id(self) -> int | None:
+        return self.spi_device_id
+
+    def get_ce_number(self) -> int | None:
+        return self.ce_number
+
+    # Event loop control
+    async def start_event_loop(self) -> None:
+        self._paused = False
+        if self.event_loop_task is None or self.event_loop_task.done():
+            self.event_loop_task = asyncio.create_task(self._event_loop())
+        # If paused, just resume; queue kept and accepting new events
+
+    async def stop_event_loop(self, mode: StopMode = StopMode.DRAIN) -> None:
+        self._stop_mode = mode
+        if mode == StopMode.PAUSE:
+            self._paused = True
+            return  # Keep task running but stop dispatching
+
+        if self.event_loop_task and not self.event_loop_task.done():
+            self.event_loop_task.cancel()
+            if mode == StopMode.DRAIN:
+                # Wait for task to finish draining
+                with suppress(asyncio.CancelledError):
+                    await self.event_loop_task
+            elif mode == StopMode.CANCEL_ALL:
+                # Drain queue without processing
+                while not self.event_queue.empty():
+                    try:
+                        self.event_queue.get_nowait()
+                    except Exception:
+                        break
+                with suppress(asyncio.CancelledError):
+                    await self.event_loop_task
+
+    async def _event_loop(self) -> None:
+        try:
+            while True:
+                if self._paused:
+                    await asyncio.sleep(0.01)  # Brief sleep while paused
+                    continue
+                event = await self.event_queue.get()
+                if self.current_state_instance is not None:
+                    await self.current_state_instance.on_event(event)
+        except asyncio.CancelledError:
+            if self._stop_mode == StopMode.DRAIN:
+                while not self.event_queue.empty():
+                    try:
+                        ev = self.event_queue.get_nowait()
+                        if self.current_state_instance is not None:
+                            await self.current_state_instance.on_event(ev)
+                    except Exception:
+                        break
+            raise
