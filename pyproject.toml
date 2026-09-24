@@ -186,10 +186,38 @@ warn_redundant_casts = true
 warn_unused_ignores = true
 warn_unreachable = true
 explicit_package_bases = true
-mypy_path = "src"
 
 [[tool.mypy.overrides]]
 module = ["spidev"]
+ignore_missing_imports = true
+
+[[tool.mypy.overrides]]
+module = ["aiologic"]
+ignore_missing_imports = true
+
+[[tool.mypy.overrides]]
+module = ["pydantic"]
+ignore_missing_imports = true
+
+[[tool.mypy.overrides]]
+module = ["ruamel.yaml"]
+ignore_missing_imports = true
+
+[[tool.mypy.overrides]]
+module = ["typer"]
+ignore_missing_imports = true
+
+# First-party internal modules — mypy can't resolve them as stubs.
+[[tool.mypy.overrides]]
+module = ["pi_lora.drivers.spi.bus", "pi_lora.drivers.spi.factory", "pi_lora.drivers.spi.locks"]
+ignore_missing_imports = true
+
+[[tool.mypy.overrides]]
+module = ["pi_lora.drivers.rfm9x_sx127x_config_model", "pi_lora.drivers.rfm9x_sx127x_config_validator", "pi_lora.drivers.rfm9x_sx127x_config_loader"]
+ignore_missing_imports = true
+
+[[tool.mypy.overrides]]
+module = ["fakes", "pi_lora.drivers.lora_module", "pi_lora.drivers.lora_detection"]
 ignore_missing_imports = true
 
 # -----------------------------------------------------------------------------

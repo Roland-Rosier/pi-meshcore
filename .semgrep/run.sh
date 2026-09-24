@@ -12,5 +12,7 @@ uv run semgrep scan --verbose \
   src/pi_lora/drivers/rfm9x_sx127x*.py \
   tests/test_rfm9x_sx127x*.py \
   src/pi_lora/framework/*.py \
-  tests/framework/*.py
+  tests/framework/*.py \
+  src/pi_lora/drivers/spi/*.py \
+  tests/spi/*.py
 

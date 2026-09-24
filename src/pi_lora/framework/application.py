@@ -31,24 +31,33 @@ from .scheduler import Scheduler
 class Application:
     """Top-level runtime owning the module lifecycle and command infrastructure."""
 
-    def __init__(self, config: Any) -> None:
+    def __init__(self, config: Any, spi_factory: Any | None = None) -> None:
         self.config = config
         self.scheduler = Scheduler()
         self.module_manager = ModuleManager()
         self.command_bus = CommandBus()
+        if spi_factory is not None:
+            self.spi_factory = spi_factory
+        else:
+            from ..drivers.spi.factory import RealSpiBusFactory
+
+            self.spi_factory = RealSpiBusFactory()
 
     async def start(self) -> None:
         """Initialize the application: load modules, register scheduler, start loops."""
-        self.module_manager.load_from_config(self.config, self.scheduler)
+        self.module_manager.load_from_config(self.config, self.scheduler, self.spi_factory)
         self.command_bus.set_module_resolver(self._resolve_module_for_command)
         await self.scheduler.start()
         for module in self.module_manager.get_all_modules():
+            if module.spi_device_id is not None:
+                await module.init_spi_bus()
             await module.start_event_loop()
 
     async def stop(self) -> None:
         """Gracefully stop all modules and the scheduler."""
         for module in self.module_manager.get_all_modules():
             await module.stop_event_loop(StopMode.DRAIN)
+            await module.close_spi()
         await self.scheduler.stop()
 
     async def run_blocking_command(self, cmd: Any) -> Any:

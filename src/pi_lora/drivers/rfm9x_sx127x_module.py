@@ -31,6 +31,8 @@ from .rfm9x_sx127x_modes import (
     StateBits,
     StateBitsMapping,
 )
+from .spi.bus import SpiBus
+from .spi.factory import SpiBusFactory
 from ..framework.events import ModuleEvent, StopMode
 
 
@@ -42,7 +44,13 @@ class Rfm9xSx127xModule:
     class type.
     """
 
-    def __init__(self, state: StateBits) -> None:
+    def __init__(
+        self,
+        state: StateBits,
+        spi_factory: SpiBusFactory | None = None,
+    ) -> None:
+        self._spi_factory: SpiBusFactory | None = spi_factory
+        self.spi_bus: SpiBus | None = None
         self.current_state_instance: Rfm9xSx127xMode|None = self._create_state_instance(state)
         self.state_instances: dict[type[Rfm9xSx127xMode], Rfm9xSx127xMode] = (
             self._create_instances()
@@ -80,6 +88,24 @@ class Rfm9xSx127xModule:
     # ------------------------------------------------------------------
     # Public API
     # ------------------------------------------------------------------
+
+    async def init_spi_bus(self) -> None:
+        """Open the SPI bus using the injected factory.
+
+        Must be called after ``spi_device_id`` and ``ce_number`` are set.
+        """
+        if self._spi_factory is None or self.spi_device_id is None:
+            return
+        self.spi_bus = self._spi_factory.create(
+            bus=self.spi_device_id, device=self.ce_number or 0
+        )
+        self.spi_bus.open(self.spi_device_id, self.ce_number or 0)
+
+    async def close_spi(self) -> None:
+        """Close the SPI bus if one is open."""
+        if self.spi_bus is not None:
+            self.spi_bus.close()
+            self.spi_bus = None
 
     def set_current_state(self, state: StateBits) -> None:
         """Transition the module to *state*, firing ``on_exit``/``on_entry`` hooks."""

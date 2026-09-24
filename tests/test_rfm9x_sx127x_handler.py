@@ -12,16 +12,14 @@
 # see the License for the specific language governing permissions and
 # limitations under the License.
 
-"""Tests for ``Rfm9xSx127xHandler`` stub methods."""
-
-
+"""Tests for ``Rfm9xSx127xHandler`` methods."""
 
 from src.pi_lora.drivers.rfm9x_sx127x_handler import Rfm9xSx127xHandler
 from src.pi_lora.drivers.rfm9x_sx127x_modes import ModeBits
 
 
 class TestRfm9xSx127xHandler:
-    """Tests for the ``Rfm9xSx127xHandler`` class and its stub methods."""
+    """Tests for the ``Rfm9xSx127xHandler`` class and its methods."""
 
     def test_init(self) -> None:
         handler = Rfm9xSx127xHandler()
@@ -31,20 +29,20 @@ class TestRfm9xSx127xHandler:
         handler = Rfm9xSx127xHandler(dummy_arg=42)
         assert isinstance(handler, Rfm9xSx127xHandler)
 
-    def test_set_module_mode_returns_none(self) -> None:
+    def test_set_module_mode_returns_false_without_spi_bus(self) -> None:
         handler = Rfm9xSx127xHandler()
         result = handler.set_module_mode(ModeBits.STANDBY)
-        assert result is None
+        assert result is False
 
     def test_set_module_mode_with_all_modes(self) -> None:
         handler = Rfm9xSx127xHandler()
         for mode in ModeBits:
             result = handler.set_module_mode(mode)
-            assert result is None, (
-                f"set_module_mode({mode.name}) should return None, got {result}"
+            assert result is False, (
+                f"set_module_mode({mode.name}) should return False without SPI bus, got {result}"
             )
 
-    def test_write_and_verify_frequency_for_khz_returns_all_none(self) -> None:
+    def test_write_and_verify_frequency_for_khz_returns_all_none_without_spi(self) -> None:
         handler = Rfm9xSx127xHandler()
         result = handler.write_and_verify_frequency_for_khz(415000)
         assert result == (None, None, None, None, None, None, None)
@@ -55,21 +53,23 @@ class TestRfm9xSx127xHandler:
         for freq in frequencies:
             result = handler.write_and_verify_frequency_for_khz(freq)
             assert result == (None, None, None, None, None, None, None), (
-                f"write_and_verify_frequency_for_khz({freq}) should return all None"
+                f"write_and_verify_frequency_for_khz({freq}) should return all None without SPI bus"
             )
 
-    def test_calc_freq_registers_for_khz_returns_all_none(self) -> None:
+    def test_calc_freq_registers_for_khz_returns_valid_values(self) -> None:
         handler = Rfm9xSx127xHandler()
         result = handler.calc_freq_registers_for_khz(415000)
-        assert result == (None, None, None)
+        assert result[0] is not None
+        assert result[1] is not None
+        assert result[2] is not None
 
     def test_calc_freq_registers_for_khz_with_various_frequencies(self) -> None:
         handler = Rfm9xSx127xHandler()
         frequencies: list[int] = [0, 1, 415000, 868000, 434000, 9999999]
         for freq in frequencies:
             result = handler.calc_freq_registers_for_khz(freq)
-            assert result == (None, None, None), (
-                f"calc_freq_registers_for_khz({freq}) should return all None"
+            assert all(r is not None for r in result), (
+                f"calc_freq_registers_for_khz({freq}) should return valid values"
             )
 
     def test_handler_instance_in_module(self) -> None:
@@ -90,10 +90,10 @@ class TestRfm9xSx127xHandler:
         assert callable(module.handler.calc_freq_registers_for_khz)
 
         result1 = module.handler.set_module_mode(ModeBits.STANDBY)
-        assert result1 is None
+        assert result1 is False
 
         result2 = module.handler.write_and_verify_frequency_for_khz(415000)
         assert result2 == (None, None, None, None, None, None, None)
 
         result3 = module.handler.calc_freq_registers_for_khz(415000)
-        assert result3 == (None, None, None)
+        assert all(r is not None for r in result3)

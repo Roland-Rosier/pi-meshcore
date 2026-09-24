@@ -17,7 +17,7 @@
 from __future__ import annotations
 
 from contextlib import suppress
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 
 if TYPE_CHECKING:
     from ..drivers.rfm9x_sx127x_config_model import Rfm9xSx127xConfig
@@ -41,6 +41,7 @@ class ModuleManager:
         self,
         config: Rfm9xSx127xConfig,
         scheduler: Scheduler,
+        spi_factory: Any | None = None,
     ) -> None:
         """Load modules from *config*, create them, set identity, register with *scheduler*.
 
@@ -54,7 +55,7 @@ class ModuleManager:
 
         for module_config in config.modules.values():
             for attachment in module_config.devices:
-                module = Rfm9xSx127xModule(state=StateBits.UNKNOWN_STATE)
+                module = Rfm9xSx127xModule(state=StateBits.UNKNOWN_STATE, spi_factory=spi_factory)
                 module.set_spi_device_id(attachment.spi_device_id)
                 module.set_ce_number(attachment.ce_number)
 

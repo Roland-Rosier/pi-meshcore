@@ -96,7 +96,7 @@ This project uses [`semgrep`](https://semgrep.dev/) for SAST-based security and 
 
 ```bash
 # Run semgrep security scan on source code
-uv run semgrep --config semgrep-rules/ src/ tests/
+uv run .semgrep/run.sh
 ```
 
 ### Adding Dependencies
