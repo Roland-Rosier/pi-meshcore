@@ -184,7 +184,8 @@ uv remove <package-name>
 │   │   └── 05-use-native-edit-tools.md     # Native file editing tool (single_find_and_replace) rules
 │   └── skills/                           # Agent skill definitions
 │       ├── grill-me/SKILL.md           # Stress-test interview skill for design validation
-│       └── repo-analyst/SKILL.md     # Repository analysis skill
+│       ├── grill-me-proscons/SKILL.md  # Pros/cons interview skill for design validation
+│       └── repo-analyst/SKILL.md       # Repository analysis skill
 ├── .gitattributes                    # Git attribute definitions for line endings, filters
 ├── .gitignore                        # Files and directories excluded from version control
 ├── .gitmodules                       # Git submodule definitions
@@ -214,7 +215,7 @@ uv remove <package-name>
 │   │   ├── best-practice/            # Best practice linting rules
 │   │   ├── correctness/              # Correctness linting rules
 │   │   │   └── common-mistakes/      # Common mistake patterns
-│   │   ├── maintaintability/         # Maintainability linting rules
+│   │   ├── maintainability/          # Maintainability linting rules
 │   │   └── security/                 # Security scanning rules
 │   │       └── audit/                  # Audit patterns (dangerous calls, injection)
 │   │           ├── insecure-transport/   # Transport security rules
@@ -231,6 +232,11 @@ uv remove <package-name>
 │   │   ├── __init__.py               # Drivers sub-package initialization
 │   │   ├── configs/                    # Driver config subdirectory
 │   │   │   └── rfm9x_sx127x_config.yaml  # Driver-specific YAML config
+│   │   ├── spi/                        # SPI bus abstraction layer
+│   │   │   ├── __init__.py               # SPI sub-package initialization
+│   │   │   ├── bus.py                    # SPI bus communication wrapper
+│   │   │   ├── factory.py                # SPI device factory
+│   │   │   └── locks.py                  # SPI bus locking primitives
 │   │   ├── lora_detection.py           # LoRa module auto-detection logic (RFM95W/RFM98W)
 │   │   ├── lora_module.py              # RFM95W/RFM98W radio driver implementation (SX1276/SX1278)
 │   │   ├── rfm9x_sx127x_config_model.py  # Config data models for RFM95W/RFM98W module settings
@@ -250,6 +256,13 @@ uv remove <package-name>
     ├── __init__.py                   # Tests package initialization
     ├── conftest.py                   # pytest fixtures and shared test configuration
     ├── fakes.py                      # Fake/mock implementations for driver testing
+    ├── drivers/                      # Driver tests
+    │   ├── __init__.py               # Driver tests package init
+    │   └── spi/                      # SPI driver tests
+    │       ├── __init__.py               # SPI tests package init
+    │       ├── test_bus.py               # SPI bus tests
+    │       ├── test_factory.py           # SPI factory tests
+    │       └── test_locks.py             # SPI locks tests
     ├── framework/                    # Framework test subdirectory
     │   ├── test_application.py       # Framework application tests
     │   ├── test_command_bus.py       # Command bus tests
@@ -257,6 +270,10 @@ uv remove <package-name>
     │   ├── test_module_event_loop.py   # Module event loop tests
     │   ├── test_module_manager.py    # Module manager tests
     │   └── test_scheduler.py         # Scheduler tests
+    ├── spi/                          # SPI mock tests
+    │   ├── __init__.py               # SPI mock tests package init
+    │   ├── mock.py                   # SPI mock implementation
+    │   └── test_mock.py              # SPI mock tests
     ├── test_check_hardware_cli.py    # Unit tests for CLI hardware check tool
     ├── test_fakes.py                 # Unit tests for fake/mock objects
     ├── test_lora_module.py           # Unit tests for LoRa radio module operations
