@@ -14,15 +14,7 @@
 
 from __future__ import annotations
 
-from typing import Protocol
-
-
-class SpiBus(Protocol):
-    """Minimal SPI bus protocol for mocking."""
-
-    def open(self, bus: int, device: int) -> None: ...
-    def close(self) -> None: ...
-    def xfer2(self, data: list[int]) -> list[int]: ...
+from pi_lora.drivers.spi.bus import SpiBus
 
 
 class MockSpiBus:
@@ -30,8 +22,6 @@ class MockSpiBus:
 
     def __init__(
         self,
-        bus_number: int = 0,
-        device_number: int = 0,
         max_speed_hz: int = 1000000,
         mode: int = 0,
         lsbfirst: bool = False,
@@ -39,16 +29,17 @@ class MockSpiBus:
     ) -> None:
         """Initialize the mock SPI bus.
 
+        Bus/device identity is set by ``open()`` — matching the underlying
+        ``spidev.SpiDev`` lifecycle (init → open).
+
         Args:
-            bus_number: The bus identifier.
-            device_number: The device identifier.
             max_speed_hz: Maximum speed in Hertz.
             mode: SPI mode setting.
             lsbfirst: Whether least significant bit comes first.
             no_cs: Whether chip select is disabled.
         """
-        self.bus_number: int = bus_number
-        self.device_number: int = device_number
+        self.bus_number: int = 0
+        self.device_number: int = 0
         self._max_speed_hz: int = max_speed_hz
         self._mode: int = mode
         self._lsbfirst: bool = lsbfirst
@@ -73,24 +64,48 @@ class MockSpiBus:
         self._opened = False
         self._registers = {}
 
-    def xfer2(self, data: list[int]) -> list[int]:
+    async def xfer2(self, data: list[int]) -> list[int]:
         """Transfer data through the SPI bus using in-memory simulation.
+
+        Implements address-based register simulation matching ``FakeSpiDev``:
+        each byte pair is (address_cmd, value) where the high bit of the
+        address byte indicates write (0x80) vs read (0x7F).  Read operations
+        return the stored register value; write operations store the value
+        and echo back the command+value pair.
 
         Args:
             data: List of byte values to transfer.
 
         Returns:
-            List of received byte values (simulated echo).
+            List of received byte values (simulated response).
         """
         if not self._opened:
             raise RuntimeError("SPI bus not opened")
 
+        if not data:
+            return []
+
         result: list[int] = []
-        for byte_value in data:
-            reg_key: int = hash(byte_value) % 256
-            simulated_response: int = self._registers.get(reg_key, byte_value) ^ 0xFF
-            self._registers[reg_key] = byte_value
-            result.append(simulated_response)
+        i: int = 0
+        while i < len(data):
+            cmd_byte: int = data[i]
+            address: int = cmd_byte & 0x7F
+            is_write: bool = (cmd_byte & 0x80) != 0
+
+            if is_write:
+                if i + 1 >= len(data):
+                    raise ValueError("Incomplete write command")
+                value: int = data[i + 1]
+                self._registers[address] = value
+                result.append(cmd_byte)
+                result.append(value)
+                i += 2
+            else:
+                reg_value: int = self._registers.get(address, 0x00)
+                result.append(cmd_byte)
+                result.append(reg_value)
+                i += 2
+
         return result
 
     @property
@@ -123,4 +138,6 @@ class MockSpiBusFactory:
         device: int = 0,
     ) -> SpiBus:
         """Return a new mock SPI bus configured for *bus* and *device*."""
-        return MockSpiBus(bus_number=bus, device_number=device)
+        mock_bus = MockSpiBus(max_speed_hz=1000000, mode=0, lsbfirst=False, no_cs=False)
+        mock_bus.open(bus=bus, device=device)
+        return mock_bus

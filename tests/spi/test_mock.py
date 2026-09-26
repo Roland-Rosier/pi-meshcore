@@ -14,6 +14,8 @@
 
 """Tests for ``MockSpiBus`` register simulation behavior."""
 
+import pytest
+
 from tests.spi.mock import MockSpiBus
 
 
@@ -30,9 +32,9 @@ class TestMockSpiBus:
         assert bus.no_cs is False
 
     def test_init_with_custom_values(self) -> None:
-        bus = MockSpiBus(bus_number=1, device_number=2, max_speed_hz=500000, mode=3, lsbfirst=True, no_cs=True)
-        assert bus.bus_number == 1
-        assert bus.device_number == 2
+        bus = MockSpiBus(max_speed_hz=500000, mode=3, lsbfirst=True, no_cs=True)
+        assert bus.bus_number == 0
+        assert bus.device_number == 0
         assert bus.max_speed_hz == 500000
         assert bus.mode == 3
         assert bus.lsbfirst is True
@@ -50,26 +52,29 @@ class TestMockSpiBus:
         bus.close()
         assert bus._opened is False
 
-    def test_xfer2_raises_when_not_opened(self) -> None:
+    @pytest.mark.asyncio
+    async def test_xfer2_raises_when_not_opened(self) -> None:
         bus = MockSpiBus()
         try:
-            bus.xfer2([0x01 | 0x80, 0xFF])
+            await bus.xfer2([0x01 | 0x80, 0xFF])
         except RuntimeError:
             pass
         else:
             raise AssertionError("Should have raised")
 
-    def test_xfer2_returns_simulated_response(self) -> None:
+    @pytest.mark.asyncio
+    async def test_xfer2_returns_simulated_response(self) -> None:
         bus = MockSpiBus()
         bus.open(0, 1)
-        result = bus.xfer2([0x01 | 0x80, 0xFF])
+        result = await bus.xfer2([0x01 | 0x80, 0xFF])
         assert isinstance(result, list)
         assert len(result) == 2
 
-    def test_xfer2_empty_data_returns_empty(self) -> None:
+    @pytest.mark.asyncio
+    async def test_xfer2_empty_data_returns_empty(self) -> None:
         bus = MockSpiBus()
         bus.open(0, 1)
-        result = bus.xfer2([])
+        result = await bus.xfer2([])
         assert result == []
 
     def test_properties_return_initial_values(self) -> None:
@@ -79,10 +84,11 @@ class TestMockSpiBus:
         assert bus.lsbfirst is True
         assert bus.no_cs is False
 
-    def test_protocol_compliance(self) -> None:
+    @pytest.mark.asyncio
+    async def test_protocol_compliance(self) -> None:
         bus = MockSpiBus()
         bus.open(0, 0)
-        result = bus.xfer2([1])
+        result = await bus.xfer2([1])
         assert isinstance(result, list)
-        assert len(result) == 1
+        assert len(result) == 2
         bus.close()

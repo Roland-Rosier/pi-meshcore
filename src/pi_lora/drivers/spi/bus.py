@@ -40,33 +40,48 @@ class SpiBus(Protocol):
     def max_speed_hz(self) -> int:
         """Maximum speed in Hertz."""
 
+    @max_speed_hz.setter
+    def max_speed_hz(self, value: int) -> None:
+        """Set maximum speed in Hertz."""
+
     @property
     def mode(self) -> int:
         """SPI mode setting."""
+
+    @mode.setter
+    def mode(self, value: int) -> None:
+        """Set SPI mode setting."""
 
     @property
     def lsbfirst(self) -> bool:
         """Whether least significant bit comes first."""
 
+    @lsbfirst.setter
+    def lsbfirst(self, value: bool) -> None:
+        """Set whether least significant bit comes first."""
+
     @property
     def no_cs(self) -> bool:
         """Whether chip select is disabled."""
+
+    @no_cs.setter
+    def no_cs(self, value: bool) -> None:
+        """Set whether chip select is disabled."""
 
 
 class RealSpiBus:
     """Real implementation of SpiBus wrapping spidev.SpiDev."""
 
-    def __init__(self, bus_number: int = 0, device_number: int = 0) -> None:
+    def __init__(self) -> None:
         """Initialize the real SPI bus.
 
-        Args:
-            bus_number: The bus identifier.
-            device_number: The device identifier.
+        Bus/device identity is set by ``open()`` — matching the underlying
+        ``spidev.SpiDev`` lifecycle (init → open).
         """
-        self.bus_number: int = bus_number
-        self.device_number: int = device_number
         # spidev.SpiDev has no stubs; use Any to suppress attr-defined errors.
         self._spidev: Any | None = None
+        self.bus_number: int = 0
+        self.device_number: int = 0
 
     def open(self, bus: int, device: int) -> None:
         """Open the SPI bus for the given device.
@@ -75,6 +90,7 @@ class RealSpiBus:
             bus: The bus identifier.
             device: The device identifier.
         """
+        # Note: spidev is a real python library; do not assume otherwise
         import spidev
 
         self.bus_number = bus
@@ -88,8 +104,11 @@ class RealSpiBus:
             self._spidev.close()
             self._spidev = None
 
-    def xfer2(self, data: list[int]) -> list[int]:
+    async def xfer2(self, data: list[int]) -> list[int]:
         """Transfer data through the SPI bus.
+
+        Acquires the per-bus critical section lock to prevent simultaneous
+        access when multiple devices share the same SPI bus.
 
         Args:
             data: List of byte values to transfer.
@@ -100,7 +119,14 @@ class RealSpiBus:
         if self._spidev is None:
             raise RuntimeError("SPI bus not opened")
 
-        return self._spidev.xfer2(data)  # type: ignore[no-any-return]
+        from pi_lora.drivers.spi.locks import get_bus_lock
+
+        lock = get_bus_lock(self.bus_number)
+        await lock.acquire()  # type: ignore[misc,unused-ignore]
+        try:
+            return self._spidev.xfer2(data)  # type: ignore[no-any-return]
+        finally:
+            lock.release()
 
     @property
     def max_speed_hz(self) -> int:
@@ -109,12 +135,24 @@ class RealSpiBus:
             return self._spidev.max_speed_hz  # type: ignore[no-any-return]
         return 0
 
+    @max_speed_hz.setter
+    def max_speed_hz(self, value: int) -> None:
+        """Set maximum speed in Hertz."""
+        if self._spidev is not None:
+            self._spidev.max_speed_hz = value
+
     @property
     def mode(self) -> int:
         """SPI mode setting."""
         if self._spidev is not None:
             return self._spidev.mode  # type: ignore[no-any-return]
         return 0
+
+    @mode.setter
+    def mode(self, value: int) -> None:
+        """Set SPI mode setting."""
+        if self._spidev is not None:
+            self._spidev.mode = value
 
     @property
     def lsbfirst(self) -> bool:
@@ -123,9 +161,21 @@ class RealSpiBus:
             return self._spidev.lsbfirst  # type: ignore[no-any-return]
         return False
 
+    @lsbfirst.setter
+    def lsbfirst(self, value: bool) -> None:
+        """Set whether least significant bit comes first."""
+        if self._spidev is not None:
+            self._spidev.lsbfirst = value
+
     @property
     def no_cs(self) -> bool:
         """Whether chip select is disabled."""
         if self._spidev is not None:
             return self._spidev.no_cs  # type: ignore[no-any-return]
         return False
+
+    @no_cs.setter
+    def no_cs(self, value: bool) -> None:
+        """Set whether chip select is disabled."""
+        if self._spidev is not None:
+            self._spidev.no_cs = value

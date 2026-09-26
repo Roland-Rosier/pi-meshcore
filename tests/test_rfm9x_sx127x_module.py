@@ -15,13 +15,17 @@
 """Tests for ``Rfm9xSx127xModule`` state management context."""
 
 import gc
+import unittest.mock
 
+import pytest
 from src.pi_lora.drivers.rfm9x_sx127x_modes import (
     FskOokSleepState,
     StateBits,
     UnknownState,
 )
 from src.pi_lora.drivers.rfm9x_sx127x_module import Rfm9xSx127xModule
+
+from tests.spi.mock import MockSpiBusFactory
 
 
 class TestRfm9xSx127xModule:
@@ -71,13 +75,22 @@ class TestRfm9xSx127xModule:
         module.set_current_state(StateBits.LORA_SLEEP)
         assert module.is_in_fsk_ook_mode() is False
 
-    def test_write_and_verify_frequency_for_khz(self) -> None:
-        module = Rfm9xSx127xModule(StateBits.FSK_OOK_SLEEP)
-        result = module.write_and_verify_frequency_for_khz(415000)
+    @pytest.mark.asyncio
+    async def test_write_and_verify_frequency_for_khz_sleep_returns_true(self) -> None:
+        factory = MockSpiBusFactory()
+        module = Rfm9xSx127xModule(StateBits.FSK_OOK_SLEEP, spi_factory=factory)
+        module.spi_device_id = 0
+        await module.init_spi_bus()
+        result: bool = await module.write_and_verify_frequency_for_khz(415000)
         assert result is True
+        await module.close_spi()
+
+    @pytest.mark.asyncio
+    async def test_write_and_verify_frequency_for_khz_fstx_raises(self) -> None:
+        module = Rfm9xSx127xModule(StateBits.FSK_OOK_SLEEP)
         module.set_current_state(StateBits.FSK_OOK_FSTX)
-        result = module.write_and_verify_frequency_for_khz(415000)
-        assert result is None
+        with pytest.raises(RuntimeError):
+            await module.write_and_verify_frequency_for_khz(415000)
 
     def test_memory_management(self) -> None:
         module = Rfm9xSx127xModule(StateBits.UNKNOWN_STATE)
@@ -85,3 +98,23 @@ class TestRfm9xSx127xModule:
         del module
         gc.collect()
         assert len(instances) > 0
+
+    @pytest.mark.asyncio
+    async def test_spi_bus_injection_and_frequency_write(self) -> None:
+        factory = MockSpiBusFactory()
+        module = Rfm9xSx127xModule(StateBits.FSK_OOK_SLEEP, spi_factory=factory)
+        module.spi_device_id = 0
+        await module.init_spi_bus()
+        assert module.spi_bus is not None
+        result: bool = await module.write_and_verify_frequency_for_khz(415000)
+        assert result is True
+        await module.close_spi()
+        assert module.spi_bus is None
+
+    def test_module_does_not_instantiate_handler(self) -> None:
+        module = Rfm9xSx127xModule(StateBits.FSK_OOK_SLEEP)
+        assert not hasattr(module, "handler")
+        mock_factory = unittest.mock.MagicMock()
+        module2 = Rfm9xSx127xModule(StateBits.FSK_OOK_SLEEP, mock_factory)
+        module2.spi_device_id = 0
+        module2.ce_number = 0

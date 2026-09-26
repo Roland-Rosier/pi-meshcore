@@ -4,7 +4,8 @@
 #
 # Usage: uv run .semgrep/run.sh
 
-uv run semgrep scan --verbose \
+mkdir -p /tmp/sandbox/semgrep_tmp
+TMPDIR=/tmp/sandbox/semgrep_tmp/ uv run semgrep scan --verbose \
   --config=".semgrep/rules/security/" \
        ".semgrep/rules/best-practice/" \
        ".semgrep/rules/correctness/" \

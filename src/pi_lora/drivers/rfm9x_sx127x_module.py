@@ -55,7 +55,6 @@ class Rfm9xSx127xModule:
         self.state_instances: dict[type[Rfm9xSx127xMode], Rfm9xSx127xMode] = (
             self._create_instances()
         )
-        self.handler: Rfm9xSx127xHandler = Rfm9xSx127xHandler()
 
         # Event loop infrastructure
         self.event_queue: asyncio.Queue[ModuleEvent] = asyncio.Queue()
@@ -142,20 +141,14 @@ class Rfm9xSx127xModule:
         """Return ``True`` when the module is **not** in LoRa mode."""
         return not self.is_in_lora_mode()
 
-    def write_and_verify_frequency_for_khz(
-        self, frequency_khz: int
-    ) -> bool | None:
-        """Return ``True`` if current state is SLEEP or STANDBY; ``None`` otherwise.
-
-        This method acts as a guard — actual frequency writing is delegated to
-        the SPI driver layer.  Only states whose ``MODE_BITS`` indicate sleep or
-        standby are permitted to proceed with frequency writes.
-        """
+    async def write_and_verify_frequency_for_khz(self, frequency_khz: int) -> bool:
+        """Guard method: only allows frequency write in SLEEP or STANDBY state."""
         if self.current_state_instance is not None:
             mode_bits = type(self.current_state_instance).MODE_BITS
             if mode_bits in (ModeBits.SLEEP_OR_ERROR_OR_NOT_A_DEVICE_OR_UNKNOWN_OR_RESET, ModeBits.STANDBY):
-                return True
-        return None
+                success, *_ = await Rfm9xSx127xHandler.write_and_verify_frequency_for_khz(self, frequency_khz)
+                return success
+        raise RuntimeError("Frequency write only allowed in SLEEP or STANDBY mode")
 
     # Identity setters (called by ModuleManager after construction)
     def set_spi_device_id(self, spi_device_id: int) -> None:

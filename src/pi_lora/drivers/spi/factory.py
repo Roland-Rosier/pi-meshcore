@@ -16,7 +16,7 @@ from __future__ import annotations
 
 from typing import Protocol
 
-from pi_lora.drivers.spi.bus import SpiBus
+from .bus import SpiBus
 
 
 class SpiBusFactory(Protocol):
@@ -47,6 +47,8 @@ class RealSpiBusFactory:
         Returns:
             A new RealSpiBus instance.
         """
-        from pi_lora.drivers.spi.bus import RealSpiBus
+        from .bus import RealSpiBus
 
-        return RealSpiBus(bus_number=bus, device_number=device)
+        bus_instance = RealSpiBus()
+        bus_instance.open(bus=bus, device=device)
+        return bus_instance  # type: ignore[return-value]

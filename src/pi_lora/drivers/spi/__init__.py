@@ -12,9 +12,9 @@
 # see the License for the specific language governing permissions and
 # limitations under the License.
 
-from pi_lora.drivers.spi.bus import RealSpiBus, SpiBus
-from pi_lora.drivers.spi.factory import RealSpiBusFactory, SpiBusFactory
-from pi_lora.drivers.spi.locks import get_bus_lock
+from .bus import RealSpiBus, SpiBus
+from .factory import RealSpiBusFactory, SpiBusFactory
+from .locks import get_bus_lock
 
 __all__: list[str] = [
     "SpiBus",

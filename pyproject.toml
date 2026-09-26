@@ -213,6 +213,10 @@ module = ["pi_lora.drivers.spi.bus", "pi_lora.drivers.spi.factory", "pi_lora.dri
 ignore_missing_imports = true
 
 [[tool.mypy.overrides]]
+module = ["pi_lora.drivers.rfm9x_sx127x_handler"]
+ignore_missing_imports = true
+
+[[tool.mypy.overrides]]
 module = ["pi_lora.drivers.rfm9x_sx127x_config_model", "pi_lora.drivers.rfm9x_sx127x_config_validator", "pi_lora.drivers.rfm9x_sx127x_config_loader"]
 ignore_missing_imports = true
 

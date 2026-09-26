@@ -38,6 +38,61 @@ class RegisterLayout:
     Values are masks/shift targets matching the Semtech/SX127x spec.
     """
 
+    # Register addresses (single source of truth)
+    REG_OP_MODE: int = 0x01
+    REG_FRF: int = 0x06
+    REG_FRF_MSB: int = 0x06
+    REG_FRF_MID: int = 0x07
+    REG_FRF_LSB: int = 0x08
+    REG_PA_CONFIG: int = 0x09
+    REG_OCP: int = 0x0A
+    REG_LNA: int = 0x0B
+    REG_FIFO_ADDR_PTR: int = 0x0C
+    REG_FIFO_TX_BASE_ADDR: int = 0x0D
+    REG_FIFO_RX_BASE_ADDR: int = 0x12
+    REG_FIFO_RX_CURRENT_ADDR: int = 0x13
+    REG_IRQ_FLAGS_MASK: int = 0x1F
+    REG_IRQ_FLAGS: int = 0x27
+    REG_RX_NB_BYTES: int = 0x28
+    REG_RX_HEADER_CNT_VALUE_MSB: int = 0x29
+    REG_RX_HEADER_CNT_VALUE_LSB: int = 0x2A
+    REG_RX_PACKET_CNT_VALUE_MSB: int = 0x2B
+    REG_RX_PACKET_CNT_VALUE_LSB: int = 0x2C
+    REG_MODEM_STAT: int = 0x2D
+    REG_PKT_SNR_VALUE: int = 0x35
+    REG_PKT_RSSI_VALUE: int = 0x36
+    REG_RSSI_VALUE: int = 0x37
+    REG_HOP_CHANNEL: int = 0x38
+    REG_MODEM_CONFIG1: int = 0x39
+    REG_MODEM_CONFIG2: int = 0x3A
+    REG_SymbTimeoutLsb: int = 0x3B
+    REG_PREAMBLE_MSB: int = 0x3C
+    REG_PREAMBLE_LSB: int = 0x3D
+    REG_PAYLOAD_LENGTH: int = 0x3E
+    REG_MAX_PAYLOAD_LENGTH: int = 0x3F
+    REG_HOP_PERIOD: int = 0x40
+    REG_FIFO_RX_BYTE_ADDR: int = 0x41
+    REG_MODEM_CONFIG3: int = 0x42
+    REG_FEI_MSB: int = 0x43
+    REG_FEI_MIB: int = 0x44
+    REG_FEI_LSB: int = 0x45
+    REG_DETECT_OPTIMIZE: int = 0x46
+    REG_INVERT_IQ: int = 0x47
+    REG_DETECTION_THRESHOLD: int = 0x48
+    REG_SYNC_WORD: int = 0x49
+    REG_DIO_MAPPING1: int = 0x52
+    REG_DIO_MAPPING2: int = 0x53
+    REG_VERSION: int = 0x54
+    REG_TCXO: int = 0x55
+    REG_PA_DAC: int = 0x56
+    REG_FORMER_TEMP: int = 0x57
+    REG_BIT_RATE_FRAC: int = 0x58
+    REG_AGC_REF: int = 0x59
+    REG_AGC_THRESH1: int = 0x5A
+    REG_AGC_THRESH2: int = 0x5B
+    REG_AGC_THRESH3: int = 0x5C
+    REG_PLL: int = 0x5D
+
     class RegOpMode(IntFlag):
         """Register OpMode -- bits 0-7 of the operation mode register."""
 
