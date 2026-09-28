@@ -12,3 +12,31 @@
 # see the License for the specific language governing permissions and
 # limitations under the License.
 
+from .rfm9x_sx127x_radio_instance import (
+    AssemblyNotFoundError,
+    ConfigConsistencyError,
+    DeviceAttachmentNotFoundError,
+    DeviceIdentity,
+    DeviceSpecNotFoundError,
+    FamilyNotFoundError,
+    ModuleNotFoundError,
+    RadioInstanceConfig,
+    RadioInstanceError,
+    create_radio_instance,
+    create_radio_instance_from_default,
+)
+
+__all__: list[str] = [
+    "RadioInstanceConfig",
+    "DeviceIdentity",
+    "create_radio_instance",
+    "create_radio_instance_from_default",
+    "RadioInstanceError",
+    "ModuleNotFoundError",
+    "DeviceAttachmentNotFoundError",
+    "AssemblyNotFoundError",
+    "DeviceSpecNotFoundError",
+    "FamilyNotFoundError",
+    "ConfigConsistencyError",
+]
+

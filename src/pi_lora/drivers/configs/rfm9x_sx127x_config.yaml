@@ -97,7 +97,7 @@ families:
 # Module configurations
 modules:
   lora_pi_434_868:
-    module_name: "LoRa Pi 434/868"
+    module_name: "lora_pi_434_868"
     devices:
       - device_name: "RFM98"
         spi_device_id: 0
@@ -116,7 +116,7 @@ modules:
 assemblies:
   default:
     assembly_name: "default"
-    module_name: "LoRa Pi 434/868"
+    module_name: "lora_pi_434_868"
     devices:
       "0:1":
         antenna_type: "parabolic"
