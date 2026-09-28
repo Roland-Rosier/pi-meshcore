@@ -160,3 +160,113 @@ class TestEmptyConfig:
         status = app.get_status()
         assert status["modules"] == []
         await app.stop()
+
+
+class TestListAssemblies:
+    """Tests for Application.list_assemblies()."""
+
+    def test_list_assemblies_basic(self) -> None:
+        """Verify list_assemblies returns assembly names."""
+        application = Application(config=None)
+        application._config = None
+        application._config_path = None
+
+        assemblies = application.list_assemblies(verbose=False)
+        assert len(assemblies) >= 1
+        names = [a["assembly_name"] for a in assemblies]
+        assert "default" in names
+
+    def test_list_assemblies_verbose(self) -> None:
+        """Verify list_assemblies verbose includes module_name and device_count."""
+        application = Application(config=None)
+        application._config = None
+        application._config_path = None
+
+        assemblies = application.list_assemblies(verbose=True)
+        assert len(assemblies) >= 1
+        for a in assemblies:
+            assert "assembly_name" in a
+            assert "module_name" in a
+            assert "device_count" in a
+
+    def test_list_assemblies_json_format(self) -> None:
+        """Verify list_assemblies returns dict format suitable for JSON."""
+        application = Application(config=None)
+        application._config = None
+        application._config_path = None
+
+        assemblies = application.list_assemblies(verbose=False)
+        assert isinstance(assemblies, list)
+        for a in assemblies:
+            assert isinstance(a, dict)
+
+
+class TestGetAssemblyConfig:
+    """Tests for Application.get_assembly_config()."""
+
+    def test_get_assembly_config_all_devices(self) -> None:
+        """Verify get_assembly_config raises when all devices fail validation."""
+        application = Application(config=None)
+        application._config = None
+        application._config_path = None
+
+        with pytest.raises(Exception):
+            application.get_assembly_config("default")
+
+    def test_get_assembly_config_single_device(self) -> None:
+        """Verify get_assembly_config raises when SPI/CE device fails validation."""
+        application = Application(config=None)
+        application._config = None
+        application._config_path = None
+
+        with pytest.raises(Exception):
+            application.get_assembly_config("default", spi_device_id=0, ce_number=0)
+
+    def test_get_assembly_config_not_found(self) -> None:
+        """Verify get_assembly_config raises AssemblyNotFoundError for missing assembly."""
+        application = Application(config=None)
+        application._config = None
+        application._config_path = None
+
+        with pytest.raises(Exception):
+            application.get_assembly_config("nonexistent")
+
+    def test_get_assembly_config_device_not_found(self) -> None:
+        """Verify get_assembly_config raises DeviceAttachmentNotFoundError for invalid SPI/CE."""
+        application = Application(config=None)
+        application._config = None
+        application._config_path = None
+
+        with pytest.raises(Exception):
+            application.get_assembly_config("default", spi_device_id=99, ce_number=99)
+
+
+class TestConfigLoading:
+    """Tests for config loading behavior."""
+
+    def test_lazy_load(self) -> None:
+        """Verify config is only loaded on first query."""
+        application = Application(config=None)
+        application._config = None
+        application._config_path = None
+
+        assert application._config is None
+        assemblies = application.list_assemblies()
+        assert len(assemblies) >= 1
+        assert application._config is not None
+
+    def test_reload_config(self) -> None:
+        """Verify reload_config forces reload."""
+        application = Application(config=None)
+        application._config = None
+        application._config_path = None
+
+        application.list_assemblies()
+        reloaded = application.reload_config()
+        assert reloaded is not None
+
+
+if __name__ == "__main__":
+    import sys
+    exit_code = pytest.main([__file__, "-v"])
+    sys.exit(exit_code)

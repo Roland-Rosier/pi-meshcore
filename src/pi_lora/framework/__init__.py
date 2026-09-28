@@ -26,6 +26,12 @@ from .events import (
     StopMode,
     TimerEvent,
 )
+from .exceptions import (
+    AssemblyNotFoundError,
+    ConfigLoadError,
+    ConfigQueryError,
+    DeviceAttachmentNotFoundError,
+)
 from .scheduler import (
     IdlePacer,
     InterruptBridge,
@@ -50,4 +56,8 @@ __all__: list[str] = [
     "Scheduler",
     "CommandBus",
     "Application",
+    "ConfigQueryError",
+    "AssemblyNotFoundError",
+    "DeviceAttachmentNotFoundError",
+    "ConfigLoadError",
 ]
