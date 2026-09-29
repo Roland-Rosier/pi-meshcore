@@ -20,6 +20,10 @@ import json
 from unittest.mock import MagicMock, patch
 
 import pytest
+from src.pi_lora.framework.exceptions import (
+    AssemblyNotFoundError,
+    DeviceAttachmentNotFoundError,
+)
 from typer.testing import CliRunner
 
 from pi_lora.cli.config import app as cli_app
@@ -129,7 +133,7 @@ class TestShowConfigCli:
         runner = CliRunner()
 
         mock_application = MagicMock()
-        mock_application.get_assembly_config.side_effect = Exception("Assembly not found")
+        mock_application.get_assembly_config.side_effect = AssemblyNotFoundError("test")
 
         with patch("pi_lora.cli.config.Application", return_value=mock_application):
             result = runner.invoke(cli_app, ["show-config", "nonexistent"])
@@ -141,7 +145,7 @@ class TestShowConfigCli:
         runner = CliRunner()
 
         mock_application = MagicMock()
-        mock_application.get_assembly_config.side_effect = Exception("Device not found")
+        mock_application.get_assembly_config.side_effect = DeviceAttachmentNotFoundError("mod", 99, 99)
 
         with patch("pi_lora.cli.config.Application", return_value=mock_application):
             result = runner.invoke(cli_app, ["show-config", "default", "--spi", "99", "--ce", "99"])
@@ -165,7 +169,7 @@ class TestShowConfigCli:
             max_radio_freq_hz: int = 915000000
             osc_freq_hz: int | None = 32000000
             family_name: str = "RFM9X"
-            excluded_frequencies_hz: tuple[int, ...] = (434000000,)
+            test_invalid_frequencies_hz: tuple[int, ...] = (434000000,)
             dio_gpio_mappings: tuple[str, ...] = ("DIO0:GPIO25", "DIO5:GPIO24")
             antenna_type: str | None = "parabolic"
             antenna_gain_db: float | None = 25.0

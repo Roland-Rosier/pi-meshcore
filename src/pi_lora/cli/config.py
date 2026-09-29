@@ -49,10 +49,10 @@ def _format_config_text(config: RadioInstanceConfig) -> str:
     else:
         lines.append("  OSC Freq:    N/A")
     lines.append(f"  Family:      {config.family_name}")
-    if config.excluded_frequencies_hz:
-        lines.append(f"  Excluded:    {', '.join(str(f) for f in config.excluded_frequencies_hz)} Hz")
+    if config.test_invalid_frequencies_hz:
+        lines.append(f"  Test Invalid: {', '.join(str(f) for f in config.test_invalid_frequencies_hz)} Hz")
     else:
-        lines.append("  Excluded:    none")
+        lines.append("  Test Invalid: none")
     if config.dio_gpio_mappings:
         lines.append(f"  Mappings:    {', '.join(config.dio_gpio_mappings)}")
     else:
@@ -77,7 +77,7 @@ def _format_config_json(config: RadioInstanceConfig | list[RadioInstanceConfig])
                 "max_radio_freq_hz": obj.max_radio_freq_hz,
                 "osc_freq_hz": obj.osc_freq_hz,
                 "family_name": obj.family_name,
-                "excluded_frequencies_hz": list(obj.excluded_frequencies_hz),
+                "test_invalid_frequencies_hz": list(obj.test_invalid_frequencies_hz),
                 "dio_gpio_mappings": list(obj.dio_gpio_mappings),
                 "antenna_type": obj.antenna_type,
                 "antenna_gain_db": obj.antenna_gain_db,

@@ -81,7 +81,7 @@ def validate_family_config(family: FamilyConfig) -> bool:
         - family_name is non-empty.
         - devices list is non-empty.
         - exclusions list is non-empty.
-        - Each exclusion has valid device_name and excluded_freq_hz > 0.
+        - Each exclusion has valid device_name and test_invalid_freq_hz > 0.
         - All exclusion device_names are in the devices list.
 
     Args:
@@ -116,9 +116,9 @@ def validate_family_config(family: FamilyConfig) -> bool:
                 f"not in devices list."
             )
 
-        if exclusion.excluded_freq_hz <= 0:
+        if exclusion.test_invalid_freq_hz <= 0:
             errors.append(
-                f"Family '{family.family_name}': exclusion excluded_freq_hz must be > 0."
+                f"Family '{family.family_name}': exclusion test_invalid_freq_hz must be > 0."
             )
 
     if errors:

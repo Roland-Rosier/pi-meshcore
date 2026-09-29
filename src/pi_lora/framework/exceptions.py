@@ -29,7 +29,15 @@ class AssemblyNotFoundError(ConfigQueryError):
 
 class DeviceAttachmentNotFoundError(ConfigQueryError):
     """Raised when no device attachment matches the given SPI/CE."""
-    pass
+
+    def __init__(self, module_name: str, spi_device_id: int, ce_number: int) -> None:
+        self.module_name = module_name
+        self.spi_device_id = spi_device_id
+        self.ce_number = ce_number
+        super().__init__(
+            f"No device attachment found for module '{module_name}' "
+            f"at SPI:{spi_device_id} CE:{ce_number}"
+        )
 
 
 class ConfigLoadError(ConfigQueryError):

@@ -30,6 +30,7 @@ from .module_manager import ModuleManager
 from .scheduler import Scheduler
 from ..drivers.rfm9x_sx127x_config_loader import get_preloaded_config
 from ..drivers.rfm9x_sx127x_radio_instance import (
+    DeviceAttachmentNotFoundError as DriverDeviceAttachmentNotFoundError,
     RadioInstanceConfig,
     create_radio_instance,
 )
@@ -208,7 +209,7 @@ class Application:
                     config=config,
                 )
                 configs.append(radio_config)
-            except (DeviceAttachmentNotFoundError, Exception):
+            except DriverDeviceAttachmentNotFoundError:
                 continue
 
         if not configs:

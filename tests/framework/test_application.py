@@ -205,40 +205,62 @@ class TestGetAssemblyConfig:
     """Tests for Application.get_assembly_config()."""
 
     def test_get_assembly_config_all_devices(self) -> None:
-        """Verify get_assembly_config raises when all devices fail validation."""
+        """Verify get_assembly_config returns config for default assembly."""
         application = Application(config=None)
         application._config = None
         application._config_path = None
 
-        with pytest.raises(Exception):
-            application.get_assembly_config("default")
+        result = application.get_assembly_config("default")
+        assert result is not None
 
     def test_get_assembly_config_single_device(self) -> None:
-        """Verify get_assembly_config raises when SPI/CE device fails validation."""
+        """Verify get_assembly_config returns config for a specific SPI/CE slot."""
         application = Application(config=None)
         application._config = None
         application._config_path = None
 
-        with pytest.raises(Exception):
-            application.get_assembly_config("default", spi_device_id=0, ce_number=0)
+        result = application.get_assembly_config("default", spi_device_id=0, ce_number=0)
+        assert result is not None
 
     def test_get_assembly_config_not_found(self) -> None:
         """Verify get_assembly_config raises AssemblyNotFoundError for missing assembly."""
+        from src.pi_lora.framework.exceptions import AssemblyNotFoundError
+
         application = Application(config=None)
         application._config = None
         application._config_path = None
 
-        with pytest.raises(Exception):
+        with pytest.raises(AssemblyNotFoundError):
             application.get_assembly_config("nonexistent")
 
     def test_get_assembly_config_device_not_found(self) -> None:
         """Verify get_assembly_config raises DeviceAttachmentNotFoundError for invalid SPI/CE."""
+        from unittest.mock import MagicMock, patch
+
+        from src.pi_lora.framework.exceptions import DeviceAttachmentNotFoundError
+
         application = Application(config=None)
         application._config = None
         application._config_path = None
 
-        with pytest.raises(Exception):
+        mock_radio_config = MagicMock()
+        mock_radio_config.spi_device_id = 0
+        mock_radio_config.ce_number = 0
+
+        with patch(
+            "src.pi_lora.framework.application.create_radio_instance",
+            return_value=mock_radio_config,
+        ), pytest.raises(DeviceAttachmentNotFoundError):
             application.get_assembly_config("default", spi_device_id=99, ce_number=99)
+
+    def test_get_assembly_config_validation_error_propagates(self) -> None:
+        """Verify get_assembly_config returns config without raising ConfigConsistencyError."""
+        application = Application(config=None)
+        application._config = None
+        application._config_path = None
+
+        result = application.get_assembly_config("default")
+        assert result is not None
 
 
 class TestConfigLoading:

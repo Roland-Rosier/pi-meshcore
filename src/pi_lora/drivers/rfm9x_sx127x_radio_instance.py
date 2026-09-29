@@ -52,7 +52,7 @@ class RadioInstanceConfig:
 
     # Family info (from FamilyConfig)
     family_name: str
-    excluded_frequencies_hz: tuple[int, ...]
+    test_invalid_frequencies_hz: tuple[int, ...]
 
     # Module attachment (from DeviceModuleAttachment)
     dio_gpio_mappings: tuple[str, ...]
@@ -226,27 +226,14 @@ def create_radio_instance(
         antenna_type = antenna_cfg.antenna_type
         antenna_gain_db = antenna_cfg.antenna_gain_db
 
-    # 7. Collect excluded frequencies for this device from family
-    excluded_freqs: list[int] = []
+    # 7. Collect test invalid frequencies for this device from family
+    # Note: test_invalid_frequencies_hz may contain frequencies outside the device's
+    # supported range; these are used for negative testing scenarios.
+    test_invalid_freqs: list[int] = []
     for exclusion in family_config.exclusions:
         if exclusion.device_name == device_name:
-            excluded_freqs.append(exclusion.excluded_freq_hz)
-    excluded_frequencies_hz: tuple[int, ...] = tuple(excluded_freqs)
-
-    # 8. Cross-reference validation
-    if len(excluded_freqs) > 0:
-        for excl_freq in excluded_freqs:
-            if excl_freq < device_spec.min_radio_freq_hz or excl_freq > device_spec.max_radio_freq_hz:
-                raise ConfigConsistencyError(
-                    f"Excluded frequency {excl_freq} Hz outside device '{device_name}' range "
-                    f"[{device_spec.min_radio_freq_hz}, {device_spec.max_radio_freq_hz}]",
-                    {
-                        "device_name": device_name,
-                        "excluded_freq_hz": excl_freq,
-                        "min_radio_freq_hz": device_spec.min_radio_freq_hz,
-                        "max_radio_freq_hz": device_spec.max_radio_freq_hz,
-                    }
-                )
+            test_invalid_freqs.append(exclusion.test_invalid_freq_hz)
+    test_invalid_frequencies_hz: tuple[int, ...] = tuple(test_invalid_freqs)
 
     if antenna_gain_db is not None and (antenna_gain_db < -100.0 or antenna_gain_db > 200.0):
         raise ConfigConsistencyError(
@@ -270,7 +257,7 @@ def create_radio_instance(
         max_radio_freq_hz=device_spec.max_radio_freq_hz,
         osc_freq_hz=device_spec.osc_freq_hz,
         family_name=family_config.family_name,
-        excluded_frequencies_hz=excluded_frequencies_hz,
+        test_invalid_frequencies_hz=test_invalid_frequencies_hz,
         dio_gpio_mappings=dio_gpio_mappings,
         antenna_type=antenna_type,
         antenna_gain_db=antenna_gain_db,

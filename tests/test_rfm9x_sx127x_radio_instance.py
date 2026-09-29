@@ -74,8 +74,8 @@ def _make_full_default_config() -> Rfm9xSx127xConfig:
             devices=["RFM95", "RFM98"],
             exclusions=[
                 # Use in-range exclusions to allow successful construction
-                FamilyDeviceExclusion(device_name="RFM95", excluded_freq_hz=900000000),
-                FamilyDeviceExclusion(device_name="RFM98", excluded_freq_hz=450000000),
+                FamilyDeviceExclusion(device_name="RFM95", test_invalid_freq_hz=900000000),
+                FamilyDeviceExclusion(device_name="RFM98", test_invalid_freq_hz=450000000),
             ],
         ),
     }
@@ -145,7 +145,7 @@ def config_with_assemblies_only() -> Rfm9xSx127xConfig:
             family_name="RFM9X",
             devices=["RFM95"],
             exclusions=[
-                FamilyDeviceExclusion(device_name="RFM95", excluded_freq_hz=900000000),
+                FamilyDeviceExclusion(device_name="RFM95", test_invalid_freq_hz=900000000),
             ],
         ),
     }
@@ -200,7 +200,7 @@ def config_no_assemblies() -> Rfm9xSx127xConfig:
             devices=["RFM95"],
             exclusions=[
                 # In-range exclusion to allow successful construction
-                FamilyDeviceExclusion(device_name="RFM95", excluded_freq_hz=900000000),
+                FamilyDeviceExclusion(device_name="RFM95", test_invalid_freq_hz=900000000),
             ],
         ),
     }
@@ -253,14 +253,14 @@ def config_multi_family_same_device() -> Rfm9xSx127xConfig:
             family_name="RFM9X",
             devices=["RFM95"],
             exclusions=[
-                FamilyDeviceExclusion(device_name="RFM95", excluded_freq_hz=900000000),
+                FamilyDeviceExclusion(device_name="RFM95", test_invalid_freq_hz=900000000),
             ],
         ),
         "sx127x": FamilyConfig(
             family_name="SX127X",
             devices=["RFM95"],  # same device in second family
             exclusions=[
-                FamilyDeviceExclusion(device_name="RFM95", excluded_freq_hz=880000000),
+                FamilyDeviceExclusion(device_name="RFM95", test_invalid_freq_hz=880000000),
             ],
         ),
     }
@@ -316,7 +316,7 @@ class TestSuccessfulCreation:
         assert result.max_radio_freq_hz == 460000000
         assert result.osc_freq_hz == 32000000
         assert result.family_name == "RFM9X"
-        assert result.excluded_frequencies_hz == (450000000,)
+        assert result.test_invalid_frequencies_hz == (450000000,)
         assert result.dio_gpio_mappings == ("DIO0:GPIO16", "DIO5:GPIO12")
         assert result.antenna_type == "parabolic"
         assert result.antenna_gain_db == 24.0
@@ -338,7 +338,7 @@ class TestSuccessfulCreation:
         assert result.max_radio_freq_hz == 915000000
         assert result.osc_freq_hz == 32000000
         assert result.family_name == "RFM9X"
-        assert result.excluded_frequencies_hz == (900000000,)
+        assert result.test_invalid_frequencies_hz == (900000000,)
         assert result.dio_gpio_mappings == ("DIO0:GPIO25", "DIO5:GPIO24")
         assert result.antenna_type == "parabolic"
         assert result.antenna_gain_db == 25.0
@@ -452,7 +452,7 @@ class TestComputedProperties:
                 family_name="RFM9X",
                 devices=["RFM95"],
                 exclusions=[
-                    FamilyDeviceExclusion(device_name="RFM95", excluded_freq_hz=900000000),
+                    FamilyDeviceExclusion(device_name="RFM95", test_invalid_freq_hz=900000000),
                 ],
             ),
         }
@@ -530,7 +530,7 @@ class TestExceptions:
                 family_name="RFM9X",
                 devices=["RFM95"],
                 exclusions=[
-                    FamilyDeviceExclusion(device_name="RFM95", excluded_freq_hz=900000000),
+                    FamilyDeviceExclusion(device_name="RFM95", test_invalid_freq_hz=900000000),
                 ],
             ),
         }
@@ -613,7 +613,7 @@ class TestExceptions:
                 family_name="RFM9X",
                 devices=["RFM95"],
                 exclusions=[
-                    FamilyDeviceExclusion(device_name="RFM95", excluded_freq_hz=900000000),
+                    FamilyDeviceExclusion(device_name="RFM95", test_invalid_freq_hz=900000000),
                 ],
             ),
         }
@@ -661,7 +661,7 @@ class TestExceptions:
                 family_name="RFM9X",
                 devices=["RFM95"],
                 exclusions=[
-                    FamilyDeviceExclusion(device_name="RFM95", excluded_freq_hz=434000000),
+                    FamilyDeviceExclusion(device_name="RFM95", test_invalid_freq_hz=434000000),
                 ],
             ),
         }
@@ -726,7 +726,7 @@ class TestExceptions:
                 family_name="SX127X",
                 devices=["SX1276"],  # RFM95 not listed
                 exclusions=[
-                    FamilyDeviceExclusion(device_name="SX1276", excluded_freq_hz=434000000),
+                    FamilyDeviceExclusion(device_name="SX1276", test_invalid_freq_hz=434000000),
                 ],
             ),
         }
@@ -795,8 +795,8 @@ class TestExceptions:
                 family_name="RFM9X",
                 devices=["RFM95", "RFM98"],
                 exclusions=[
-                    FamilyDeviceExclusion(device_name="RFM95", excluded_freq_hz=434000000),
-                    FamilyDeviceExclusion(device_name="RFM98", excluded_freq_hz=868000000),
+                    FamilyDeviceExclusion(device_name="RFM95", test_invalid_freq_hz=434000000),
+                    FamilyDeviceExclusion(device_name="RFM98", test_invalid_freq_hz=868000000),
                 ],
             ),
         }
@@ -849,8 +849,8 @@ class TestExceptions:
         assert exc.context["module_name"] == "lora_pi_434_868"
         assert isinstance(exc, RadioInstanceError)
 
-    def test_config_consistency_error_excluded_freq_out_of_range(self) -> None:
-        """Test ConfigConsistencyError when excluded frequency is outside device range."""
+    def test_excluded_freq_out_of_range_accepted(self) -> None:
+        """Test out-of-range excluded frequency is accepted (validation removed)."""
         devices: dict[str, DeviceConfig] = {
             "RFM95": DeviceConfig(
                 name="RFM95",
@@ -864,7 +864,7 @@ class TestExceptions:
                 family_name="RFM9X",
                 devices=["RFM95"],
                 exclusions=[
-                    FamilyDeviceExclusion(device_name="RFM95", excluded_freq_hz=100000),  # way too low
+                    FamilyDeviceExclusion(device_name="RFM95", test_invalid_freq_hz=100000),  # way too low
                 ],
             ),
         }
@@ -897,18 +897,15 @@ class TestExceptions:
             assemblies=assemblies,
         )
 
-        with pytest.raises(ConfigConsistencyError) as exc_info:
-            create_radio_instance(
-                assembly_name="test_asm",
-                spi_device_id=0,
-                ce_number=0,
-                config=config,
-            )
+        result: RadioInstanceConfig = create_radio_instance(
+            assembly_name="test_asm",
+            spi_device_id=0,
+            ce_number=0,
+            config=config,
+        )
 
-        exc: ConfigConsistencyError = exc_info.value
-        assert "Excluded frequency" in str(exc)
-        assert exc.context["excluded_freq_hz"] == 100000
-        assert isinstance(exc, RadioInstanceError)
+        assert result.device_name == "RFM95"
+        assert 100000 in result.test_invalid_frequencies_hz
 
     def test_config_consistency_error_antenna_gain_out_of_range(self) -> None:
         """Test ConfigConsistencyError when antenna gain is physically impossible."""
@@ -925,7 +922,7 @@ class TestExceptions:
                 family_name="RFM9X",
                 devices=["RFM95"],
                 exclusions=[
-                    FamilyDeviceExclusion(device_name="RFM95", excluded_freq_hz=900000000),
+                    FamilyDeviceExclusion(device_name="RFM95", test_invalid_freq_hz=900000000),
                 ],
             ),
         }
@@ -985,32 +982,30 @@ class TestCreateFromDefault:
     def test_from_default_rfm95(self) -> None:
         """Test create_radio_instance_from_default for RFM95 (0:0).
 
-        The preloaded YAML config has out-of-range exclusion (434MHz outside [868M,915M])
-        which triggers ConfigConsistencyError. This test verifies that validation works.
+        The preloaded YAML config has out-of-range exclusion but validation is removed,
+        so this now succeeds with the excluded frequency included.
         """
-        with pytest.raises(ConfigConsistencyError) as exc_info:
-            create_radio_instance_from_default(
-                assembly_name="default",
-                spi_device_id=0,
-                ce_number=0,
-            )
+        result: RadioInstanceConfig = create_radio_instance_from_default(
+            assembly_name="default",
+            spi_device_id=0,
+            ce_number=0,
+        )
 
-        assert "Excluded frequency" in str(exc_info.value)
+        assert result.device_name == "RFM95"
 
     def test_from_default_rfm98(self) -> None:
         """Test create_radio_instance_from_default for RFM98 (0:1).
 
-        The preloaded YAML config has out-of-range exclusion (868MHz outside [434M,460M])
-        which triggers ConfigConsistencyError. This test verifies that validation works.
+        The preloaded YAML config has out-of-range exclusion but validation is removed,
+        so this now succeeds with the excluded frequency included.
         """
-        with pytest.raises(ConfigConsistencyError) as exc_info:
-            create_radio_instance_from_default(
-                assembly_name="default",
-                spi_device_id=0,
-                ce_number=1,
-            )
+        result: RadioInstanceConfig = create_radio_instance_from_default(
+            assembly_name="default",
+            spi_device_id=0,
+            ce_number=1,
+        )
 
-        assert "Excluded frequency" in str(exc_info.value)
+        assert result.device_name == "RFM98"
 
     def test_from_default_raises_module_not_found(self) -> None:
         """Test create_radio_instance_from_default raises for nonexistent assembly."""
@@ -1053,7 +1048,7 @@ class TestFrequencyEdgeCases:
                 family_name="TEST_FAM",
                 devices=["TEST"],
                 exclusions=[
-                    FamilyDeviceExclusion(device_name="TEST", excluded_freq_hz=500000000),
+                    FamilyDeviceExclusion(device_name="TEST", test_invalid_freq_hz=500000000),
                 ],
             ),
         }
@@ -1111,7 +1106,7 @@ class TestFrequencyEdgeCases:
                 family_name="TEST_FAM",
                 devices=["TEST"],
                 exclusions=[
-                    FamilyDeviceExclusion(device_name="TEST", excluded_freq_hz=500000000),
+                    FamilyDeviceExclusion(device_name="TEST", test_invalid_freq_hz=500000000),
                 ],
             ),
         }
@@ -1168,7 +1163,7 @@ class TestFrequencyEdgeCases:
                 family_name="TEST_FAM",
                 devices=["TEST"],
                 exclusions=[
-                    FamilyDeviceExclusion(device_name="TEST", excluded_freq_hz=600000000),
+                    FamilyDeviceExclusion(device_name="TEST", test_invalid_freq_hz=600000000),
                 ],
             ),
         }
@@ -1211,7 +1206,7 @@ class TestFrequencyEdgeCases:
         assert freqs == (500000000, 600000000)
 
     def test_empty_exclusions_tuple(self) -> None:
-        """Test excluded_frequencies_hz contains the exclusion from family."""
+        """Test test_invalid_frequencies_hz contains the exclusion from family."""
         devices: dict[str, DeviceConfig] = {
             "RFM95": DeviceConfig(
                 name="RFM95",
@@ -1225,7 +1220,7 @@ class TestFrequencyEdgeCases:
                 family_name="RFM9X",
                 devices=["RFM95"],
                 exclusions=[
-                    FamilyDeviceExclusion(device_name="RFM95", excluded_freq_hz=900000000),
+                    FamilyDeviceExclusion(device_name="RFM95", test_invalid_freq_hz=900000000),
                 ],
             ),
         }
@@ -1265,8 +1260,8 @@ class TestFrequencyEdgeCases:
             config=config,
         )
 
-        assert len(result.excluded_frequencies_hz) == 1
-        assert result.excluded_frequencies_hz[0] == 900000000
+        assert len(result.test_invalid_frequencies_hz) == 1
+        assert result.test_invalid_frequencies_hz[0] == 900000000
 
 
 # ──────────────────────────────────────────────────────────────────────
@@ -1321,9 +1316,9 @@ class TestMultipleFamilies:
 
         # Should use RFM9X family (first in dict iteration) exclusions
         assert result.family_name == "RFM9X"
-        assert result.excluded_frequencies_hz == (900000000,)
+        assert result.test_invalid_frequencies_hz == (900000000,)
         # SX127X exclusion should NOT be present
-        assert 880000000 not in result.excluded_frequencies_hz
+        assert 880000000 not in result.test_invalid_frequencies_hz
 
     def test_first_match_wins_supported_freqs(self, config_multi_family_same_device: Rfm9xSx127xConfig) -> None:
         """Test supported_frequencies returns (min, max) tuple."""
@@ -1345,8 +1340,8 @@ class TestMultipleFamilies:
 class TestCrossReferenceValidation:
     """Test cross-reference validation raises ConfigConsistencyError."""
 
-    def test_excluded_freq_above_max(self) -> None:
-        """Test ConfigConsistencyError when excluded freq > max_radio_freq_hz."""
+    def test_excluded_freq_above_max_accepted(self) -> None:
+        """Test out-of-range excluded frequency above max is accepted (validation removed)."""
         devices: dict[str, DeviceConfig] = {
             "TEST": DeviceConfig(
                 name="TEST",
@@ -1360,7 +1355,7 @@ class TestCrossReferenceValidation:
                 family_name="TEST_FAM",
                 devices=["TEST"],
                 exclusions=[
-                    FamilyDeviceExclusion(device_name="TEST", excluded_freq_hz=600000000),
+                    FamilyDeviceExclusion(device_name="TEST", test_invalid_freq_hz=600000000),
                 ],
             ),
         }
@@ -1392,16 +1387,15 @@ class TestCrossReferenceValidation:
             assemblies=assemblies,
         )
 
-        with pytest.raises(ConfigConsistencyError) as exc_info:
-            create_radio_instance(
-                assembly_name="test_asm",
-                spi_device_id=0,
-                ce_number=0,
-                config=config,
-            )
+        result: RadioInstanceConfig = create_radio_instance(
+            assembly_name="test_asm",
+            spi_device_id=0,
+            ce_number=0,
+            config=config,
+        )
 
-        assert "Excluded frequency" in str(exc_info.value)
-        assert exc_info.value.context["excluded_freq_hz"] == 600000000
+        assert result.device_name == "TEST"
+        assert 600000000 in result.test_invalid_frequencies_hz
 
     def test_osc_freq_out_of_range(self) -> None:
         """Test ConfigConsistencyError when osc_freq is physically impossible."""
@@ -1419,7 +1413,7 @@ class TestCrossReferenceValidation:
                 family_name="TEST_FAM",
                 devices=["TEST"],
                 exclusions=[
-                    FamilyDeviceExclusion(device_name="TEST", excluded_freq_hz=450000000),
+                    FamilyDeviceExclusion(device_name="TEST", test_invalid_freq_hz=450000000),
                 ],
             ),
         }
@@ -1500,7 +1494,7 @@ class TestCrossReferenceValidation:
                 family_name="TEST_FAM",
                 devices=["TEST"],
                 exclusions=[
-                    FamilyDeviceExclusion(device_name="TEST", excluded_freq_hz=500000000),
+                    FamilyDeviceExclusion(device_name="TEST", test_invalid_freq_hz=500000000),
                 ],
             ),
         }
@@ -1540,7 +1534,7 @@ class TestCrossReferenceValidation:
         )
 
         assert result.device_name == "TEST"
-        assert result.excluded_frequencies_hz == (500000000,)
+        assert result.test_invalid_frequencies_hz == (500000000,)
 
 
 # ──────────────────────────────────────────────────────────────────────

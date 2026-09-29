@@ -87,7 +87,7 @@ class TestValidateFamilyConfig:
     def test_valid_family(self) -> None:
         """Test valid family config passes validation."""
         exclusions: list[FamilyDeviceExclusion] = [
-            FamilyDeviceExclusion(device_name="RFM95", excluded_freq_hz=434000000),
+            FamilyDeviceExclusion(device_name="RFM95", test_invalid_freq_hz=434000000),
         ]
         family: FamilyConfig = FamilyConfig(
             family_name="RFM9X",
@@ -103,14 +103,14 @@ class TestValidateFamilyConfig:
                 FamilyConfig(
                     family_name="EMPTY",
                     devices=[],
-                    exclusions=[FamilyDeviceExclusion(device_name="X", excluded_freq_hz=100)],
+                    exclusions=[FamilyDeviceExclusion(device_name="X", test_invalid_freq_hz=100)],
                 )
             )
 
     def test_invalid_exclusion_not_in_devices(self) -> None:
         """Test exclusion device not in devices list fails validation."""
         exclusions: list[FamilyDeviceExclusion] = [
-            FamilyDeviceExclusion(device_name="NONEXISTENT", excluded_freq_hz=100),
+            FamilyDeviceExclusion(device_name="NONEXISTENT", test_invalid_freq_hz=100),
         ]
         family: FamilyConfig = FamilyConfig(
             family_name="RFM9X",
@@ -121,9 +121,9 @@ class TestValidateFamilyConfig:
             validate_family_config(family)
 
     def test_invalid_zero_excluded_freq(self) -> None:
-        """Test exclusion with excluded_freq_hz = 0 fails validation."""
+        """Test exclusion with test_invalid_freq_hz = 0 fails validation."""
         with pytest.raises(_VALIDATION_ERRORS):
-            FamilyDeviceExclusion(device_name="RFM95", excluded_freq_hz=0)
+            FamilyDeviceExclusion(device_name="RFM95", test_invalid_freq_hz=0)
 
 
 class TestValidateModuleConfig:
@@ -403,7 +403,7 @@ class TestValidateFullConfig:
                 "rfm9x": FamilyConfig(
                     family_name="RFM9X",
                     devices=["RFM95"],
-                    exclusions=[FamilyDeviceExclusion(device_name="RFM95", excluded_freq_hz=434000000)],
+                    exclusions=[FamilyDeviceExclusion(device_name="RFM95", test_invalid_freq_hz=434000000)],
                 ),
             },
             modules={

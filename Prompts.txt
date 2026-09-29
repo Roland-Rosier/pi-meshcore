@@ -740,3 +740,15 @@ Tasks:
 
 Constraints:
 * Perform no other tasks.
+
+----
+
+A software architect has provided a plan in `.plans/2026_09_28_create_radio_instance_config_fix.md`. Treat this as the single-source-of-truth for this session.
+
+Launch a sub-agent to analyse and summarize the current code and documentation in the project.
+
+For each of the phases (Phase 1 to Phase 4), sequentially launch a sub-agent to implement that phase and provide a summary of progress to you.
+
+Only run one sub-agent at a time.
+
+Perform no other tasks
