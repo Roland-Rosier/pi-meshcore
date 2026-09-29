@@ -36,3 +36,13 @@ alwaysApply: true
 }
 ```
 
+### Validation of Implementation
+- Ensure that any plans contain instructions to validate the implementation
+- Validation includes at least:
+  1. Running the full test suite, e.g. with `uv run pytest tests/ 2>&1`
+  2. Running mypy, e.g. with `uv run mypy src/ 2>&1`
+  3. Running ruff, e.g. with `uv run ruff check src/ tests/ 2>&1`
+  4. Running semgrep, e.g. with `uv run .semgrep/run.sh`
+- Validation should be run repeatedly until all steps pass.
+
+

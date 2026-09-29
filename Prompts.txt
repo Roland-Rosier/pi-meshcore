@@ -178,7 +178,7 @@ Constraints:
 
 Context:
 
-You are a Software Architect with Electronics and Radio experience.
+You are a Senior Software Architect with Electronics and Radio experience.
 
 You are developing a system which can use LoRa modules attached to a Raspberry PI to scan the radio frequencies to look for radio transmissions.
 
@@ -290,7 +290,7 @@ Constraints:
 
 ----
 Context:
-* You are a Software Architect with Electronics and Radio experience.
+* You are a Senior Software Architect with Electronics and Radio experience.
 * You are developing a system which can use LoRa modules attached to a Raspberry PI to scan the radio frequencies to look for radio transmissions.
 * The Raspberry PI has up to two LoRa modules attached to the CE0 and, optionally, the CE1 lines of the SPI0 module.
 * Any attached module may be a RFM95W (High Frequency) or RFM98W (Low Frequency) module.
@@ -458,3 +458,297 @@ Constraints:
 
 * Perform no other tasks.
 
+=====
+Context:
+* You are a Senior Software Architect with Electronics and Radio experience.
+* You are developing a system which can use LoRa modules attached to a Raspberry PI to scan the radio frequencies to look for radio transmissions.
+* The Raspberry PI has up to two LoRa modules attached to the CE0 and, optionally, the CE1 lines of the SPI0 module.
+* Any attached module may be a RFM95W (High Frequency) or RFM98W (Low Frequency) module.
+* It has not so far been possible for software to check what capabilities they have, but it is possible for software to check:
+  * Whether a module is attached to a specific SPI CE line.
+  * Whether that module can try to output high frequency.
+  * Whether that module can try to output low frequency.
+  * Whether that module can try to output both high and low frequencies.
+* The hardware detection logic in `src/pi_lora/drivers/lora_module.py` and `src/pi_lora/drivers/lora_detection.py` can currently detect that modules are attached to CE0 and/or CE1 and has various logic that tries to detect the difference between the RFM95W and RFM98W, but for most (all?) hardware, it can currently only detec that the RFM9XW/SX127X family series is present.
+* You need to add more logic to the  `_perform_extended_detection` function in the `src/pi_lora/drivers/lora_module.py`  file which:
+  a. Puts the module into SLEEP mode.
+  b. Puts the chip into LoRa Mode.
+  c. Clear bit 3 (LowFrequencyModeOn) in RegOpMode for HF operation
+  d. Write a high frequency (915 MHz (= 915000 kHz)) to the frequency registers.
+  e. Set the mode to FS Rx (NOT FS Tx) to attempt a frequency lock
+  f. Wait for up to 5 * 100ms for a PLL Lock (read RegIrqFlags1 bit 4)
+  g. Record whether or not the PLL locked
+  h. perform steps a to g, but with bit 3 in RegOpMode set for LF operation and the frequency written being 410 MHz (= 410000 kHz).
+  i. Put the module into SLEEP mode.
+  j. Switch the module out of LoRa mode.
+  k. If both PLLs locked, continue reporting a RFM9XW/SX127X family series.
+  l. If only one PLL locked, report the appropraite family,
+  m. If neither PLL locked, report 'Unknown' (the existing function behaviour returns "RFM98W (Low-Band 433Mhz / Semtech SX1278)", which is incorrect behaviour)
+* Additional logic needs to be added to that function so that immediately after putting into sleep mode for the first time, it clears any LoRa mode bit to ensure that the device is not in LoRa mode.
+* You also need to add functions `_set_lora_mode_bit` and `_clear_lora_mode_bit` which set and clear the LoRa mode (bit 7 of RegOpMode (0x01)) following the patter for `_set_lf_mode_bit` and `_clear_lf_mode_bit`.
+* The functions `_set_lora_mode_bit` and `_clear_lora_mode_bit` should be called when entering and exiting LoRa mode.
+* The funcitonality which waits for locking should exit as soon as it detects any lock (unlike the existing code) and the existing code should also be modified to do this.
+
+Task:
+* Read the `src/pi_lora/drivers/lora_detection.py`, `src/pi_lora/drivers/lora_module.py` and `src/pi_lora/cli/check_hardware.py` files so that you know what is in them.
+* Read the tests in the `tests` subdirectory.
+* Figure out how to implement the changes mentioned above.
+* Figure out what changes need to be made to the tests to test these new changes.
+* Create a plan to achieve all these changes and write that plan into the `./2026_08_17_plan_pll_lora_lock.md`
+
+Constraints:
+* Perform no other tasks.
+
+Context:
+* You are a Senior Software Architect with Electronics and Radio experience.
+* You are developing a system which can use RFM9X / SX127X modules attached to a Raspberry PI to scan the radio frequencies to look for radio transmissions.
+* The Raspberry PI has up to two LoRa modules attached to the CE0 and, optionally, the CE1 lines of the SPI0 module.
+* Any attached module may be a RFM95W (High Frequency) or RFM98W (Low Frequency) module.
+* You want to create a set of classes which represent the operating modes of the device using the GoF "State pattern" (https://en.wikipedia.org/wiki/State_pattern)
+* The states to be represented are:
+  1.  `UNKNOWN`: This is the state that the device is in when it is initially accessed and there is no information as to what state it actually is in.
+  2.  `RESETTING`: This is the state which can be used to reset registers back to known or default values
+  3.  `FSK_OOK_SLEEP`     (000): Low power mode; in this mode only the SPI and configuration registers are accessible and it is the only mode where it is permissible to switch between FSK/OOK mode and LoRa mode.
+  4.  `LORA_SLEEP`        (000): Low power mode; in this mode only the SPI and configuration registers are accessible and it is the only mode where it is permissible to switch between FSK/OOK mode and LoRa mode.
+  5.  `FSK_OOK_STANDBY`   (001): Standby mode; the top regulator and crystal oscillator are enabled.
+  6.  `LORA_STANDBY`      (001): Standby mode; both crystal oscillator and LoRa basebanmd blocks are turned on, but the RF part and PLLs are disabled.
+  7.  `FSK_OOK_FSTX`      (010): This is a frequency synthesis mode for transmission; the frequency is synthesized at the Tx frequency (Frf) but the RF part is off.
+  8.  `LORA_FSTX`         (010): This is a frequency synthesis mode for transmission; the PLL selected for transmission is locked and active at the transmit frequency but the RF part is off.
+  9.  `FSK_OOK_FSRX`      (100): This is a frequency synthesis mode for reception; the frequency is syntheisized at the frequency for reception (Rrf-IF), but the RF part is off.
+  10. `LORA_FSRX`         (100): This is a frequency synthesis mode for reception; the PLL selected for reception is locked and active at the receive frequency, but the RF part is off.
+  11. `FSK_OOK_TX`        (011): Frequency synthesizer and transmitter.
+  12. `LORA_TX`           (011): Remaining blocks required for tranmsit are turned on, PA is ramped, the packet is transmitted and the device returns to `STANDBY` mode.
+  13. `FSK_OOK_RX`        (101): Receive mode; Frequency synthesizer and receiver enabled.
+  13. `LORA_RXCONTINUOUS` (101): Remaining blocks required for reception are powered, and received data is processed until a new request is made to change operating mode.
+  14. `LORA_RXSINGLE`     (110): Remaining blocks required for receiption are powered and kept powered until a valid packet is received and then the device returns to `STANDBY` mode.
+  15. `LORA_CAD`          (111): The device will check a given channel to detect LoRa preamble signal.
+* Each state needs to be represented.
+* Each state needs to know its value that needs to be written to RegOpMode - this is the value in brackets in the list above, e.g. (000)
+* Each state initially has a basic virtual interface, consisting of `on_entry` and `on_exit` functions.
+
+Task:
+* Read files in `src/pi_lora/drivers` and `tests` to understand the existing code.
+* Create a plan to create a set of classes to represent the above.
+* Choose an appropriate set of filenames to contain the classes (maybe they fit in an exsiting file, or maybe they need one-or-more new files, as appropriate)
+* Write the plan to `.plans/2026_08_30_create_device_mode_classes.md`
+
+Constraints:
+* Perform no other tasks.
+
+ ---- 
+
+Context:
+* You are a Senior Software Architect with Electronics and Radio experience.
+* You are developing a system which can use RFM9X / SX127X modules attached to a Raspberry PI to scan the radio frequencies to look for radio transmissions.
+* You are using the "State"  pattern to track the state of the RFM9X / SX127X module.
+* A skeleton of that "State" has been writting into the file `src/pi_lora/drivers/rfm9x_sx127x_modes.py` as class `Rfm9xSx127xMode` and the classes which inherit from it.
+* You now need to write a skeleton of the "Context" which maintains that "State".
+* The "Context" class(s) will be written into the file `src/pi_lora/drivers/rfm9x_sx127x_module.py` and will be called `Rfm9xSx127xModule`.
+* When initialised, the `Rfm9xSx127xModule` class will create an instance of the `UnknownState`, run its `on_entry` method and store a reference to that `UnknownState` as the `current_state`.
+* The `Rfm9xSx127xModule` also has a `change_state` method which takes a parameter which is one of the enumerations from the enum `StateBits` in the file `src/pi_lora/drivers/rfm9x_sx127x_module.py`. This method will:
+  a. If there is a `current_state`, it will call the `on_exit` method of the `current_state`.
+  b. Either destroy the `current_state` or store it for later use (your choice which mechanism to use).
+  c. Create an instance of the state to be changed to, unless an instance has already been stored from a previous use, in which case that instance will be retrieved.
+  d. Call the `on_entry` method of that state.
+  e. store the reference to that state as the `current_state`.
+* It is up to the designer now which of the two lifecycle methods could be used for the states themselves, either
+  1. Create each state new each time it is used and then delete it when it is changed away from.
+  2. Create each state new on first use, but store the reference when it is changed away from and re-used that reference later.
+* If option 2 for state storage is used, a mechanism will be needed to store the not-currently-used states; maybe a list.
+* option 2 for state storage does appear to be the preferred option.
+* If option 2 for state storage is used, then when the `Rfm9xSx127xModule` is detroyed, all stored states also need to be destroyed.
+
+Tasks:
+* Create a plan to implement the `Rfm9xSx127xModule` and tests needed to test it and write that plan into `.plans/2026_09_05_create_module.md`
+
+Constraints:
+* Perform no other tasks.
+
+
+----
+
+Context:
+* You are a Senior Software Architect with Electronics and Radio experience.
+* You are developing a system which can use RFM9X / SX127X modules attached to a Raspberry PI to scan the radio frequencies to look for radio transmissions.
+* You are using the "State"  pattern to track the state of the RFM9X / SX127X module.
+* Several skeleton classes have been already written into the `src/pi_lora/drivers/rfm9x_sx127x_modes.py`, `src/pi_lora/drivers/rfm9x_sx127x_module.py` and `src/pi_lora/drivers/rfm9x_sx127x_handler.py` files.
+* A new set of classes need to be written to handle the specific configurations for the multiple device types.
+* These configurations will be user-configurable using YAML files.
+* The `pydantic` library will provide a base to use to store the configurations.
+* Multiple configurations could be loaded at once and could be searched.
+* A device configuration will contain at least:
+  1. Device name (e.g. "RFM98")
+  2. Device oscillator frequency (e.g., "32 MHz")
+  3. Minimum Radio frequency (e.g. 868 MHz)
+  4. Maximum Radio Frequency (e.g. 915 MHz)
+  + Any other configuration points that differ between different variants and need storing. Please access any knowledge you have about these modules (e.g. the datasheets) to suggest configuration points to store.
+* The new config class could be called `Rfm9xSx127xConfig` and be written into a `src/pi_lora/drivers/rfm9x_sx127x_config.py` file.
+* Note that the locations of the RFM95W/RFM98W and SX1276/SX1278 Datasheets can be found in the `README.md` file.
+
+Tasks:
+* Read all relevant files to familiarize yourself with the current state of the code.
+* Create a plan to achieve the above.
+* Write the plan into `.plans/2026_09_08_add_config.md`
+* Ensure that the plan contanis multiple independent stages, together with instructions to keep a TODO list to track progress.
+* Ensure that the plan contains instructions to run the full test and validation suite, including pytest, mypy and ruff, as per the instructions in `README.md` to use `uv`.
+
+Constraints:
+* Perform no other tasks.
+
+
+----
+
+/grill-me 
+Context:
+* You are a Senior Software Architect with Electronics and Radio experience.
+* You are developing a system which can use RFM9X / SX127X modules attached to a Raspberry PI to scan the radio frequencies to look for radio transmissions.
+* A previous plan was written to add the ability to configure the devices with YAML. That plan is in `.plans/2026_09_11_create_configuration.md`
+* That plan was implemented.
+* Pydantic classes and tests were created, together with an initial configuration created into `configs/rfm9x_sx127x_config.yaml`
+* However, that plan had an oversight. I placed the fields `antenna_type` and `antenna_gain_db` into the `devices` class.
+* Instead these `antenna_type` and `antenna_gain_db` should have been within a different class, one called `composite`.
+* The `composite` configuration consists of one or more `modules` where each module is also associated with the `antenna_type` and `antenna_gain_db` fields.
+* The `antenna_type` and `antenna_gain_db` fields then need to be removed from the `device` configuration.
+* All `pydantic` classes need to be updated to represent this.
+* All tests need to be updated to represent this.
+
+Tasks:
+* Read the `.plans/2026_09_11_create_configuration.md` file, the `configs/rfm9x_sx127x_config.yaml` and any other files in the `src/` and `tests/` directories and the `README.md` file to understand the situation.
+* Create a plan to update the configurations (YAML files and python pydantic classes and tests).
+* Write that plan into `.plans/2026_09_12_update_configuration.md`.
+
+Constraints:
+* Perform no other tasks
+
+
+----
+
+Context:
+* You are a Senior Software Architect with Electronics and Radio experience.
+* You are developing a system which can use RFM9X / SX127X modules attached to a Raspberry PI to scan the radio frequencies to look for radio transmissions.
+* Previous plans were written to add the ability to configure the devices with YAML. Those plans are in `.plans/2026_09_11_create_configuration.md` and `.plans/2026_09_11_update_configuration.md`
+* Those plas were implemented.
+* Pydantic classes and tests were created, together with an initial configuration created into `configs/rfm9x_sx127x_config.yaml`
+* However, that plan had an oversight. I placed the fields `antenna_type` and `antenna_gain_db` into the `modules` class.
+* Instead these `antenna_type` and `antenna_gain_db` should have been within a different class, one called `assembly`.
+* The `assembly` configuration consists of an `assembly_name` and a `module_name`, which specifies the module that it contains, and one of more associations between a `device_id` and and `antenna_configuration`.
+* The `device_id` is made from a combination of `spi_device_id` and `ce_number`, e.g. "0:1" or "0:0" and represents one of the devices within the named `module`
+* The `antenna_configuration` is contained within the `assembly` and consists of the `antenna_type` and `antenna_gain` fields
+* The `antenna_type` and `antenna_gain_db` fields then need to be removed from the `module` configuration.
+* All `pydantic` classes need to be updated to represent this.
+* All tests need to be updated to represent this.
+
+Tasks:
+* Read the `.plans/2026_09_11_create_configuration.md` file, the `.plans/2026_09_12_update_configuration.md` file, the `configs/rfm9x_sx127x_config.yaml` and any other files in the `src/` and `tests/` directories and the `README.md` file to understand the situation.
+* Create a plan to update the configurations (YAML files and python pydantic classes and tests).
+* Write that plan into `.plans/2026_09_12_update_configuration-2.md`.
+
+Constraints:
+* Perform no other tasks
+
+---
+Context:
+* You are a senior software test engineer with radio, electronics and software architecture experience.
+* A reviewer has provided a review which contains a plan to implement offline semgrep.
+* That review/plan is in `.plans/2026_09_15_review.md`
+
+Tasks:
+* Implement the offline semgrep as described in section "## 4. Offline Semgrep Configuration Plan"
+
+Constraints:
+* Ignore all other non-semgrep-related areas in the plan
+* Perform no other tasks
+
+
+---
+
+/grill-me 
+
+Context:
+* You are a Senior Software Architect with Electronics and Radio experience.
+* You are developing a system which can use RFM9X / SX127X modules attached to a Raspberry PI to scan the radio frequencies to look for radio transmissions.
+* Various skeleton classes have been written into `src/pi_lora/drivers/rfm_9x_sx127x_*.py`.
+* The `Rfm9xSx127xModule` class can have multiple instances in a system, each of which can be running independently using asyncio.
+* A previous plan has been written into `.plans/2026_09_16_asyncio_framework.md`, but it was too broad.
+* A new plan needs to be derived which focuses *only* on the creation of a *skeleton* Asyncio Framework, which will be *capable of*, but not yet implementing the following:
+  1. A mechanism to instantiage one-or-more of the `Rfm9xSx127xModule` classes in the `src/pi_lora/drivers/rfm_9x_sx_127x_module.py` file.
+  2. A mechanism to call a yet-to-be-defined `on_jiffy` or 'do_jiffy" method in that class (which will call an as-yet-to-be-defined `on_jiffy` method in the `current_state_instance` composed in that `Rfm9xSx127xModule` class instance.
+  3. The `on_jiffy` or `do_jiffy` method could be called in either one or both of two modes:
+    3a. As a "background loop" , so it just keeps looping through all the `on_jiffy` / `do_jiffy` methods in order.
+    3b. As a triggered event that happens on a specified / configurable periodic time.
+  4. The `on_jiffy` or `do_jiffy` method calling of each `Rfm9xSx127xModule` instance should be made independent of one another so that if one `Rfm9xSx127xModule` blocks on an asyncio block, it allows all the other `Rfm9xSx127xModule` instances to keep running their `on_jiffy` / `do_jiffy` methods.
+  5. The framework should be capable of taking syncrhonous (blocking) commands and asynchronous (non-blocking) commands, especially from a command line, and so should be able to handle the following operating modes:
+    5a. A command line causes the framework to block the command line, spin up, instantiate one-or-more modules, test the hardware, spin down and return the results of the test to the command line (which is spins up).
+    5b. A command line causes the framework to spin up, while returning the command line a message saying that it has received teh "start" command (which causes the command line to return and complete), test the hardware and then wait for more asynchronous commands.
+    5c. A command line causes the framework to report status back to the command line.
+    5d. A command received over the network causes the waiting framework to do something, possibly returning status to the network.
+* The scope of this task is *not* the implementation of all of that functionality, but is limited to the implementation of a skeleton framework which can be expanded later with functionality similar to that defined; what this means is that the architectural capabilities have to be created, but without any of the body that makes executing anything possible right now.
+
+Tasks:
+* Read the previous plan and any of the sources staring with `rfm9x_sx127x_` so that you can gain an understanding of the system as it is today.
+* Create a new plan to implement the skeleton framework and write that plan into `.plans/2026_09_17_asyncio_framework.md`
+
+Constraints:
+* Perform no other tasks.
+
+Context:
+* You are a Senior Software Architect with Electronics and Radio experience.
+* You are developing a system which can use RFM9X / SX127X modules attached to a Raspberry PI to scan the radio frequencies to look for radio transmissions.
+* it is time to add SPI access to the system; by passing an Abstract Factory into the `Rfm9xSx127xModule` class.
+* The Abstract Factory will create a class instance which can either access SPI or mock SPI access.
+* The class instance which can access SPI will also have an async cricital section  mechanism which protects an SPI bus (so if two devices on the same SPI bus but on different CE try to access it, it will provent simultaneous access, but if two devices are on different SPI buses, access will work).
+
+Tasks:
+* Create a plan to add SPI access to the system, as specified above.
+* Write the plan into `.plans/2026_09_21_spi.md`
+* Ensure that to validate the plan, the implementer runs mypy, ruff and semgrep as specified in the `README.md`.
+
+Constraints:
+* Perform no other tasks.
+
+----
+
+A software architect has provided a plan in `.plans/2026_09_26_more_spi.md`. Treat this as the single-source-of-truth for this session.
+
+For each of the phases (Phase 1 to Phase 6), launch a sub-agent to implement that phase.
+
+Perform no other tasks
+
+
+------
+
+/grill-me-proscons 
+
+Context:
+* You are a Senior Software Architect with Electronics and Radio experience.
+* You are developing a system which can use RFM9X / SX127X modules attached to a Raspberry PI to scan the radio frequencies to look for radio transmissions.
+* It is time to extend the CLI so that it begins to use the newer mechanism to retrieve the configuration of the devices present.
+* It is not yet time to add any other functionality to the system.
+
+Tasks:
+* Create a sub-agent to analyse the codebase and documentation and create a summary report for you.
+* Figure out how to add a new CLI file and class(es) in the `src/pi_lora/cli` directory which can query the set of configurations using a passed in assembly name to see if that is a valid assembly - and, if so, return that configuration as formatted text that the caller can read.
+* This new cli will achive that by:
+    1. Calling (probably new) functionality in `src/pi_lora/framework/application.py` which
+    2. Uses the `ModuleManager` r (in `src/pi_lora/framework/module_manager.py` to get the list of available modules, and
+    3. Creates a new  `RadioInstanceConfig` using the `create_radio_instance` function in `src/pi_lora/drivers/rfm9x_sx127x_radio_instance.py` file.
+    4. Prints out the configuration in that `RadioInstanceConfig` for the user to see.
+* Figure out how to do the above and write a plan to acheive it to `.plans/2026_09_28_create_radio_instance_config.md`
+* Ensure that the plan is structured into a number of easy-to-implement phases.
+* Ensure that the plan contains sufficient additional tests to verfiy the new functionality.
+* Ensure that the plan contains instructions to validate the changes using the test harness and code validation tools specified in `README.md`
+
+Constraints:
+* Perform no other tasks.
+
+----
+
+A software architect has provided a plan in `.plans/2026_09_28_create_radio_instance_config_fix.md`. Treat this as the single-source-of-truth for this session.
+
+Launch a sub-agent to analyse and summarize the current code and documentation in the project.
+
+For each of the phases (Phase 1 to Phase 4), sequentially launch a sub-agent to implement that phase and provide a summary of progress to you.
+
+Only run one sub-agent at a time.
+
+Perform no other tasks

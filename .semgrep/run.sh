@@ -15,5 +15,7 @@ TMPDIR=/tmp/sandbox/semgrep_tmp/ uv run semgrep scan --verbose \
   src/pi_lora/framework/*.py \
   tests/framework/*.py \
   src/pi_lora/drivers/spi/*.py \
-  tests/spi/*.py
+  tests/spi/*.py \
+  src/pi_lora/cli/config.py \
+  tests/test_config_*.py
 

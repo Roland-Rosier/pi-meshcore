@@ -23,6 +23,25 @@
       "instructions": [
         "./kilo/rules/03-plan-execution-protocol.md"
       ]
+    },
+    "planner": {
+      "model": "kilo/nvidia/nemotron-3-super-120b-a12b:free",
+      "temperature": 1.0,
+      "instructions": [
+        "./kilo/rules/03-plan-execution-protocol.md"
+      ],
+      "permission": {
+        "edit": {
+          ".plans/**/*.md": "allow",      // Directly allows writing/modifying in this directory
+          ".kilo/plans/**/*.md": "allow", // Retains default behaviour
+          "*": "deny"                     // Categorically blocks this agent from editing anything else
+        },
+        "write": {
+          ".plans/**/*.md": "allow",      // Directly allows writing/modifying in this directory
+          ".kilo/plans/**/*.md": "allow", // Retains default behaviour
+          "*": "deny"                     // Categorically blocks this agent from writing anything else
+        }
+      }
     }
   },
   "mcp": {

@@ -69,13 +69,13 @@ families:
       - "RFM98"
     exclusions:
       - device_name: "RFM95"
-        excluded_freq_hz: 434000000
+        test_invalid_freq_hz: 434000000
       - device_name: "RFM97"
-        excluded_freq_hz: 868000000
+        test_invalid_freq_hz: 868000000
       - device_name: "RFM96"
-        excluded_freq_hz: 434000000
+        test_invalid_freq_hz: 434000000
       - device_name: "RFM98"
-        excluded_freq_hz: 868000000
+        test_invalid_freq_hz: 868000000
 
   sx127x:
     family_name: "SX127X"
@@ -86,13 +86,13 @@ families:
       - "SX1279"
     exclusions:
       - device_name: "SX1276"
-        excluded_freq_hz: 434000000
+        test_invalid_freq_hz: 434000000
       - device_name: "SX1277"
-        excluded_freq_hz: 868000000
+        test_invalid_freq_hz: 868000000
       - device_name: "SX1278"
-        excluded_freq_hz: 868000000
+        test_invalid_freq_hz: 868000000
       - device_name: "SX1279"
-        excluded_freq_hz: 434000000
+        test_invalid_freq_hz: 434000000
 
 # Module configurations
 modules:

@@ -61,11 +61,11 @@ class FamilyDeviceExclusion(BaseModel):
 
     Required:
         device_name: Name of the device.
-        excluded_freq_hz: Frequency the device does NOT support.
+        test_invalid_freq_hz: Frequency for negative testing (may be outside device range).
     """
 
     device_name: str = Field(..., min_length=1)
-    excluded_freq_hz: int = Field(..., gt=0)
+    test_invalid_freq_hz: int = Field(..., gt=0)
 
 
 class FamilyConfig(BaseModel):
@@ -74,7 +74,7 @@ class FamilyConfig(BaseModel):
     Required:
         family_name: Family identifier.
         devices: List of potential device names in the family.
-        exclusions: Per-device frequencies not supported.
+        exclusions: Per-device frequencies for negative testing (may be outside device range).
     """
 
     family_name: str = Field(..., min_length=1)

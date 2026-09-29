@@ -1,8 +1,10 @@
 # MeshCore Raspberry Pi 4 LoRa Implementation
 
-This project implements [MeshCore](https://meshcore.co.uk/) on a Raspberry Pi 4 with LoRa expansion hat containing:
+This project originally intended to implement [MeshCore](https://meshcore.io/) on a Raspberry Pi 4 with LoRa expansion hat containing:
 - RFM95W (SX1276) for 868MHz spectrum
 - RFM98W (SX1278) for 434MHz spectrum
+
+However, it has pivoted to attempt to use the radio transceivers in more of a listening context.
 
 ---
 
@@ -166,23 +168,24 @@ uv remove <package-name>
 │   ├── mcpServers/
 │   │   └── desktop-commander-mcp.yaml  # MCP server config for Desktop Commander integration
 │   └── rules/
-│       ├── 01-system-constraints.md      # Global system constraints and safety modes
-│       ├── 02-execution-protocol.md        # Phase-based execution protocol guidelines
-│       ├── 03-use-desktop-commander-mcp.md   # Desktop Commander MCP tool usage rules
-│       └── 04-use-native-edit-tools.md     # Native file editing tool (single_find_and_replace) rules
-├── .kilo/                                # Kilo agent configuration directory
+│       ├── 01-system-constraints.md    # Global system constraints and safety modes
+│       ├── 02-execution-protocol.md      # Phase-based execution protocol guidelines
+│       ├── 03-use-desktop-commander-mcp.md # Desktop Commander MCP tool usage rules
+│       └── 04-use-native-edit-tools.md   # Native file editing tool (single_find_and_replace) rules
+├── .kilo/                              # Kilo agent configuration directory
 │   ├── agents/
 │   │   ├── architect_reviewer.md     # Architect reviewer agent configuration
-│   │   └── repo_analyst.md           # Repository analysis agent configuration
+│   │   ├── repo_analyst.md           # Repository analysis agent configuration
+│   │   └── planner.md                # Custom planner agent configuration (writes to root plan directories)
 │   ├── kilo.jsonc                    # Kilo main configuration file
 │   ├── rules/
-│   │   ├── 01-strict-tool-calls.md     # Strict tool call enforcement rules
-│   │   ├── 02-system-constraints.md      # Global system constraints and safety modes
-│   │   ├── 03-act--execution-protocol.md   # Act phase execution protocol guidelines
-│   │   ├── 03-plan-execution-protocol.md   # Plan phase execution protocol guidelines
-│   │   ├── 04-use-desktop-commander-mcp.md   # Desktop Commander MCP tool usage rules
-│   │   └── 05-use-native-edit-tools.md     # Native file editing tool (single_find_and_replace) rules
-│   └── skills/                           # Agent skill definitions
+│   │   ├── 01-strict-tool-calls.md   # Strict tool call enforcement rules
+│   │   ├── 02-system-constraints.md    # Global system constraints and safety modes
+│   │   ├── 03-act--execution-protocol.md # Act phase execution protocol guidelines
+│   │   ├── 03-plan-execution-protocol.md # Plan phase execution protocol guidelines
+│   │   ├── 04-use-desktop-commander-mcp.md # Desktop Commander MCP tool usage rules
+│   │   └── 05-use-native-edit-tools.md   # Native file editing tool (single_find_and_replace) rules
+│   └── skills/                         # Agent skill definitions
 │       ├── grill-me/SKILL.md           # Stress-test interview skill for design validation
 │       ├── grill-me-proscons/SKILL.md  # Pros/cons interview skill for design validation
 │       └── repo-analyst/SKILL.md       # Repository analysis skill
@@ -203,8 +206,8 @@ uv remove <package-name>
 ├── configs/                          # Configuration files directory
 │   ├── continue/
 │   │   └── config_lmstudio.yaml      # LM Studio configuration for Continue.dev agent workflows
-│   ├── rfm9x_sx127x_config.yaml        # YAML config file for RFM95W/RFM98W module parameters (pins, freq)
-│   └── ruff-lint-workflow.yml.disabled  # Disabled ruff lint workflow configuration file
+│   ├── rfm9x_sx127x_config.yaml      # YAML config file for RFM95W/RFM98W module parameters (pins, freq)
+│   └── ruff-lint-workflow.yml.disabled # Disabled ruff lint workflow configuration file
 ├── pyproject.toml                    # Python project metadata, pytest & coverage configuration
 ├── requirements.txt                  # Python dependency list (FastAPI, meshcore, pytest, etc.)
 ├── scripts/                          # Utility scripts directory
@@ -217,9 +220,9 @@ uv remove <package-name>
 │   │   │   └── common-mistakes/      # Common mistake patterns
 │   │   ├── maintainability/          # Maintainability linting rules
 │   │   └── security/                 # Security scanning rules
-│   │       └── audit/                  # Audit patterns (dangerous calls, injection)
-│   │           ├── insecure-transport/   # Transport security rules
-│   │           └── sqli/               # SQL injection patterns
+│   │       └── audit/                # Audit patterns (dangerous calls, injection)
+│   │           ├── insecure-transport/ # Transport security rules
+│   │           └── sqli/             # SQL injection patterns
 │   ├── run.sh                        # Semgrep execution runner
 │   ├── semgrep-semgrep-rules         # External semgrep ruleset
 │   └── trailofbits-semgrep-rules     # External semgrep ruleset
@@ -233,11 +236,12 @@ uv remove <package-name>
 │   │   ├── configs/                    # Driver config subdirectory
 │   │   │   └── rfm9x_sx127x_config.yaml  # Driver-specific YAML config
 │   │   ├── spi/                        # SPI bus abstraction layer
-│   │   │   ├── __init__.py               # SPI sub-package initialization
-│   │   │   ├── bus.py                    # SPI bus communication wrapper
-│   │   │   ├── factory.py                # SPI device factory
-│   │   │   └── locks.py                  # SPI bus locking primitives
-│   │   ├── lora_detection.py           # LoRa module auto-detection logic (RFM95W/RFM98W)
+│   │   │   ├── __init__.py           # SPI sub-package initialization
+│   │   │   ├── README.md             # SPI bus abstraction layer documentation
+│   │   │   ├── bus.py                # SPI bus communication wrapper
+│   │   │   ├── factory.py            # SPI device factory
+│   │   │   └── locks.py              # SPI bus locking primitives
+│   │   ├── lora_detection.py         # LoRa module auto-detection logic (RFM95W/RFM98W)
 │   │   ├── lora_module.py              # RFM95W/RFM98W radio driver implementation (SX1276/SX1278)
 │   │   ├── rfm9x_sx127x_config_model.py  # Config data models for RFM95W/RFM98W module settings
 │   │   ├── rfm9x_sx127x_config_loader.py   # YAML config loader for RFM95W/RFM98W parameters
@@ -247,6 +251,7 @@ uv remove <package-name>
 │   │   └── rfm9x_sx127x_module.py      # RFM95W/RFM98W radio module abstraction layer
 │   └── framework/                    # Framework infrastructure subpackage
 │       ├── __init__.py               # Framework package init
+│       ├── README.md                 # Framework infrastructure documentation
 │       ├── application.py            # Application lifecycle management
 │       ├── command_bus.py            # Command dispatch bus
 │       ├── events.py                 # Event system definitions
@@ -259,15 +264,16 @@ uv remove <package-name>
     ├── drivers/                      # Driver tests
     │   ├── __init__.py               # Driver tests package init
     │   └── spi/                      # SPI driver tests
-    │       ├── __init__.py               # SPI tests package init
-    │       ├── test_bus.py               # SPI bus tests
-    │       ├── test_factory.py           # SPI factory tests
-    │       └── test_locks.py             # SPI locks tests
+    │       ├── __init__.py           # SPI tests package init
+    │       ├── test_bus.py           # SPI bus tests
+    │       ├── test_factory.py       # SPI factory tests
+    │       └── test_locks.py         # SPI locks tests
     ├── framework/                    # Framework test subdirectory
     │   ├── test_application.py       # Framework application tests
     │   ├── test_command_bus.py       # Command bus tests
     │   ├── test_events.py            # Event system tests
-    │   ├── test_module_event_loop.py   # Module event loop tests
+    │   ├── test_exceptions.py        # Framework exception class tests
+    │   ├── test_module_event_loop.py # Module event loop tests
     │   ├── test_module_manager.py    # Module manager tests
     │   └── test_scheduler.py         # Scheduler tests
     ├── spi/                          # SPI mock tests
@@ -275,6 +281,8 @@ uv remove <package-name>
     │   ├── mock.py                   # SPI mock implementation
     │   └── test_mock.py              # SPI mock tests
     ├── test_check_hardware_cli.py    # Unit tests for CLI hardware check tool
+    ├── test_config_cli.py            # Unit tests for CLI config module
+    ├── test_config_cli_integration.py  # Integration tests for CLI config workflows
     ├── test_fakes.py                 # Unit tests for fake/mock objects
     ├── test_lora_module.py           # Unit tests for LoRa radio module operations
     ├── test_lora_module_detection.py   # Tests for hardware detection logic
@@ -284,7 +292,8 @@ uv remove <package-name>
     ├── test_rfm9x_sx127x_config_validator.py # Tests for config validation logic
     ├── test_rfm9x_sx127x_handler.py        # Tests for RFM module handler
     ├── test_rfm9x_sx127x_modes.py        # Unit tests for RFM95W/RFM98W mode definitions
-    └── test_rfm9x_sx127x_module.py     # Unit tests for RFM95W/RFM98W radio module implementation
+    ├── test_rfm9x_sx127x_module.py       # Unit tests for RFM95W/RFM98W radio module implementation
+    └── test_rfm9x_sx127x_radio_instance.py # Unit tests for RFM radio instance class
 ```
 
 ---

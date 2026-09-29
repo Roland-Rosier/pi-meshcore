@@ -17,15 +17,23 @@
 from __future__ import annotations
 
 import asyncio  # noqa: F401
-from typing import TYPE_CHECKING, Any
+from pathlib import Path
+from typing import TYPE_CHECKING, Any, cast
 
 if TYPE_CHECKING:
     from ..drivers.rfm9x_sx127x_config_model import Rfm9xSx127xConfig  # noqa: F401
 
 from .command_bus import CommandBus
 from .events import StopMode
+from .exceptions import AssemblyNotFoundError, DeviceAttachmentNotFoundError
 from .module_manager import ModuleManager
 from .scheduler import Scheduler
+from ..drivers.rfm9x_sx127x_config_loader import get_preloaded_config
+from ..drivers.rfm9x_sx127x_radio_instance import (
+    DeviceAttachmentNotFoundError as DriverDeviceAttachmentNotFoundError,
+    RadioInstanceConfig,
+    create_radio_instance,
+)
 
 
 class Application:
@@ -42,6 +50,8 @@ class Application:
             from ..drivers.spi.factory import RealSpiBusFactory
 
             self.spi_factory = RealSpiBusFactory()
+        self._config: "Rfm9xSx127xConfig | None" = None
+        self._config_path: Path | None = None
 
     async def start(self) -> None:
         """Initialize the application: load modules, register scheduler, start loops."""
@@ -94,3 +104,127 @@ class Application:
                 return result
             raise ValueError(f"No module for target {target}")
         raise ValueError(f"Invalid command target: {target}")
+
+    def _load_config(self, config_path: Path | None = None) -> "Rfm9xSx127xConfig":
+        """Load configuration, caching it for subsequent calls.
+
+        Args:
+            config_path: Optional custom config file path (forces reload).
+
+        Returns:
+            The loaded Rfm9xSx127xConfig instance.
+        """
+        if config_path is not None:
+            config = get_preloaded_config(config_path=config_path)
+            self._config_path = config_path
+            self._config = config
+            return config
+
+        if self._config is not None:
+            return self._config
+
+        config = cast("Rfm9xSx127xConfig", get_preloaded_config())
+        self._config = config
+        return config
+
+    def reload_config(self, config_path: Path | None = None) -> "Rfm9xSx127xConfig":
+        """Force reload configuration.
+
+        Args:
+            config_path: Optional custom config file path.
+
+        Returns:
+            The reloaded Rfm9xSx127xConfig instance.
+        """
+        config = cast("Rfm9xSx127xConfig", get_preloaded_config(force_reload=True, config_path=config_path))
+        self._config_path = config_path
+        self._config = config
+        return config
+
+    def list_assemblies(self, verbose: bool = False) -> list[dict[str, Any]]:
+        """Return list of available assemblies.
+
+        Args:
+            verbose: If True, include module_name and device_count for each assembly.
+
+        Returns:
+            List of dicts with assembly info.
+        """
+        config = self._load_config()
+        results: list[dict[str, Any]] = []
+        for assembly_name, assembly in config.assemblies.items():
+            if verbose:
+                results.append({
+                    "assembly_name": assembly_name,
+                    "module_name": assembly.module_name,
+                    "device_count": len(assembly.devices),
+                })
+            else:
+                results.append({"assembly_name": assembly_name})
+        return results
+
+    def get_assembly_config(
+        self,
+        assembly_name: str,
+        spi_device_id: int | None = None,
+        ce_number: int | None = None,
+        config_path: Path | None = None,
+    ) -> RadioInstanceConfig | list[RadioInstanceConfig]:
+        """Get RadioInstanceConfig(s) for an assembly.
+
+        Args:
+            assembly_name: Name of the assembly to query.
+            spi_device_id: Optional SPI device ID to filter.
+            ce_number: Optional CE number to filter.
+            config_path: Optional custom config file path (forces reload).
+
+        Returns:
+            Single RadioInstanceConfig if both spi_device_id and ce_number provided,
+            otherwise list of all RadioInstanceConfigs for the assembly.
+
+        Raises:
+            AssemblyNotFoundError: If assembly not found.
+            DeviceAttachmentNotFoundError: If SPI/CE filter doesn't match any device.
+        """
+        config = self._load_config(config_path)
+
+        if assembly_name not in config.assemblies:
+            raise AssemblyNotFoundError(f"Assembly '{assembly_name}' not found in configuration")
+
+        assembly = config.assemblies[assembly_name]
+        module_name = assembly.module_name
+
+        if module_name not in config.modules:
+            raise AssemblyNotFoundError(f"Module '{module_name}' for assembly '{assembly_name}' not found")
+
+        module_obj = config.modules[module_name]
+
+        configs: list[RadioInstanceConfig] = []
+        for attachment in module_obj.devices:
+            try:
+                radio_config = create_radio_instance(
+                    assembly_name=assembly_name,
+                    spi_device_id=attachment.spi_device_id,
+                    ce_number=attachment.ce_number,
+                    config=config,
+                )
+                configs.append(radio_config)
+            except DriverDeviceAttachmentNotFoundError:
+                continue
+
+        if not configs:
+            raise DeviceAttachmentNotFoundError(
+                module_name,
+                spi_device_id if spi_device_id is not None else -1,
+                ce_number if ce_number is not None else -1,
+            )
+
+        if spi_device_id is not None and ce_number is not None:
+            for cfg in configs:
+                if cfg.spi_device_id == spi_device_id and cfg.ce_number == ce_number:
+                    return cfg
+            raise DeviceAttachmentNotFoundError(
+                module_name, spi_device_id, ce_number
+            )
+
+        return configs

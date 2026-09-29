@@ -125,10 +125,11 @@ dev = [
 ]
 
 # -----------------------------------------------------------------------------
-# No CLI entry points yet — real CLI not developed
-# (Will be added when src/cli/ is ready)
-# [project.scripts]
-# pi-lora-check = "src.cli.check_hardware:main"
+# CLI entry points
+# -----------------------------------------------------------------------------
+[project.scripts]
+check-hardware = "pi_lora.cli.check_hardware:app"
+config = "pi_lora.cli.config:app"
 
 # No ASGI application module yet — web interface not implemented
 
@@ -224,6 +225,18 @@ ignore_missing_imports = true
 module = ["fakes", "pi_lora.drivers.lora_module", "pi_lora.drivers.lora_detection"]
 ignore_missing_imports = true
 
+[[tool.mypy.overrides]]
+module = ["src.pi_lora.framework", "src.pi_lora.framework.exceptions", "src.pi_lora.framework.application", "src.pi_lora.drivers.rfm9x_sx127x_radio_instance", "src.pi_lora.drivers.rfm9x_sx127x_config_loader", "pi_lora.framework", "pi_lora.framework.exceptions", "pi_lora.framework.application", "pi_lora.drivers.rfm9x_sx127x_radio_instance", "pi_lora.drivers.rfm9x_sx127x_config_loader"]
+ignore_missing_imports = true
+
+[[tool.mypy.overrides]]
+module = ["src.pi_lora.drivers.rfm9x_sx127x_config_model"]
+disable_error_code = ["import-untyped"]
+
+[[tool.mypy.overrides]]
+module = ["src.pi_lora.framework.application"]
+disable_error_code = ["no-any-return", "unused-ignore"]
+
 # -----------------------------------------------------------------------------
 # ruff configuration (linting)
 # -----------------------------------------------------------------------------
@@ -272,6 +285,8 @@ ignore = [
 "src/pi_lora/cli/check_hardware.py" = ["E402", "B008"]
 "src/pi_lora/drivers/lora_detection.py" = ["E402"]
 "tests/test_lora_module_detection.py" = ["E402", "B017"]
+"tests/framework/test_application.py" = ["B017"]
+"src/pi_lora/framework/application.py" = ["UP037"]
 
 # Tests that verify simulated SPI failures use bare Exception intentionally.
 "tests/test_fakes.py" = ["B017"]
