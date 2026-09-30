@@ -55,12 +55,13 @@ class Application:
 
     async def start(self) -> None:
         """Initialize the application: load modules, register scheduler, start loops."""
-        self.module_manager.load_from_config(self.config, self.scheduler, self.spi_factory)
+        assembly_result = self.get_assembly_config("default")
+        radio_configs: list[RadioInstanceConfig] = assembly_result if isinstance(assembly_result, list) else [assembly_result]
+        self.module_manager.load_from_config(radio_configs, self.scheduler, self.spi_factory)
         self.command_bus.set_module_resolver(self._resolve_module_for_command)
         await self.scheduler.start()
         for module in self.module_manager.get_all_modules():
-            if module.spi_device_id is not None:
-                await module.init_spi_bus()
+            await module.init_spi_bus()  # Initialize SPI bus
             await module.start_event_loop()
 
     async def stop(self) -> None:

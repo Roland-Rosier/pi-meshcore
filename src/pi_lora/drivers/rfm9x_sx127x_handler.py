@@ -20,12 +20,20 @@ frequency calculations, writes, and verifications against SPI driver registers.
 
 from __future__ import annotations
 
+from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
 from .rfm9x_sx127x_modes import ModeBits, RegisterLayout
 
 if TYPE_CHECKING:
     from .rfm9x_sx127x_module import Rfm9xSx127xModule
+
+
+@dataclass(frozen=True)
+class FrequencyCalculationConfig:
+    """Configuration for LoRa frequency register calculations."""
+
+    osc_freq_hz: int | None = None
 
 
 class Rfm9xSx127xHandler:
@@ -75,14 +83,16 @@ class Rfm9xSx127xHandler:
 
     @staticmethod
     async def write_and_verify_frequency_for_khz(
-        module: "Rfm9xSx127xModule", freq_khz: int  # noqa: UP037
+        module: "Rfm9xSx127xModule", freq_config: FrequencyCalculationConfig, freq_khz: int  # noqa: UP037
     ) -> tuple[bool, int, int, int, int, int, int]:
         """Write and verify frequency registers (Frf MSB/MID/LSB)."""
         spi_bus = module.spi_bus
         if spi_bus is None:
             raise RuntimeError("module.spi_bus is None")
         try:
-            freq_registers = Rfm9xSx127xHandler.calc_freq_registers_for_khz(freq_khz)
+            freq_registers = Rfm9xSx127xHandler.calc_freq_registers_for_khz(
+                freq_config, freq_khz
+            )
             req_msb, req_mid, req_lsb = freq_registers
 
             await Rfm9xSx127xHandler.write_reg(module, RegisterLayout.REG_FRF_MSB, req_msb)
@@ -99,14 +109,23 @@ class Rfm9xSx127xHandler:
             raise
 
     @staticmethod
-    def calc_freq_registers_for_khz(freq_khz: int) -> tuple[int, int, int]:
+    def calc_freq_registers_for_khz(
+        freq_config: FrequencyCalculationConfig, freq_khz: int
+    ) -> tuple[int, int, int]:
         """Calculate frequency register values (pure calculation, no I/O).
 
-        FSTEP = 61.03515625 Hz. freq_register_value = (freq_khz * 1_000_000) / FSTEP.
+        FSTEP derived from ``freq_config.osc_freq_hz`` or defaults to 32 000 000 Hz.
+        ``freq_register_value = int((freq_khz * 1_000) / fstep)``.
         Returns (msb, mid, lsb).
         """
-        freq_hz_times_100000000: int = freq_khz * 100000000000
-        freq_register_value: int = freq_hz_times_100000000 // 6103515625
+        osc_freq: int = freq_config.osc_freq_hz if freq_config.osc_freq_hz is not None else 32_000_000
+        if freq_config.osc_freq_hz is None:
+            import logging
+            logging.getLogger(__name__).warning(
+                "osc_freq_hz not configured; defaulting to 32 MHz"
+            )
+        fstep: float = osc_freq / 524288  # 2^19 — Hz per frequency register step
+        freq_register_value: int = int((freq_khz * 1_000) / fstep)
         lsb: int = freq_register_value & 0xFF
         mid: int = (freq_register_value & 0xFF00) >> 8
         msb: int = (freq_register_value & 0xFF0000) >> 16

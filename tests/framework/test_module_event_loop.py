@@ -15,7 +15,7 @@
 """Unit tests for Rfm9xSx127xModule event loop with mock state."""
 
 import asyncio
-from unittest.mock import AsyncMock
+from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 from src.pi_lora.drivers.rfm9x_sx127x_modes import StateBits
@@ -24,9 +24,19 @@ from src.pi_lora.framework.events import EventType, ModuleEvent, StopMode
 
 
 @pytest.fixture
-def module() -> Rfm9xSx127xModule:
+def mock_radio_config() -> MagicMock:
+    """Create a mock RadioInstanceConfig for tests."""
+    config = MagicMock()
+    config.spi_device_id = 0
+    config.ce_number = 0
+    config.osc_freq_hz = 868000000
+    return config
+
+
+@pytest.fixture
+def module(mock_radio_config: MagicMock) -> Rfm9xSx127xModule:
     """Create a fresh Rfm9xSx127xModule instance."""
-    return Rfm9xSx127xModule(state=StateBits.UNKNOWN_STATE)
+    return Rfm9xSx127xModule(radio_config=mock_radio_config, state=StateBits.UNKNOWN_STATE)
 
 
 @pytest.fixture
@@ -119,14 +129,14 @@ class TestQueueSizeGetter:
 
 
 class TestIdentitySetters:
-    """Verify identity setters work correctly."""
+    """Verify identity getters return config values."""
 
-    def test_set_spi_device_id(self, module: Rfm9xSx127xModule) -> None:
-        module.set_spi_device_id(1)
+    def test_get_spi_device_id(self, module: Rfm9xSx127xModule, mock_radio_config: MagicMock) -> None:
+        mock_radio_config.spi_device_id = 1
         assert module.get_spi_device_id() == 1
 
-    def test_set_ce_number(self, module: Rfm9xSx127xModule) -> None:
-        module.set_ce_number(0)
+    def test_get_ce_number(self, module: Rfm9xSx127xModule, mock_radio_config: MagicMock) -> None:
+        mock_radio_config.ce_number = 0
         assert module.get_ce_number() == 0
 
 
