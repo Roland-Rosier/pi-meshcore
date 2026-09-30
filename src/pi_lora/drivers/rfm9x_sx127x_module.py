@@ -23,7 +23,7 @@ using a shared ``state_instances`` dictionary to avoid redundant object creation
 import asyncio
 from contextlib import suppress
 
-from .rfm9x_sx127x_handler import Rfm9xSx127xHandler
+from .rfm9x_sx127x_handler import FrequencyCalculationConfig, Rfm9xSx127xHandler
 from .rfm9x_sx127x_modes import (
     LoraMode,
     ModeBits,
@@ -31,6 +31,7 @@ from .rfm9x_sx127x_modes import (
     StateBits,
     StateBitsMapping,
 )
+from .rfm9x_sx127x_radio_instance import RadioInstanceConfig
 from .spi.bus import SpiBus
 from .spi.factory import SpiBusFactory
 from ..framework.events import ModuleEvent, StopMode
@@ -46,9 +47,13 @@ class Rfm9xSx127xModule:
 
     def __init__(
         self,
+        radio_config: RadioInstanceConfig,
         state: StateBits,
         spi_factory: SpiBusFactory | None = None,
     ) -> None:
+        self.radio_config: RadioInstanceConfig = radio_config
+        self.spi_device_id: int = radio_config.spi_device_id
+        self.ce_number: int = radio_config.ce_number
         self._spi_factory: SpiBusFactory | None = spi_factory
         self.spi_bus: SpiBus | None = None
         self.current_state_instance: Rfm9xSx127xMode|None = self._create_state_instance(state)
@@ -61,10 +66,6 @@ class Rfm9xSx127xModule:
         self.event_loop_task: asyncio.Task[None] | None = None
         self._stop_mode: StopMode = StopMode.DRAIN
         self._paused: bool = False
-
-        # Module identity (set via setters after construction)
-        self.spi_device_id: int | None = None
-        self.ce_number: int | None = None
 
     # ------------------------------------------------------------------
     # Internal helpers
@@ -89,16 +90,13 @@ class Rfm9xSx127xModule:
     # ------------------------------------------------------------------
 
     async def init_spi_bus(self) -> None:
-        """Open the SPI bus using the injected factory.
-
-        Must be called after ``spi_device_id`` and ``ce_number`` are set.
-        """
-        if self._spi_factory is None or self.spi_device_id is None:
+        """Open the SPI bus using the injected factory."""
+        if self._spi_factory is None:
             return
         self.spi_bus = self._spi_factory.create(
-            bus=self.spi_device_id, device=self.ce_number or 0
+            bus=self.spi_device_id, device=self.ce_number
         )
-        self.spi_bus.open(self.spi_device_id, self.ce_number or 0)
+        self.spi_bus.open(self.spi_device_id, self.ce_number)
 
     async def close_spi(self) -> None:
         """Close the SPI bus if one is open."""
@@ -146,16 +144,14 @@ class Rfm9xSx127xModule:
         if self.current_state_instance is not None:
             mode_bits = type(self.current_state_instance).MODE_BITS
             if mode_bits in (ModeBits.SLEEP_OR_ERROR_OR_NOT_A_DEVICE_OR_UNKNOWN_OR_RESET, ModeBits.STANDBY):
-                success, *_ = await Rfm9xSx127xHandler.write_and_verify_frequency_for_khz(self, frequency_khz)
+                freq_config = FrequencyCalculationConfig(
+                    osc_freq_hz=self.radio_config.osc_freq_hz
+                )
+                success, *_ = await Rfm9xSx127xHandler.write_and_verify_frequency_for_khz(
+                    self, freq_config, frequency_khz
+                )
                 return success
         raise RuntimeError("Frequency write only allowed in SLEEP or STANDBY mode")
-
-    # Identity setters (called by ModuleManager after construction)
-    def set_spi_device_id(self, spi_device_id: int) -> None:
-        self.spi_device_id = spi_device_id
-
-    def set_ce_number(self, ce_number: int) -> None:
-        self.ce_number = ce_number
 
     # Encapsulation getters (for Application.get_status())
     def get_current_state_name(self) -> str:
@@ -166,11 +162,13 @@ class Rfm9xSx127xModule:
     def get_event_queue_size(self) -> int:
         return self.event_queue.qsize()
 
-    def get_spi_device_id(self) -> int | None:
-        return self.spi_device_id
+    def get_spi_device_id(self) -> int:
+        """Return the SPI device ID (always ``int``, never ``None``)."""
+        return self.radio_config.spi_device_id
 
-    def get_ce_number(self) -> int | None:
-        return self.ce_number
+    def get_ce_number(self) -> int:
+        """Return the CE number (always ``int``, never ``None``)."""
+        return self.radio_config.ce_number
 
     # Event loop control
     async def start_event_loop(self) -> None:

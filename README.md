@@ -30,9 +30,9 @@ This implementation includes:
 
 ### Pin Mapping
 
-| Module | DIO0 | DIO5 |
-|--------|-----|------|
-| RFM95W | WPi6 | WPi5 |
+| Module | DIO0  | DIO5  |
+|--------|-------|-------|
+| RFM95W | WPi6  | WPi5  |
 | RFM98W | WPi27 | WPi26 |
 
 ---

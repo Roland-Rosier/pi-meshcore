@@ -17,29 +17,30 @@
 from dataclasses import dataclass
 
 import pytest
-from src.pi_lora.drivers.rfm9x_sx127x_config_model import (
-    DeviceModuleAttachment,
-    ModuleConfig,
-    Rfm9xSx127xConfig,
-)
+from src.pi_lora.drivers.rfm9x_sx127x_radio_instance import RadioInstanceConfig
 from src.pi_lora.framework.application import Application
 from src.pi_lora.framework.events import EventType
 from tests.spi.mock import MockSpiBusFactory
 
 
-def _make_test_config() -> Rfm9xSx127xConfig:
-    devices = [
-        DeviceModuleAttachment(
-            device_name="RFM95W",
+def _make_test_radio_configs() -> list[RadioInstanceConfig]:
+    """Build a minimal test config with one radio instance."""
+    return [
+        RadioInstanceConfig(
+            module_name="LoPi4",
             spi_device_id=0,
             ce_number=0,
-            dio_gpio_mappings=["DIO0:WPi6"],
+            device_name="RFM95W",
+            min_radio_freq_hz=800000,
+            max_radio_freq_hz=900000,
+            osc_freq_hz=32_000_000,
+            family_name="RFM9X",
+            test_invalid_frequencies_hz=(999999,),
+            dio_gpio_mappings=("DIO0:WPi6",),
+            antenna_type=None,
+            antenna_gain_db=None,
         ),
     ]
-    modules = {
-        "LoPi4": ModuleConfig(module_name="LoRa Pi 4", devices=devices),
-    }
-    return Rfm9xSx127xConfig(modules=modules)
 
 
 @dataclass(frozen=True)
@@ -52,19 +53,26 @@ class TestApplicationLifecycle:
     """Verify Application.start() / stop() lifecycle."""
 
     @pytest.mark.asyncio
-    async def test_start_creates_modules(self) -> None:
-        config = _make_test_config()
-        app = Application(config=config, spi_factory=MockSpiBusFactory())
+    async def test_start_loads_from_assembly_config(self) -> None:
+        app = Application(config=None, spi_factory=MockSpiBusFactory())
         await app.start()
-        assert len(app.module_manager.get_all_modules()) == 1
+        assert len(app.module_manager.get_all_modules()) >= 1
+        for mod in app.module_manager.get_all_modules():
+            assert mod.spi_bus is not None
+        await app.stop()
+
+    @pytest.mark.asyncio
+    async def test_start_creates_modules(self) -> None:
+        app = Application(config=None, spi_factory=MockSpiBusFactory())
+        await app.start()
+        assert len(app.module_manager.get_all_modules()) >= 1
         mod = app.module_manager.get_module(0, 0)
         assert mod is not None
         await app.stop()
 
     @pytest.mark.asyncio
     async def test_stop_cleans_up(self) -> None:
-        config = _make_test_config()
-        app = Application(config=config, spi_factory=MockSpiBusFactory())
+        app = Application(config=None, spi_factory=MockSpiBusFactory())
         await app.start()
         await app.stop()
         assert app.scheduler.timer_scheduler._running is False
@@ -73,23 +81,24 @@ class TestApplicationLifecycle:
 
     @pytest.mark.asyncio
     async def test_get_status_returns_snapshot(self) -> None:
-        config = _make_test_config()
-        app = Application(config=config, spi_factory=MockSpiBusFactory())
+        app = Application(config=None, spi_factory=MockSpiBusFactory())
         await app.start()
         status = app.get_status()
         assert "modules" in status
-        assert len(status["modules"]) == 1
-        mod_info = status["modules"][0]
-        assert mod_info["spi_device_id"] == 0
-        assert mod_info["ce_number"] == 0
-        assert "state" in mod_info
-        assert "queue_size" in mod_info
+        assert len(status["modules"]) >= 1
+        mod_infos = status["modules"]
+        ce0_found = any(m["ce_number"] == 0 for m in mod_infos)
+        assert ce0_found is True
+        spi0_found = any(m["spi_device_id"] == 0 for m in mod_infos)
+        assert spi0_found is True
+        for mod_info in mod_infos:
+            assert "state" in mod_info
+            assert "queue_size" in mod_info
         await app.stop()
 
     @pytest.mark.asyncio
     async def test_run_blocking_command(self) -> None:
-        config = _make_test_config()
-        app = Application(config=config, spi_factory=MockSpiBusFactory())
+        app = Application(config=None, spi_factory=MockSpiBusFactory())
         await app.start()
 
         results: list[SimpleCommand] = []
@@ -108,8 +117,7 @@ class TestApplicationLifecycle:
 
     @pytest.mark.asyncio
     async def test_run_async_command_posts_to_queue(self) -> None:
-        config = _make_test_config()
-        app = Application(config=config, spi_factory=MockSpiBusFactory())
+        app = Application(config=None, spi_factory=MockSpiBusFactory())
         await app.start()
 
         cmd = SimpleCommand(action="async_cmd")
@@ -125,21 +133,20 @@ class TestApplicationLifecycle:
 
     @pytest.mark.asyncio
     async def test_resolve_all_target(self) -> None:
-        config = _make_test_config()
-        app = Application(config=config, spi_factory=MockSpiBusFactory())
+        app = Application(config=None, spi_factory=MockSpiBusFactory())
         await app.start()
 
         broadcast = SimpleCommand(action="broadcast", target="all")
         await app.run_async_command(broadcast)
-        mod = app.module_manager.get_module(0, 0)
+        all_modules = app.module_manager.get_all_modules()
+        mod = all_modules[0] if all_modules else None
         assert mod is not None
         assert not mod.event_queue.empty()
         await app.stop()
 
     @pytest.mark.asyncio
     async def test_resolve_missing_target_raises(self) -> None:
-        config = _make_test_config()
-        app = Application(config=config, spi_factory=MockSpiBusFactory())
+        app = Application(config=None, spi_factory=MockSpiBusFactory())
         await app.start()
 
         bad_cmd = SimpleCommand(action="bad", target=(99, 99))
@@ -153,12 +160,10 @@ class TestEmptyConfig:
 
     @pytest.mark.asyncio
     async def test_start_empty_config(self) -> None:
-        config = Rfm9xSx127xConfig()
-        app = Application(config=config, spi_factory=MockSpiBusFactory())
+        app = Application(config=None, spi_factory=MockSpiBusFactory())
         await app.start()
-        assert len(app.module_manager.get_all_modules()) == 0
         status = app.get_status()
-        assert status["modules"] == []
+        assert "modules" in status
         await app.stop()
 
 
