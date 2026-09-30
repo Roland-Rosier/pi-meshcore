@@ -752,3 +752,17 @@ For each of the phases (Phase 1 to Phase 4), sequentially launch a sub-agent to 
 Only run one sub-agent at a time.
 
 Perform no other tasks
+
+----
+
+Context:
+* An architect has provided a multi-phase plan to fix some secondary findings associated with changes on a branch. That plan is in `.plans/2026_09_30_pass_osc_freq_fixes_after_impl_review-2.md`.
+
+Tasks:
+* Create a sub-agent to read the codebase and documentation and report a summary to you.
+* For each phase in the plan, create a sub-agent to implement the fix.
+* Ensure that the final, validation phase is completed after all other phases.
+
+Constraints:
+* Only run one sub-agent at a time.
+* Perform no other tasks.

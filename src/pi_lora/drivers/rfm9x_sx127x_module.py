@@ -23,7 +23,7 @@ using a shared ``state_instances`` dictionary to avoid redundant object creation
 import asyncio
 from contextlib import suppress
 
-from .rfm9x_sx127x_handler import Rfm9xSx127xHandler
+from .rfm9x_sx127x_handler import FrequencyCalculationConfig, Rfm9xSx127xHandler
 from .rfm9x_sx127x_modes import (
     LoraMode,
     ModeBits,
@@ -144,8 +144,6 @@ class Rfm9xSx127xModule:
         if self.current_state_instance is not None:
             mode_bits = type(self.current_state_instance).MODE_BITS
             if mode_bits in (ModeBits.SLEEP_OR_ERROR_OR_NOT_A_DEVICE_OR_UNKNOWN_OR_RESET, ModeBits.STANDBY):
-                from .rfm9x_sx127x_handler import FrequencyCalculationConfig
-
                 freq_config = FrequencyCalculationConfig(
                     osc_freq_hz=self.radio_config.osc_freq_hz
                 )
@@ -165,9 +163,11 @@ class Rfm9xSx127xModule:
         return self.event_queue.qsize()
 
     def get_spi_device_id(self) -> int:
+        """Return the SPI device ID (always ``int``, never ``None``)."""
         return self.radio_config.spi_device_id
 
     def get_ce_number(self) -> int:
+        """Return the CE number (always ``int``, never ``None``)."""
         return self.radio_config.ce_number
 
     # Event loop control

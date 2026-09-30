@@ -20,6 +20,7 @@ frequency calculations, writes, and verifications against SPI driver registers.
 
 from __future__ import annotations
 
+import logging
 from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
@@ -120,12 +121,10 @@ class Rfm9xSx127xHandler:
         """
         osc_freq: int = freq_config.osc_freq_hz if freq_config.osc_freq_hz is not None else 32_000_000
         if freq_config.osc_freq_hz is None:
-            import logging
             logging.getLogger(__name__).warning(
-                "osc_freq_hz not configured; defaulting to 32 MHz"
+                "%s", "osc_freq_hz not configured; defaulting to 32 MHz"
             )
-        fstep: float = osc_freq / 524288  # 2^19 — Hz per frequency register step
-        freq_register_value: int = int((freq_khz * 1_000) / fstep)
+        freq_register_value: int = (freq_khz * 1_000 * 524288) // osc_freq
         lsb: int = freq_register_value & 0xFF
         mid: int = (freq_register_value & 0xFF00) >> 8
         msb: int = (freq_register_value & 0xFF0000) >> 16

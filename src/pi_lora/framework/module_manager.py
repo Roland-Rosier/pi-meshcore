@@ -61,15 +61,16 @@ class ModuleManager:
 
             # Extract GPIO pins from DIO->GPIO mappings
             gpio_pins: list[int] = []
-            for mapping in radio_config.dio_gpio_mappings:
-                parts = mapping.split(":")
-                if len(parts) == 2:
-                    gpio_str = parts[1]
-                    for prefix in ("GPIO", "WPi"):
-                        if gpio_str.startswith(prefix):
-                            with suppress(ValueError):
-                                gpio_pins.append(int(gpio_str[len(prefix):]))
-                            break
+            if radio_config.dio_gpio_mappings:
+                for mapping in radio_config.dio_gpio_mappings:
+                    parts = mapping.split(":")
+                    if len(parts) == 2:
+                        gpio_str = parts[1]
+                        for prefix in ("GPIO", "WPi"):
+                            if gpio_str.startswith(prefix):
+                                with suppress(ValueError):
+                                    gpio_pins.append(int(gpio_str[len(prefix):]))
+                                break
 
             scheduler.register_module(
                 module,
@@ -79,6 +80,11 @@ class ModuleManager:
             )
 
             device_key: DeviceIdentity = radio_config.device_id_key
+            if device_key in self.modules_by_id:
+                import logging
+                logging.getLogger(__name__).warning(
+                    "Duplicate DeviceIdentity %s in config; overwriting previous module", device_key
+                )
             self.modules_by_id[device_key] = module
             self.modules.append(module)
 
