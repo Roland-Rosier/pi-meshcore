@@ -16,7 +16,11 @@
 
 from dataclasses import dataclass
 from enum import Enum
-from typing import Any, Protocol
+from typing import Any, Generic, Protocol, TypeGuard, TypeVar
+
+from ..types import StateBits
+
+T = TypeVar('T')
 
 
 class EventType(Enum):
@@ -38,7 +42,7 @@ class StopMode(Enum):
 
 
 @dataclass(frozen=True)
-class ModuleEvent:
+class ModuleEvent(Generic[T]):
     """Base event posted to module event queues."""
 
     event_type: EventType
@@ -72,11 +76,15 @@ class CommandEvent:
 class StateChangeEvent:
     """Payload for STATE_CHANGE events."""
 
-    new_state: Any
-    reason: str = ""
+    new_state: StateBits
+    reason: str
 
 
 class EventHandler(Protocol):
     """Protocol for objects that handle ModuleEvent instances."""
 
-    async def on_event(self, event: ModuleEvent) -> None: ...
+    async def on_event(self, event: ModuleEvent) -> None: ...  # type: ignore[type-arg]
+
+
+def is_state_change_event(event: ModuleEvent) -> TypeGuard[ModuleEvent[StateChangeEvent]]:  # type: ignore[type-arg]
+    return event.event_type == EventType.STATE_CHANGE

@@ -18,9 +18,9 @@ from __future__ import annotations
 
 import asyncio  # noqa: F401
 from collections.abc import Callable
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING as _TC, Any  # noqa: F401
 
-if TYPE_CHECKING:
+if _TC:  # noqa: F821
     from .module_manager import ModuleManager  # noqa: F401
 
 
@@ -72,7 +72,7 @@ class CommandBus:
         module = self._module_resolver(command)
         from .events import CommandEvent, EventType, ModuleEvent
 
-        event = ModuleEvent(
+        event: ModuleEvent[CommandEvent] = ModuleEvent(
             event_type=EventType.COMMAND,
             payload=CommandEvent(command),
         )

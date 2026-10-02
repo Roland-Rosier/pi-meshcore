@@ -11,3 +11,9 @@
 # WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 # see the License for the specific language governing permissions and
 # limitations under the License.
+
+from .check_hardware import app as check_hardware_app
+from .config import app as config_app
+from .test import app as test_app
+
+__all__ = ["check_hardware_app", "config_app", "test_app"]

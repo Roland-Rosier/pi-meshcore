@@ -21,20 +21,26 @@ using a shared ``state_instances`` dictionary to avoid redundant object creation
 
 
 import asyncio
+from collections import defaultdict, deque
+from collections.abc import Callable
 from contextlib import suppress
+from dataclasses import dataclass
 
 from .rfm9x_sx127x_handler import FrequencyCalculationConfig, Rfm9xSx127xHandler
-from .rfm9x_sx127x_modes import (
-    LoraMode,
-    ModeBits,
-    Rfm9xSx127xMode,
-    StateBits,
-    StateBitsMapping,
-)
+from .rfm9x_sx127x_modes import Rfm9xSx127xMode, StateBitsMapping
 from .rfm9x_sx127x_radio_instance import RadioInstanceConfig
 from .spi.bus import SpiBus
 from .spi.factory import SpiBusFactory
-from ..framework.events import ModuleEvent, StopMode
+from ..framework.events import EventType, ModuleEvent, StopMode, is_state_change_event
+from ..types import LoraMode, ModeBits, StateBits
+
+
+@dataclass
+class _EventWaiter:
+    predicate: Callable[[ModuleEvent], bool]  # type: ignore[type-arg]
+    event: asyncio.Event
+    result: ModuleEvent | None = None  # type: ignore[type-arg]
+    cancelled: bool = False
 
 
 class Rfm9xSx127xModule:
@@ -62,10 +68,14 @@ class Rfm9xSx127xModule:
         )
 
         # Event loop infrastructure
-        self.event_queue: asyncio.Queue[ModuleEvent] = asyncio.Queue()
+        self.event_queue: asyncio.Queue[ModuleEvent] = asyncio.Queue()  # type: ignore[type-arg]
         self.event_loop_task: asyncio.Task[None] | None = None
         self._stop_mode: StopMode = StopMode.DRAIN
         self._paused: bool = False
+        self._event_buffer: dict[EventType, deque[ModuleEvent]] = defaultdict(  # type: ignore[type-arg]
+            lambda: deque(maxlen=1000)
+        )
+        self._event_waiters: dict[EventType, list[_EventWaiter]] = defaultdict(list)
 
     # ------------------------------------------------------------------
     # Internal helpers
@@ -206,8 +216,23 @@ class Rfm9xSx127xModule:
                     await asyncio.sleep(0.01)  # Brief sleep while paused
                     continue
                 event = await self.event_queue.get()
+
+                # Intercept STATE_CHANGE at module level
+                if event.event_type == EventType.STATE_CHANGE and is_state_change_event(event):
+                    new_state: StateBits = event.payload.new_state
+                    self.set_current_state(new_state)
+
                 if self.current_state_instance is not None:
                     await self.current_state_instance.on_event(event)
+
+                # Buffer all events for waiters
+                self._event_buffer[event.event_type].append(event)
+
+                # Notify waiters atomically
+                for waiter in self._event_waiters[event.event_type]:
+                    if not waiter.cancelled and waiter.predicate(event):
+                        waiter.result = event
+                        waiter.event.set()
         except asyncio.CancelledError:
             if self._stop_mode == StopMode.DRAIN:
                 while not self.event_queue.empty():
@@ -218,3 +243,27 @@ class Rfm9xSx127xModule:
                     except Exception:
                         break
             raise
+
+    async def wait_for_event(
+        self,
+        event_type: EventType,
+        predicate: Callable[[ModuleEvent], bool] | None = None,  # type: ignore[type-arg]
+        timeout: float = 5.0,
+    ) -> ModuleEvent | None:  # type: ignore[type-arg]
+        """Wait for an event matching predicate, with timeout. Race-free implementation."""
+        waiter = _EventWaiter(
+            predicate=predicate or (lambda _: True),
+            event=asyncio.Event(),
+        )
+        self._event_waiters[event_type].append(waiter)
+
+        try:
+            try:
+                await asyncio.wait_for(waiter.event.wait(), timeout=timeout)
+            except asyncio.TimeoutError:
+                return None
+            return waiter.result
+        finally:
+            # Clean up waiter from registry to prevent memory leak
+            with suppress(ValueError):
+                self._event_waiters[event_type].remove(waiter)

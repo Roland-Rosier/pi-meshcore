@@ -15,6 +15,7 @@
 """Unit tests for framework event dataclasses and enums."""
 
 import pytest
+from src.pi_lora.drivers.rfm9x_sx127x_modes import StateBits
 from src.pi_lora.framework.events import (
     CommandEvent,
     EventType,
@@ -115,11 +116,11 @@ class TestStateChangeEvent:
     """Verify StateChangeEvent dataclass."""
 
     def test_creation_with_reason(self) -> None:
-        event = StateChangeEvent(new_state="LORA", reason="transition")
-        assert event.new_state == "LORA"
+        event = StateChangeEvent(new_state=StateBits.LORA_FSTX, reason="transition")
+        assert event.new_state == StateBits.LORA_FSTX
         assert event.reason == "transition"
 
-    def test_creation_without_reason(self) -> None:
-        event = StateChangeEvent(new_state="SLEEP")
-        assert event.new_state == "SLEEP"
-        assert event.reason == ""
+    def test_creation_with_default_reason(self) -> None:
+        event = StateChangeEvent(new_state=StateBits.LORA_SLEEP, reason="test")
+        assert event.new_state == StateBits.LORA_SLEEP
+        assert event.reason == "test"

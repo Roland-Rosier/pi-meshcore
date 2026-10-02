@@ -130,6 +130,7 @@ dev = [
 [project.scripts]
 check-hardware = "pi_lora.cli.check_hardware:app"
 config = "pi_lora.cli.config:app"
+test = "pi_lora.cli.test:app"
 
 # No ASGI application module yet — web interface not implemented
 
@@ -236,6 +237,10 @@ disable_error_code = ["import-untyped"]
 [[tool.mypy.overrides]]
 module = ["src.pi_lora.framework.application"]
 disable_error_code = ["no-any-return", "unused-ignore"]
+
+[[tool.mypy.overrides]]
+module = ["pi_lora.types", "pi_lora.framework.events", "pi_lora.cli.test"]
+ignore_missing_imports = true
 
 # -----------------------------------------------------------------------------
 # ruff configuration (linting)
