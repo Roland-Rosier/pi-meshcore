@@ -25,11 +25,16 @@ Bit layout of RegOpMode:
   - Bit 7: LoRa mode flag (0x80 = LoRa, 0x00 = FSK/OOK)
 """
 
+import logging
 from enum import Enum, IntFlag
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
-from ..framework.events import ModuleEvent
+if TYPE_CHECKING:
+    from ..framework.events import ModuleEvent
+
 from ..types import LoraMode, MetaModeBits, ModeBits, StateBits
+
+logger = logging.getLogger(__name__)
 
 __all__: list[str] = [
     "RegisterLayout",
@@ -413,13 +418,13 @@ class Rfm9xSx127xMode(metaclass=_ConstantsMeta):
 
     def on_entry(self) -> None:
         """Called when the device is entered into this mode."""
-        print(f"Entering state: {type(self).__name__}")
+        logger.info("Entering state: %s", type(self).__name__)
 
     def on_exit(self) -> None:
         """Called when the device is exited from this mode."""
-        print(f"Exiting state: {type(self).__name__}")
+        logger.info("Exiting state: %s", type(self).__name__)
 
-    async def on_event(self, event: ModuleEvent) -> None:  # type: ignore[type-arg]
+    async def on_event(self, event: "ModuleEvent") -> None:  # type: ignore[type-arg]
         """Default no-op handler. Concrete states override."""
         pass
 
@@ -458,7 +463,7 @@ class ResetState(Rfm9xSx127xMode):
     class _Constants(Enum):
         STATE_BITS = StateBits.RESET_STATE
 
-    async def on_event(self, event: ModuleEvent) -> None:  # type: ignore[type-arg]
+    async def on_event(self, event: "ModuleEvent") -> None:  # type: ignore[type-arg]
         raise NotImplementedError("ResetState.on_event not implemented")
 
     async def on_jiffy(self) -> None:

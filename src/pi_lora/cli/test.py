@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import logging
+import os
 from pathlib import Path
 
 import typer
@@ -20,6 +22,13 @@ from pi_lora.framework.exceptions import (
     DeviceAttachmentNotFoundError,
 )
 from pi_lora.types import StateBits
+
+# Configure logging using environment variable
+_log_level = os.environ.get("PI_LORA_LOG_LEVEL", "WARNING").upper()
+logging.basicConfig(
+    level=getattr(logging, _log_level, logging.WARNING),
+    format="%(asctime)s %(levelname)s %(name)s: %(message)s",
+)
 
 app = typer.Typer(
     name="test",
@@ -63,7 +72,18 @@ async def test_hardware(
         raise typer.Exit(code=1)
 
     # Start application (creates modules, starts event loops, registers scheduler)
-    await application.start()
+    try:
+        await application.start(assembly_name=assembly_name)
+    except AssemblyNotFoundError as e:
+        console.print(f"[red]Error:[/red] {e}")
+        raise typer.Exit(code=1) from None
+    except DeviceAttachmentNotFoundError as e:
+        console.print(f"[red]Error:[/red] {e}")
+        raise typer.Exit(code=1) from None
+    except Exception as e:
+        console.print(f"[red]Error:[/red] Failed to start application: {e}")
+        await application.stop()
+        raise typer.Exit(code=1) from None
 
     try:
         # Filter to target modules

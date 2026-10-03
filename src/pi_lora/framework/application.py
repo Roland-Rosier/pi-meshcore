@@ -22,6 +22,7 @@ from typing import TYPE_CHECKING, Any, cast
 
 if TYPE_CHECKING:
     from ..drivers.rfm9x_sx127x_config_model import Rfm9xSx127xConfig  # noqa: F401
+    from ..drivers.rfm9x_sx127x_module import Rfm9xSx127xModule  # noqa: F401
 
 from .command_bus import CommandBus
 from .events import StopMode
@@ -52,17 +53,21 @@ class Application:
             self.spi_factory = RealSpiBusFactory()
         self._config: "Rfm9xSx127xConfig | None" = None
         self._config_path: Path | None = None
+        self._started_modules: list[Rfm9xSx127xModule] = []
+        self._scheduler_started: bool = False
 
-    async def start(self) -> None:
+    async def start(self, assembly_name: str = "default") -> None:
         """Initialize the application: load modules, register scheduler, start loops."""
-        assembly_result = self.get_assembly_config("default")
+        assembly_result = self.get_assembly_config(assembly_name)
         radio_configs: list[RadioInstanceConfig] = assembly_result if isinstance(assembly_result, list) else [assembly_result]
         self.module_manager.load_from_config(radio_configs, self.scheduler, self.spi_factory)
         self.command_bus.set_module_resolver(self._resolve_module_for_command)
         await self.scheduler.start()
+        self._scheduler_started = True
         for module in self.module_manager.get_all_modules():
             await module.init_spi_bus()  # Initialize SPI bus
             await module.start_event_loop()
+            self._started_modules.append(module)
 
     async def stop(self) -> None:
         """Gracefully stop all modules and the scheduler."""
@@ -70,6 +75,16 @@ class Application:
             await module.stop_event_loop(StopMode.DRAIN)
             await module.close_spi()
         await self.scheduler.stop()
+
+    async def _cleanup_partial_start(self) -> None:
+        """Mirror stop() for partially-started modules on failure."""
+        for module in self._started_modules:
+            await module.stop_event_loop(StopMode.DRAIN)
+            await module.close_spi()
+        if self._scheduler_started:
+            await self.scheduler.stop()
+        self._started_modules.clear()
+        self._scheduler_started = False
 
     async def run_blocking_command(self, cmd: Any) -> Any:
         """Execute *cmd* synchronously via CommandBus.execute()."""

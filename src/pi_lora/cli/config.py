@@ -17,6 +17,8 @@
 from __future__ import annotations
 
 import json
+import logging
+import os
 import sys
 from typing import Any
 
@@ -29,6 +31,13 @@ from pi_lora.framework.application import Application
 from pi_lora.framework.exceptions import (
     AssemblyNotFoundError,
     DeviceAttachmentNotFoundError,
+)
+
+# Configure logging using environment variable
+_log_level = os.environ.get("PI_LORA_LOG_LEVEL", "WARNING").upper()
+logging.basicConfig(
+    level=getattr(logging, _log_level, logging.WARNING),
+    format="%(asctime)s %(levelname)s %(name)s: %(message)s",
 )
 
 app = typer.Typer(

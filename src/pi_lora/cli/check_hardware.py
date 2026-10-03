@@ -28,6 +28,15 @@ if project_root not in sys.path:
     sys.path.append(project_root)
     print(f"✅ Added project root to sys.path: {project_root}")
 
+import logging
+
+# Configure logging using environment variable
+_log_level = os.environ.get("PI_LORA_LOG_LEVEL", "WARNING").upper()
+logging.basicConfig(
+    level=getattr(logging, _log_level, logging.WARNING),
+    format="%(asctime)s %(levelname)s %(name)s: %(message)s",
+)
+
 from pi_lora.drivers.lora_detection import LoRaModuleDetector
 
 

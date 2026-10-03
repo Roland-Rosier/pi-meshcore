@@ -128,6 +128,7 @@ dev = [
 # CLI entry points
 # -----------------------------------------------------------------------------
 [project.scripts]
+pi_lora = "pi_lora.cli.main:app"
 check-hardware = "pi_lora.cli.check_hardware:app"
 config = "pi_lora.cli.config:app"
 test = "pi_lora.cli.test:app"

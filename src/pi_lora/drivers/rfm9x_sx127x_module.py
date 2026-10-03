@@ -25,6 +25,7 @@ from collections import defaultdict, deque
 from collections.abc import Callable
 from contextlib import suppress
 from dataclasses import dataclass
+from typing import Any
 
 from .rfm9x_sx127x_handler import FrequencyCalculationConfig, Rfm9xSx127xHandler
 from .rfm9x_sx127x_modes import Rfm9xSx127xMode, StateBitsMapping
@@ -37,9 +38,9 @@ from ..types import LoraMode, ModeBits, StateBits
 
 @dataclass
 class _EventWaiter:
-    predicate: Callable[[ModuleEvent], bool]  # type: ignore[type-arg]
+    predicate: Callable[[ModuleEvent[Any]], bool]
     event: asyncio.Event
-    result: ModuleEvent | None = None  # type: ignore[type-arg]
+    result: ModuleEvent[Any] | None = None
     cancelled: bool = False
 
 
@@ -68,11 +69,11 @@ class Rfm9xSx127xModule:
         )
 
         # Event loop infrastructure
-        self.event_queue: asyncio.Queue[ModuleEvent] = asyncio.Queue()  # type: ignore[type-arg]
+        self.event_queue: asyncio.Queue[ModuleEvent[Any]] = asyncio.Queue()
         self.event_loop_task: asyncio.Task[None] | None = None
         self._stop_mode: StopMode = StopMode.DRAIN
         self._paused: bool = False
-        self._event_buffer: dict[EventType, deque[ModuleEvent]] = defaultdict(  # type: ignore[type-arg]
+        self._event_buffer: dict[EventType, deque[ModuleEvent[Any]]] = defaultdict(
             lambda: deque(maxlen=1000)
         )
         self._event_waiters: dict[EventType, list[_EventWaiter]] = defaultdict(list)
@@ -219,7 +220,7 @@ class Rfm9xSx127xModule:
 
                 # Intercept STATE_CHANGE at module level
                 if event.event_type == EventType.STATE_CHANGE and is_state_change_event(event):
-                    new_state: StateBits = event.payload.new_state
+                    new_state: StateBits = event.payload.new_state if event.payload is not None else StateBits.UNDEFINED_STATE
                     self.set_current_state(new_state)
 
                 if self.current_state_instance is not None:
@@ -247,9 +248,9 @@ class Rfm9xSx127xModule:
     async def wait_for_event(
         self,
         event_type: EventType,
-        predicate: Callable[[ModuleEvent], bool] | None = None,  # type: ignore[type-arg]
+        predicate: Callable[[ModuleEvent[Any]], bool] | None = None,
         timeout: float = 5.0,
-    ) -> ModuleEvent | None:  # type: ignore[type-arg]
+    ) -> ModuleEvent[Any] | None:
         """Wait for an event matching predicate, with timeout. Race-free implementation."""
         waiter = _EventWaiter(
             predicate=predicate or (lambda _: True),
@@ -267,3 +268,21 @@ class Rfm9xSx127xModule:
             # Clean up waiter from registry to prevent memory leak
             with suppress(ValueError):
                 self._event_waiters[event_type].remove(waiter)
+
+    def drain_events(self, event_type: EventType) -> list[ModuleEvent[Any]]:
+        """Return and clear all buffered events of the given type."""
+        events = list(self._event_buffer[event_type])
+        self._event_buffer[event_type].clear()
+        return events
+
+    def get_event_history(self, event_type: EventType, limit: int | None = None) -> list[ModuleEvent[Any]]:
+        """Return a copy of recent events of the given type, up to limit."""
+        buffer = self._event_buffer[event_type]
+        if limit is None or limit >= len(buffer):
+            return list(buffer)
+        return list(buffer)[-limit:]
+
+    def get_last_event(self, event_type: EventType) -> ModuleEvent[Any] | None:
+        """Return the most recent event of the given type, or None if empty."""
+        buffer = self._event_buffer[event_type]
+        return buffer[-1] if buffer else None

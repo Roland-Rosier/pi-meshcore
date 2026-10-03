@@ -46,7 +46,7 @@ class ModuleEvent(Generic[T]):
     """Base event posted to module event queues."""
 
     event_type: EventType
-    payload: Any = None
+    payload: T | None = None
     timestamp: float = 0.0
     source: str = ""
 
@@ -83,8 +83,8 @@ class StateChangeEvent:
 class EventHandler(Protocol):
     """Protocol for objects that handle ModuleEvent instances."""
 
-    async def on_event(self, event: ModuleEvent) -> None: ...  # type: ignore[type-arg]
+    async def on_event(self, event: ModuleEvent[T]) -> None: ...
 
 
-def is_state_change_event(event: ModuleEvent) -> TypeGuard[ModuleEvent[StateChangeEvent]]:  # type: ignore[type-arg]
+def is_state_change_event(event: ModuleEvent[Any]) -> TypeGuard[ModuleEvent[StateChangeEvent]]:
     return event.event_type == EventType.STATE_CHANGE
