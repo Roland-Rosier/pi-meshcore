@@ -58,16 +58,22 @@ class Application:
 
     async def start(self, assembly_name: str = "default") -> None:
         """Initialize the application: load modules, register scheduler, start loops."""
-        assembly_result = self.get_assembly_config(assembly_name)
-        radio_configs: list[RadioInstanceConfig] = assembly_result if isinstance(assembly_result, list) else [assembly_result]
-        self.module_manager.load_from_config(radio_configs, self.scheduler, self.spi_factory)
-        self.command_bus.set_module_resolver(self._resolve_module_for_command)
-        await self.scheduler.start()
-        self._scheduler_started = True
-        for module in self.module_manager.get_all_modules():
-            await module.init_spi_bus()  # Initialize SPI bus
-            await module.start_event_loop()
-            self._started_modules.append(module)
+        self._started_modules = []
+        self._scheduler_started = False
+        try:
+            assembly_result = self.get_assembly_config(assembly_name)
+            radio_configs: list[RadioInstanceConfig] = assembly_result if isinstance(assembly_result, list) else [assembly_result]
+            self.module_manager.load_from_config(radio_configs, self.scheduler, self.spi_factory)
+            self.command_bus.set_module_resolver(self._resolve_module_for_command)
+            await self.scheduler.start()
+            self._scheduler_started = True
+            for module in self.module_manager.get_all_modules():
+                await module.init_spi_bus()  # Initialize SPI bus
+                await module.start_event_loop()
+                self._started_modules.append(module)
+        except Exception:
+            await self._cleanup_partial_start()
+            raise
 
     async def stop(self) -> None:
         """Gracefully stop all modules and the scheduler."""
@@ -75,6 +81,8 @@ class Application:
             await module.stop_event_loop(StopMode.DRAIN)
             await module.close_spi()
         await self.scheduler.stop()
+        self._started_modules.clear()
+        self._scheduler_started = False
 
     async def _cleanup_partial_start(self) -> None:
         """Mirror stop() for partially-started modules on failure."""

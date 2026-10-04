@@ -80,7 +80,7 @@ class StateChangeEvent:
     reason: str
 
 
-class EventHandler(Protocol):
+class EventHandler(Generic[T], Protocol):
     """Protocol for objects that handle ModuleEvent instances."""
 
     async def on_event(self, event: ModuleEvent[T]) -> None: ...

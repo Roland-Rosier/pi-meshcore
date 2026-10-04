@@ -424,7 +424,7 @@ class Rfm9xSx127xMode(metaclass=_ConstantsMeta):
         """Called when the device is exited from this mode."""
         logger.info("Exiting state: %s", type(self).__name__)
 
-    async def on_event(self, event: "ModuleEvent") -> None:  # type: ignore[type-arg]
+    async def on_event(self, event: "ModuleEvent[Any]") -> None:
         """Default no-op handler. Concrete states override."""
         pass
 
@@ -463,7 +463,7 @@ class ResetState(Rfm9xSx127xMode):
     class _Constants(Enum):
         STATE_BITS = StateBits.RESET_STATE
 
-    async def on_event(self, event: "ModuleEvent") -> None:  # type: ignore[type-arg]
+    async def on_event(self, event: "ModuleEvent[Any]") -> None:
         raise NotImplementedError("ResetState.on_event not implemented")
 
     async def on_jiffy(self) -> None:
