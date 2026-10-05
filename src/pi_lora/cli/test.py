@@ -23,6 +23,7 @@ from pi_lora.framework.exceptions import (
 )
 from pi_lora.types import StateBits
 
+
 def _ensure_logged() -> None:
     from .main import setup_logging
     setup_logging()
@@ -104,7 +105,7 @@ async def test_hardware_impl(
         for module in modules:
             event = await module.wait_for_event(
                 EventType.STATE_CHANGE,
-                lambda e: is_state_change_event(e) and e.payload.new_state == StateBits.RESET_STATE,
+                lambda e: is_state_change_event(e) and e.payload is not None and e.payload.new_state == StateBits.RESET_STATE,
                 timeout=5.0,
             )
             if event is None:

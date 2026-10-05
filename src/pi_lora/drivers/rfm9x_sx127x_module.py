@@ -28,8 +28,6 @@ from contextlib import suppress
 from dataclasses import dataclass
 from typing import Any
 
-logger = logging.getLogger(__name__)
-
 from .rfm9x_sx127x_handler import FrequencyCalculationConfig, Rfm9xSx127xHandler
 from .rfm9x_sx127x_modes import Rfm9xSx127xMode, StateBitsMapping
 from .rfm9x_sx127x_radio_instance import RadioInstanceConfig
@@ -37,6 +35,8 @@ from .spi.bus import SpiBus
 from .spi.factory import SpiBusFactory
 from ..framework.events import EventType, ModuleEvent, StopMode, is_state_change_event
 from ..types import LoraMode, ModeBits, StateBits
+
+logger = logging.getLogger(__name__)
 
 
 @dataclass
@@ -261,9 +261,13 @@ class Rfm9xSx127xModule:
         check_pred = predicate or (lambda _: True)
 
         # Replay check: return buffered events that already match (race-free: nothing else runs between check and registration)
-        for ev in reversed(self._event_buffer.get(event_type, ())):
-            if check_pred(ev):
-                return ev
+        buffered = self._event_buffer.get(event_type)
+        if buffered is not None:
+            events: list[ModuleEvent[Any]] = list(buffered)
+            for ev in reversed(events):
+                if check_pred(ev):
+                    found: ModuleEvent[Any] = ev
+                    return found
 
         # No match yet — register and wait
         waiter = _EventWaiter(

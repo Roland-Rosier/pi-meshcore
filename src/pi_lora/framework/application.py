@@ -18,7 +18,7 @@ from __future__ import annotations
 
 import asyncio  # noqa: F401
 from pathlib import Path
-from typing import TYPE_CHECKING, Any, cast
+from typing import TYPE_CHECKING, Any
 
 if TYPE_CHECKING:
     from ..drivers.rfm9x_sx127x_config_model import Rfm9xSx127xConfig  # noqa: F401
@@ -147,7 +147,7 @@ class Application:
         if self._config is not None:
             return self._config
 
-        config = cast("Rfm9xSx127xConfig", get_preloaded_config())
+        config = get_preloaded_config()
         self._config = config
         return config
 
@@ -160,7 +160,7 @@ class Application:
         Returns:
             The reloaded Rfm9xSx127xConfig instance.
         """
-        config = cast("Rfm9xSx127xConfig", get_preloaded_config(force_reload=True, config_path=config_path))
+        config = get_preloaded_config(force_reload=True, config_path=config_path)
         self._config_path = config_path
         self._config = config
         return config

@@ -21,7 +21,7 @@ from collections.abc import Callable
 from typing import TYPE_CHECKING, Any
 
 if TYPE_CHECKING:
-    from .module_manager import ModuleManager
+    from .module_manager import ModuleManager  # noqa: F401
 
 
 class CommandBus:

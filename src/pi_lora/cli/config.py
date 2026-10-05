@@ -31,6 +31,7 @@ from pi_lora.framework.exceptions import (
     DeviceAttachmentNotFoundError,
 )
 
+
 def _ensure_logged() -> None:
     from .main import setup_logging
     setup_logging()
