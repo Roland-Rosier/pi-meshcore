@@ -28,14 +28,9 @@ if project_root not in sys.path:
     sys.path.append(project_root)
     print(f"✅ Added project root to sys.path: {project_root}")
 
-import logging
-
-# Configure logging using environment variable
-_log_level = os.environ.get("PI_LORA_LOG_LEVEL", "WARNING").upper()
-logging.basicConfig(
-    level=getattr(logging, _log_level, logging.WARNING),
-    format="%(asctime)s %(levelname)s %(name)s: %(message)s",
-)
+def _ensure_logged() -> None:
+    from .main import setup_logging
+    setup_logging()
 
 from pi_lora.drivers.lora_detection import LoRaModuleDetector
 
@@ -128,6 +123,8 @@ def detect_modules(
 @app.callback(invoke_without_command=True)
 def main_callback(ctx: typer.Context) -> None:
     """MeshCore hardware check utility — show help when invoked without subcommand."""
+    _ensure_logged()
+
     if ctx.invoked_subcommand is None:
         typer.echo("Usage: check-hardware [command]")
         typer.echo("Available commands:")

@@ -5,16 +5,24 @@ import os
 
 import typer
 
+
+def setup_logging() -> None:
+    """Configure root logger using PI_LORA_LOG_LEVEL environment variable.
+
+    Safe to call multiple times — basicConfig is idempotent after first call.
+    """
+    log_level = os.environ.get("PI_LORA_LOG_LEVEL", "WARNING").upper()
+    logging.basicConfig(
+        level=getattr(logging, log_level, logging.WARNING),
+        format="%(asctime)s %(levelname)s %(name)s: %(message)s",
+    )
+
+
+setup_logging()
+
 from .check_hardware import app as check_hardware_app
 from .config import app as config_app
 from .test import app as test_app
-
-# Configure logging for CLI entry point
-log_level = os.environ.get("PI_LORA_LOG_LEVEL", "WARNING").upper()
-logging.basicConfig(
-    level=getattr(logging, log_level, logging.WARNING),
-    format="%(asctime)s %(levelname)s %(name)s: %(message)s",
-)
 
 app = typer.Typer(
     name="pi_lora",

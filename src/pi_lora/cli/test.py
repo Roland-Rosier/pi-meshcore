@@ -2,8 +2,7 @@
 
 from __future__ import annotations
 
-import logging
-import os
+import asyncio
 from contextlib import suppress
 from pathlib import Path
 
@@ -24,12 +23,9 @@ from pi_lora.framework.exceptions import (
 )
 from pi_lora.types import StateBits
 
-# Configure logging using environment variable
-_log_level = os.environ.get("PI_LORA_LOG_LEVEL", "WARNING").upper()
-logging.basicConfig(
-    level=getattr(logging, _log_level, logging.WARNING),
-    format="%(asctime)s %(levelname)s %(name)s: %(message)s",
-)
+def _ensure_logged() -> None:
+    from .main import setup_logging
+    setup_logging()
 
 app = typer.Typer(
     name="test",
@@ -39,14 +35,13 @@ app = typer.Typer(
 console = Console()
 
 
-@app.command("hardware")
-async def test_hardware(
-    assembly_name: str = typer.Argument(..., help="Assembly name to test"),
-    spi: int | None = typer.Option(None, "--spi", help="Filter by SPI device ID"),
-    ce: int | None = typer.Option(None, "--ce", help="Filter by CE number"),
-    config_file: str | None = typer.Option(None, "--config", "-c", help="Custom config file path"),
+async def test_hardware_impl(
+    assembly_name: str,
+    spi: int | None = None,
+    ce: int | None = None,
+    config_file: str | None = None,
 ) -> None:
-    """Test hardware by transitioning modules to RESET_STATE."""
+    """Test hardware by transitioning modules to RESET_STATE (async implementation)."""
 
     custom_path: Path | None = Path(config_file) if config_file else None
     application = Application(config=None)
@@ -123,3 +118,26 @@ async def test_hardware(
         await application.stop()
 
     raise typer.Exit(code=0)
+
+
+def test_hardware_sync(
+    assembly_name: str,
+    spi: int | None = None,
+    ce: int | None = None,
+    config_file: str | None = None,
+) -> None:
+    """Sync wrapper for Typer CLI — ensures async function is awaited."""
+    asyncio.run(test_hardware_impl(assembly_name, spi, ce, config_file))
+
+
+@app.command("hardware")
+def test_hardware(
+    assembly_name: str = typer.Argument(..., help="Assembly name to test"),
+    spi: int | None = typer.Option(None, "--spi", help="Filter by SPI device ID"),
+    ce: int | None = typer.Option(None, "--ce", help="Filter by CE number"),
+    config_file: str | None = typer.Option(None, "--config", "-c", help="Custom config file path"),
+) -> None:
+    """Test hardware by transitioning modules to RESET_STATE."""
+    _ensure_logged()
+
+    test_hardware_sync(assembly_name, spi, ce, config_file)

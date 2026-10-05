@@ -281,25 +281,24 @@ class TestStateTransitions:
         modes_logger.setLevel(orig_level)
         assert "Entering" in output or "Exiting" in output
 
-    def test_reset_state_handler_stubs(self) -> None:
-        import asyncio
-
+    @pytest.mark.asyncio
+    async def test_reset_state_handler_stubs(self) -> None:
         from src.pi_lora.drivers.rfm9x_sx127x_modes import ResetState
         from src.pi_lora.framework.events import ModuleEvent
 
         rs = ResetState()
 
-        with pytest.raises(NotImplementedError):
-            asyncio.run(rs.on_event(ModuleEvent(event_type=EventType.TIMER)))
+        # on_event is a no-op by design (event loop must survive dispatch into RESET_STATE)
+        await rs.on_event(ModuleEvent(event_type=EventType.TIMER))
 
         with pytest.raises(NotImplementedError):
-            asyncio.run(rs.on_jiffy())
+            await rs.on_jiffy()
 
         with pytest.raises(NotImplementedError):
-            asyncio.run(rs.on_idle())
+            await rs.on_idle()
 
         with pytest.raises(NotImplementedError):
-            asyncio.run(rs.on_interrupt(gpio_pin=0))
+            await rs.on_interrupt(gpio_pin=0)
 
 
 class TestEventBuffer:

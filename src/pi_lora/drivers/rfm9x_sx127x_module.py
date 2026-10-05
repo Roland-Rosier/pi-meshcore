@@ -21,11 +21,14 @@ using a shared ``state_instances`` dictionary to avoid redundant object creation
 
 
 import asyncio
+import logging
 from collections import defaultdict, deque
 from collections.abc import Callable
 from contextlib import suppress
 from dataclasses import dataclass
 from typing import Any
+
+logger = logging.getLogger(__name__)
 
 from .rfm9x_sx127x_handler import FrequencyCalculationConfig, Rfm9xSx127xHandler
 from .rfm9x_sx127x_modes import Rfm9xSx127xMode, StateBitsMapping
@@ -41,7 +44,6 @@ class _EventWaiter:
     predicate: Callable[[ModuleEvent[Any]], bool]
     event: asyncio.Event
     result: ModuleEvent[Any] | None = None
-    cancelled: bool = False
 
 
 class Rfm9xSx127xModule:
@@ -218,20 +220,24 @@ class Rfm9xSx127xModule:
                     continue
                 event = await self.event_queue.get()
 
-                # Intercept STATE_CHANGE at module level
-                if event.event_type == EventType.STATE_CHANGE and is_state_change_event(event):
-                    new_state: StateBits = event.payload.new_state if event.payload is not None else StateBits.UNDEFINED_STATE
-                    self.set_current_state(new_state)
+                try:
+                    # Intercept STATE_CHANGE at module level
+                    if event.event_type == EventType.STATE_CHANGE and is_state_change_event(event):
+                        new_state: StateBits = event.payload.new_state if event.payload is not None else StateBits.UNDEFINED_STATE
+                        self.set_current_state(new_state)
 
-                if self.current_state_instance is not None:
-                    await self.current_state_instance.on_event(event)
+                    if self.current_state_instance is not None:
+                        await self.current_state_instance.on_event(event)
+                except Exception:
+                    logger.exception("Event dispatch failed for event_type=%s", event.event_type)
+                    raise
 
                 # Buffer all events for waiters
                 self._event_buffer[event.event_type].append(event)
 
                 # Notify waiters atomically
                 for waiter in self._event_waiters[event.event_type]:
-                    if not waiter.cancelled and waiter.predicate(event):
+                    if waiter.predicate(event) and waiter.result is None:
                         waiter.result = event
                         waiter.event.set()
         except asyncio.CancelledError:
@@ -251,9 +257,17 @@ class Rfm9xSx127xModule:
         predicate: Callable[[ModuleEvent[Any]], bool] | None = None,
         timeout: float = 5.0,
     ) -> ModuleEvent[Any] | None:
-        """Wait for an event matching predicate, with timeout. Race-free implementation."""
+        """Wait for an event matching predicate, with timeout. Replays already-buffered events."""
+        check_pred = predicate or (lambda _: True)
+
+        # Replay check: return buffered events that already match (race-free: nothing else runs between check and registration)
+        for ev in reversed(self._event_buffer.get(event_type, ())):
+            if check_pred(ev):
+                return ev
+
+        # No match yet — register and wait
         waiter = _EventWaiter(
-            predicate=predicate or (lambda _: True),
+            predicate=check_pred,
             event=asyncio.Event(),
         )
         self._event_waiters[event_type].append(waiter)
@@ -280,6 +294,8 @@ class Rfm9xSx127xModule:
         buffer = self._event_buffer[event_type]
         if limit is None or limit >= len(buffer):
             return list(buffer)
+        if limit <= 0:
+            return []
         return list(buffer)[-limit:]
 
     def get_last_event(self, event_type: EventType) -> ModuleEvent[Any] | None:

@@ -44,6 +44,26 @@ __all__: list[str] = [
     "LoraMode",
     "Rfm9xSx127xMode",
     "StateBitsMapping",
+    # Concrete state classes (alphabetical)
+    "ErrorState",
+    "FskOokFsrxState",
+    "FskOokFstxState",
+    "FskOokRxState",
+    "FskOokSleepState",
+    "FskOokStandbyState",
+    "FskOokTxState",
+    "LoraCadState",
+    "LoraFsrxState",
+    "LoraFstxState",
+    "LoraRxContinuousState",
+    "LoraRxSingleState",
+    "LoraSleepState",
+    "LoraStandbyState",
+    "LoraTxState",
+    "NotARfm9xSx127xDeviceState",
+    "ResetState",
+    "UndefinedState",
+    "UnknownState",
 ]
 
 
@@ -464,7 +484,11 @@ class ResetState(Rfm9xSx127xMode):
         STATE_BITS = StateBits.RESET_STATE
 
     async def on_event(self, event: "ModuleEvent[Any]") -> None:
-        raise NotImplementedError("ResetState.on_event not implemented")
+        """No-op by design: the event loop must survive dispatch into RESET_STATE.
+
+        Buffering and waiter notification happen only after on_event returns.
+        """
+        pass
 
     async def on_jiffy(self) -> None:
         raise NotImplementedError("ResetState.on_jiffy not implemented")

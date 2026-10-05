@@ -16,12 +16,12 @@
 
 from __future__ import annotations
 
-import asyncio  # noqa: F401
+import asyncio
 from collections.abc import Callable
-from typing import TYPE_CHECKING as _TC, Any  # noqa: F401
+from typing import TYPE_CHECKING, Any
 
-if _TC:  # noqa: F821
-    from .module_manager import ModuleManager  # noqa: F401
+if TYPE_CHECKING:
+    from .module_manager import ModuleManager
 
 
 class CommandBus:

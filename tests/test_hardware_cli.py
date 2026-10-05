@@ -85,19 +85,19 @@ async def _run_hardware(
     mock_application: MagicMock,
     **kwargs: Any,
 ) -> int:
-    """Invoke ``test_hardware`` directly with a mocked Application.
+    """Invoke ``test_hardware_impl`` directly with a mocked Application.
 
     Patches ``pi_lora.cli.test.Application`` (returning ``mock_application``) and
     the module-level ``console`` so rich output is captured into ``capture``.
     Returns the exit code the command produced (0 on success, 1 on error).
 
-    ``test_hardware`` is a Typer-decorated async command, so its default argument
-    values are ``typer.OptionInfo``/``typer.ArgumentInfo`` objects rather than the
-    documented ``None`` defaults. ``typer.testing.CliRunner`` does not await async
-    commands, so the body is exercised by calling the function directly after
-    resolving those defaults to ``None``. ``typer.Exit`` in the current Click
-    version carries no ``code`` attribute, so the exit code is inferred from the
-    captured output (the success message is only printed on a full transition).
+    ``test_hardware`` is a sync Typer wrapper around the ``test_hardware_impl``
+    async implementation, so ``asyncio.run()`` cannot be called from within
+    pytest-asyncio's running event loop. The body is exercised by calling
+    ``test_hardware_impl`` directly after resolving its ``None`` defaults.
+    ``typer.Exit`` in the current Click version carries no ``code`` attribute, so
+    the exit code is inferred from the captured output (the success message is
+    only printed on a full transition).
     """
     resolved: dict[str, Any] = dict(kwargs)
     resolved.setdefault("spi", None)
@@ -107,7 +107,7 @@ async def _run_hardware(
         "pi_lora.cli.test.console", Console(file=capture)
     ):
         try:
-            await _test_cmd.test_hardware(**resolved)
+            await _test_cmd.test_hardware_impl(**resolved)
         except typer.Exit:
             output = capture.getvalue()
             return (
