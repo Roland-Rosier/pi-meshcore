@@ -25,8 +25,9 @@ from pi_lora.types import StateBits
 
 
 def _ensure_logged() -> None:
-    from .main import setup_logging
+    from pi_lora.cli.main import setup_logging
     setup_logging()
+
 
 app = typer.Typer(
     name="test",
@@ -142,3 +143,7 @@ def test_hardware(
     _ensure_logged()
 
     test_hardware_sync(assembly_name, spi, ce, config_file)
+
+
+if __name__ == "__main__":
+    app()

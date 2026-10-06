@@ -28,9 +28,11 @@ if project_root not in sys.path:
     sys.path.append(project_root)
     print(f"✅ Added project root to sys.path: {project_root}")
 
+
 def _ensure_logged() -> None:
-    from .main import setup_logging
+    from pi_lora.cli.main import setup_logging
     setup_logging()
+
 
 from pi_lora.drivers.lora_detection import LoRaModuleDetector
 

@@ -229,8 +229,11 @@ class Rfm9xSx127xModule:
                     if self.current_state_instance is not None:
                         await self.current_state_instance.on_event(event)
                 except Exception:
-                    logger.exception("Event dispatch failed for event_type=%s", event.event_type)
-                    raise
+                    logger.exception(
+                        "Event dispatch failed for event_type=%s; continuing loop",
+                        event.event_type,
+                    )
+                    continue
 
                 # Buffer all events for waiters
                 self._event_buffer[event.event_type].append(event)

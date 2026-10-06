@@ -128,7 +128,7 @@ dev = [
 # CLI entry points
 # -----------------------------------------------------------------------------
 [project.scripts]
-pi_lora = "pi_lora.cli.main:app"
+pi-lora = "pi_lora.cli.main:app"
 check-hardware = "pi_lora.cli.check_hardware:app"
 config = "pi_lora.cli.config:app"
 pi-lora-test = "pi_lora.cli.test:app"
@@ -240,7 +240,6 @@ disable_error_code = ["import-untyped"]
 [[tool.mypy.overrides]]
 module = ["src.pi_lora.framework.application"]
 disable_error_code = ["no-any-return", "unused-ignore"]
-
 
 # -----------------------------------------------------------------------------
 # ruff configuration (linting)

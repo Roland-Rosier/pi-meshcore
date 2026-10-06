@@ -33,8 +33,9 @@ from pi_lora.framework.exceptions import (
 
 
 def _ensure_logged() -> None:
-    from .main import setup_logging
+    from pi_lora.cli.main import setup_logging
     setup_logging()
+
 
 app = typer.Typer(
     name="config",

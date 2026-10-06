@@ -17,6 +17,7 @@
 from __future__ import annotations
 
 import asyncio  # noqa: F401
+import logging
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
@@ -35,6 +36,8 @@ from ..drivers.rfm9x_sx127x_radio_instance import (
     RadioInstanceConfig,
     create_radio_instance,
 )
+
+logger = logging.getLogger(__name__)
 
 
 class Application:
@@ -71,7 +74,7 @@ class Application:
                 await module.init_spi_bus()  # Initialize SPI bus
                 await module.start_event_loop()
                 self._started_modules.append(module)
-        except Exception:
+        except (Exception, asyncio.CancelledError):
             await self._cleanup_partial_start()
             raise
 
@@ -85,12 +88,34 @@ class Application:
         self._scheduler_started = False
 
     async def _cleanup_partial_start(self) -> None:
-        """Mirror stop() for partially-started modules on failure."""
+        """Mirror stop() for partially-started modules on failure.
+
+        Each module is drained and closed independently so that a failure on one
+        module does not prevent the remaining modules (and the scheduler) from
+        being cleaned up.
+        """
         for module in self._started_modules:
-            await module.stop_event_loop(StopMode.DRAIN)
-            await module.close_spi()
+            try:
+                await module.stop_event_loop(StopMode.DRAIN)
+            except Exception:
+                logger.exception(
+                    "stop_event_loop failed for SPI device=%s CE=%s",
+                    module.get_spi_device_id(),
+                    module.get_ce_number(),
+                )
+            try:
+                await module.close_spi()
+            except Exception:
+                logger.exception(
+                    "close_spi failed for SPI device=%s CE=%s",
+                    module.get_spi_device_id(),
+                    module.get_ce_number(),
+                )
         if self._scheduler_started:
-            await self.scheduler.stop()
+            try:
+                await self.scheduler.stop()
+            except Exception:
+                logger.exception("scheduler.stop() failed during cleanup")
         self._started_modules.clear()
         self._scheduler_started = False
 
