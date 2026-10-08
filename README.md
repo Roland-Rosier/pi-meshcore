@@ -174,7 +174,7 @@ uv remove <package-name>
 │       └── 04-use-native-edit-tools.md   # Native file editing tool (single_find_and_replace) rules
 ├── .kilo/                              # Kilo agent configuration directory
 │   ├── agents/
-│   │   ├── architect_reviewer.md     # Architect reviewer agent configuration
+│   │   ├── architectreviewer.md      # Architect reviewer agent configuration
 │   │   ├── repo_analyst.md           # Repository analysis agent configuration
 │   │   └── planner.md                # Custom planner agent configuration (writes to root plan directories)
 │   ├── kilo.jsonc                    # Kilo main configuration file
@@ -228,9 +228,13 @@ uv remove <package-name>
 │   └── trailofbits-semgrep-rules     # External semgrep ruleset
 ├── src/pi_lora/                      # Main source code package
 │   ├── __init__.py                   # Package initialization for pi_lora top-level module
+│   ├── types.py                      # Shared type definitions and protocols
 │   ├── cli/
 │   │   ├── __init__.py               # CLI sub-package initialization
-│   │   └── check_hardware.py         # CLI tool for LoRa hardware detection and status checks
+│   │   ├── check_hardware.py         # CLI tool for LoRa hardware detection and status checks
+│   │   ├── config.py                 # CLI configuration management
+│   │   ├── main.py                   # CLI entry point and command routing
+│   │   └── test.py                   # CLI test utilities
 │   ├── drivers/
 │   │   ├── __init__.py               # Drivers sub-package initialization
 │   │   ├── configs/                    # Driver config subdirectory
@@ -248,9 +252,10 @@ uv remove <package-name>
 │   │   ├── rfm9x_sx127x_config_validator.py  # Config validation for RFM module settings
 │   │   ├── rfm9x_sx127x_handler.py         # High-level handler for RFM95W/RFM98W operations
 │   │   ├── rfm9x_sx127x_modes.py         # RFM95W/RFM98W frequency mode definitions and constants
-│   │   └── rfm9x_sx127x_module.py      # RFM95W/RFM98W radio module abstraction layer
-│   └── framework/                    # Framework infrastructure subpackage
-│       ├── __init__.py               # Framework package init
+│   │   ├── rfm9x_sx127x_module.py        # RFM95W/RFM98W radio module abstraction layer
+│   │   └── rfm9x_sx127x_radio_instance.py  # RFM95W/RFM98W radio instance abstraction
+│   └── framework/                        # Framework infrastructure subpackage
+│       ├── __init__.py                 # Framework package init
 │       ├── README.md                 # Framework infrastructure documentation
 │       ├── application.py            # Application lifecycle management
 │       ├── command_bus.py            # Command dispatch bus
