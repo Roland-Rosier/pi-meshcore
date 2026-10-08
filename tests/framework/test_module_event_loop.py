@@ -107,7 +107,7 @@ class TestEventQueueProcessing:
         await asyncio.sleep(0.1)
         await module.stop_event_loop(StopMode.CANCEL_ALL)
 
-        mock_state.on_event.assert_called_once_with(event)
+        mock_state.on_event.assert_called_once_with(event, module)
 
     @pytest.mark.asyncio
     async def test_process_multiple_events_sequentially(
@@ -183,7 +183,7 @@ class TestPauseResume:
         await asyncio.sleep(0.1)
         await module.stop_event_loop(StopMode.CANCEL_ALL)
 
-        mock_state.on_event.assert_called_once_with(event)
+        mock_state.on_event.assert_called_once_with(event, module)
 
 
 class TestEventWaiters:
@@ -283,22 +283,25 @@ class TestStateTransitions:
 
     @pytest.mark.asyncio
     async def test_reset_state_handler_stubs(self) -> None:
+        from unittest.mock import MagicMock
+
         from src.pi_lora.drivers.rfm9x_sx127x_modes import ResetState
         from src.pi_lora.framework.events import ModuleEvent
 
         rs = ResetState()
+        module = MagicMock()
 
         # on_event is a no-op by design (event loop must survive dispatch into RESET_STATE)
-        await rs.on_event(ModuleEvent(event_type=EventType.TIMER))
+        await rs.on_event(ModuleEvent(event_type=EventType.TIMER), module)
 
         with pytest.raises(NotImplementedError):
-            await rs.on_jiffy()
+            await rs.on_jiffy(module)
 
         with pytest.raises(NotImplementedError):
-            await rs.on_idle()
+            await rs.on_idle(module)
 
         with pytest.raises(NotImplementedError):
-            await rs.on_interrupt(gpio_pin=0)
+            await rs.on_interrupt(gpio_pin=0, module=module)
 
 
 class TestEventBuffer:

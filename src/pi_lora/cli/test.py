@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import asyncio
-from contextlib import suppress
 from pathlib import Path
 
 import typer
@@ -80,8 +79,6 @@ async def test_hardware_impl(
         raise typer.Exit(code=1) from None
     except Exception as e:
         console.print(f"[red]Error:[/red] Failed to start application: {e}")
-        with suppress(Exception):
-            await application._cleanup_partial_start()
         raise typer.Exit(code=1) from None
 
     try:

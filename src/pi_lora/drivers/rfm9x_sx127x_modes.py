@@ -30,6 +30,7 @@ from enum import Enum, IntFlag
 from typing import TYPE_CHECKING, Any
 
 if TYPE_CHECKING:
+    from .rfm9x_sx127x_module import Rfm9xSx127xModule
     from ..framework.events import ModuleEvent
 
 from ..types import LoraMode, MetaModeBits, ModeBits, StateBits
@@ -436,15 +437,25 @@ class Rfm9xSx127xMode(metaclass=_ConstantsMeta):
     class _Constants(Enum):
         STATE_BITS = StateBits.UNDEFINED_STATE
 
-    def on_entry(self) -> None:
+    def on_entry(self, module: "Rfm9xSx127xModule") -> None:
         """Called when the device is entered into this mode."""
-        logger.info("Entering state: %s", type(self).__name__)
+        logger.info(
+            "[SPI:%s CE:%s] Entering state: %s",
+            module.get_spi_device_id(),
+            module.get_ce_number(),
+            type(self).__name__,
+        )
 
-    def on_exit(self) -> None:
+    def on_exit(self, module: "Rfm9xSx127xModule") -> None:
         """Called when the device is exited from this mode."""
-        logger.info("Exiting state: %s", type(self).__name__)
+        logger.info(
+            "[SPI:%s CE:%s] Exiting state: %s",
+            module.get_spi_device_id(),
+            module.get_ce_number(),
+            type(self).__name__,
+        )
 
-    async def on_event(self, event: "ModuleEvent[Any]") -> None:
+    async def on_event(self, event: "ModuleEvent[Any]", module: "Rfm9xSx127xModule") -> None:
         """Default no-op handler. Concrete states override."""
         pass
 
@@ -483,20 +494,20 @@ class ResetState(Rfm9xSx127xMode):
     class _Constants(Enum):
         STATE_BITS = StateBits.RESET_STATE
 
-    async def on_event(self, event: "ModuleEvent[Any]") -> None:
+    async def on_event(self, event: "ModuleEvent[Any]", module: "Rfm9xSx127xModule") -> None:
         """No-op by design: the event loop must survive dispatch into RESET_STATE.
 
         Buffering and waiter notification happen only after on_event returns.
         """
         pass
 
-    async def on_jiffy(self) -> None:
+    async def on_jiffy(self, module: "Rfm9xSx127xModule") -> None:
         raise NotImplementedError("ResetState.on_jiffy not implemented")
 
-    async def on_idle(self) -> None:
+    async def on_idle(self, module: "Rfm9xSx127xModule") -> None:
         raise NotImplementedError("ResetState.on_idle not implemented")
 
-    async def on_interrupt(self, gpio_pin: int) -> None:
+    async def on_interrupt(self, gpio_pin: int, module: "Rfm9xSx127xModule") -> None:
         raise NotImplementedError("ResetState.on_interrupt not implemented")
 
 

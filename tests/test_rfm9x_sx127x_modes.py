@@ -14,6 +14,8 @@
 
 """Tests for RFM9x/SX127x device mode classes."""
 
+from unittest.mock import MagicMock
+
 import pytest
 from src.pi_lora.drivers.rfm9x_sx127x_modes import (
     ErrorState,
@@ -42,6 +44,14 @@ from src.pi_lora.drivers.rfm9x_sx127x_modes import (
     UndefinedState,
     UnknownState,
 )
+
+
+def _make_module() -> MagicMock:
+    """Lightweight mock module exposing the getters used by on_entry/on_exit logging."""
+    module = MagicMock()
+    module.get_spi_device_id.return_value = 0
+    module.get_ce_number.return_value = 0
+    return module
 
 
 class TestRfm9xSx127xMode:
@@ -91,10 +101,11 @@ class TestRfm9xSx127xMode:
 
     def test_on_entry_on_exit(self) -> None:
         mode = UnknownState()
+        module = _make_module()
         assert callable(mode.on_entry)
         assert callable(mode.on_exit)
-        mode.on_entry()
-        mode.on_exit()
+        mode.on_entry(module)
+        mode.on_exit(module)
 
 
 class TestMetaModeBitsExtraction:
@@ -276,15 +287,17 @@ class TestBaseClassBehavior:
 
     def test_base_on_entry_exit_noop(self) -> None:
         mode = Rfm9xSx127xMode()
-        mode.on_entry()
-        mode.on_exit()
+        module = _make_module()
+        mode.on_entry(module)
+        mode.on_exit(module)
 
     def test_subclass_inherits_base_methods(self) -> None:
         state = UnknownState()
+        module = _make_module()
         assert hasattr(state, 'on_entry')
         assert hasattr(state, 'on_exit')
-        state.on_entry()
-        state.on_exit()
+        state.on_entry(module)
+        state.on_exit(module)
 
     def test_all_19_states_exist(self) -> None:
         expected_classes: list[type[Rfm9xSx127xMode]] = [
