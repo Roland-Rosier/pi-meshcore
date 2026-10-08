@@ -72,8 +72,8 @@ class Application:
             self._scheduler_started = True
             for module in self.module_manager.get_all_modules():
                 await module.init_spi_bus()  # Initialize SPI bus
+                self._started_modules.append(module)  # Track after SPI init
                 await module.start_event_loop()
-                self._started_modules.append(module)
         except (Exception, asyncio.CancelledError):
             await self._cleanup_partial_start()
             raise
@@ -97,7 +97,7 @@ class Application:
         for module in self._started_modules:
             try:
                 await module.stop_event_loop(StopMode.DRAIN)
-            except Exception:
+            except (Exception, asyncio.CancelledError):
                 logger.exception(
                     "stop_event_loop failed for SPI device=%s CE=%s",
                     module.get_spi_device_id(),
@@ -105,7 +105,7 @@ class Application:
                 )
             try:
                 await module.close_spi()
-            except Exception:
+            except (Exception, asyncio.CancelledError):
                 logger.exception(
                     "close_spi failed for SPI device=%s CE=%s",
                     module.get_spi_device_id(),
@@ -114,7 +114,7 @@ class Application:
         if self._scheduler_started:
             try:
                 await self.scheduler.stop()
-            except Exception:
+            except (Exception, asyncio.CancelledError):
                 logger.exception("scheduler.stop() failed during cleanup")
         self._started_modules.clear()
         self._scheduler_started = False
@@ -190,7 +190,7 @@ class Application:
         self._config = config
         return config
 
-    def list_assemblies(self, verbose: bool = False) -> list[dict[str, Any]]:
+    def list_assemblies(self, verbose: bool = False, config_path: str | Path | None = None) -> list[dict[str, Any]]:
         """Return list of available assemblies.
 
         Args:
@@ -199,7 +199,8 @@ class Application:
         Returns:
             List of dicts with assembly info.
         """
-        config = self._load_config()
+        resolved_path: Path | None = Path(config_path) if isinstance(config_path, str) else config_path
+        config = self._load_config(resolved_path)
         results: list[dict[str, Any]] = []
         for assembly_name, assembly in config.assemblies.items():
             if verbose:

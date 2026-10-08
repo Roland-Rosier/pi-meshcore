@@ -459,6 +459,15 @@ class Rfm9xSx127xMode(metaclass=_ConstantsMeta):
         """Default no-op handler. Concrete states override."""
         pass
 
+    async def on_jiffy(self, module: "Rfm9xSx127xModule") -> None:
+        raise NotImplementedError(f"{type(self).__name__}.on_jiffy not implemented")
+
+    async def on_idle(self, module: "Rfm9xSx127xModule") -> None:
+        raise NotImplementedError(f"{type(self).__name__}.on_idle not implemented")
+
+    async def on_interrupt(self, gpio_pin: int, module: "Rfm9xSx127xModule") -> None:
+        raise NotImplementedError(f"{type(self).__name__}.on_interrupt not implemented")
+
 
 class ErrorState(Rfm9xSx127xMode):
     """Pseudo-state indicating unrecoverable error (0x10)."""
@@ -497,7 +506,7 @@ class ResetState(Rfm9xSx127xMode):
     async def on_event(self, event: "ModuleEvent[Any]", module: "Rfm9xSx127xModule") -> None:
         """No-op by design: the event loop must survive dispatch into RESET_STATE.
 
-        Buffering and waiter notification happen only after on_event returns.
+        Buffering and waiter notification happen BEFORE this dispatch, so they are not lost even if dispatch fails.
         """
         pass
 

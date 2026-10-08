@@ -78,7 +78,10 @@ async def test_hardware_impl(
         console.print(f"[red]Error:[/red] {e}")
         raise typer.Exit(code=1) from None
     except Exception as e:
-        console.print(f"[red]Error:[/red] Failed to start application: {e}")
+        console.print(f"[red]Error:[/red] Failed to start application: {e!r}")
+        console.print("[red]Traceback:[/red]")
+        import traceback
+        traceback.print_exc()
         raise typer.Exit(code=1) from None
 
     try:
