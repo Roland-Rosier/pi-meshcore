@@ -18,6 +18,7 @@ from __future__ import annotations
 
 import json
 import sys
+from pathlib import Path
 from typing import Any
 
 import typer
@@ -30,6 +31,12 @@ from pi_lora.framework.exceptions import (
     AssemblyNotFoundError,
     DeviceAttachmentNotFoundError,
 )
+
+
+def _ensure_logged() -> None:
+    from pi_lora.cli.main import setup_logging
+    setup_logging()
+
 
 app = typer.Typer(
     name="config",
@@ -102,9 +109,13 @@ def list_assemblies(
 ) -> None:
     """List available assemblies."""
 
+    _ensure_logged()
+
+    custom_path: Path | None = Path(config_file) if config_file else None
+
     application = Application(config=None)
 
-    assemblies = application.list_assemblies(verbose=verbose)
+    assemblies = application.list_assemblies(verbose=verbose, config_path=custom_path)
 
     if json_output:
         typer.echo(json.dumps(assemblies, indent=2))
@@ -135,6 +146,8 @@ def show_config(
     config_file: str | None = typer.Option(None, "--config", "-c", help="Custom config file path"),
 ) -> None:
     """Show configuration for an assembly."""
+    _ensure_logged()
+
     from pathlib import Path
 
     custom_path: Path | None = Path(config_file) if config_file else None

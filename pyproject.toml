@@ -128,8 +128,10 @@ dev = [
 # CLI entry points
 # -----------------------------------------------------------------------------
 [project.scripts]
+pi-lora = "pi_lora.cli.main:app"
 check-hardware = "pi_lora.cli.check_hardware:app"
 config = "pi_lora.cli.config:app"
+pi-lora-test = "pi_lora.cli.test:app"
 
 # No ASGI application module yet — web interface not implemented
 
@@ -187,6 +189,8 @@ warn_redundant_casts = true
 warn_unused_ignores = true
 warn_unreachable = true
 explicit_package_bases = true
+mypy_path = ["src"]
+namespace_packages = true
 
 [[tool.mypy.overrides]]
 module = ["spidev"]
@@ -283,6 +287,7 @@ ignore = [
 
 # Files that intentionally append to sys.path for import resolution on RPi, and tests using bare Exception.
 "src/pi_lora/cli/check_hardware.py" = ["E402", "B008"]
+"src/pi_lora/cli/main.py" = ["E402"]
 "src/pi_lora/drivers/lora_detection.py" = ["E402"]
 "tests/test_lora_module_detection.py" = ["E402", "B017"]
 "tests/framework/test_application.py" = ["B017"]

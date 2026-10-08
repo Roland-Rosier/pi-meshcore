@@ -2,7 +2,7 @@
 slug: repo_analyst
 name: Repo Analyst
 description: Compare actual repo structure against README documentation
-mode: subagent
+mode: all
 ---
 
 # Role

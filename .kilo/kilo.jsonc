@@ -9,7 +9,8 @@
   ],
   "agent": {
     "code": {
-      "model": "local_lm_studio/qwen3.6-27b-a3b-coder",
+      // "model": "local_lm_studio/qwen3.6-27b-a3b-coder",
+      "model": "local_lm_studio/ornith-1.5-27b-a3b-coderx-mtp@4_k_m",
       "temperature": 0.7,
       "instructions": [
         "./kilo/rules/03-act-execution-protocol.md"
@@ -25,10 +26,30 @@
       ]
     },
     "planner": {
-      "model": "kilo/nvidia/nemotron-3-super-120b-a12b:free",
+      "model": "kilo/nvidia/nemotron-3-ultra-120b-a12b:free",
       "temperature": 1.0,
       "instructions": [
         "./kilo/rules/03-plan-execution-protocol.md"
+      ],
+      "permission": {
+        "edit": {
+          ".plans/**/*.md": "allow",      // Directly allows writing/modifying in this directory
+          ".kilo/plans/**/*.md": "allow", // Retains default behaviour
+          "*": "deny"                     // Categorically blocks this agent from editing anything else
+        },
+        "write": {
+          ".plans/**/*.md": "allow",      // Directly allows writing/modifying in this directory
+          ".kilo/plans/**/*.md": "allow", // Retains default behaviour
+          "*": "deny"                     // Categorically blocks this agent from writing anything else
+        }
+      }
+    },
+    "architectreviewer": {
+      // "model": "kilo/nvidia/nemotron-3-super-120b-a12b:free",
+      "model": "kilo/nvidia/nemotron-3-ultra-120b-a12b:free",
+      "temperature": 1.0,
+      "instructions": [
+        "./kilo/rules/03-architect-execution-protocol.md"
       ],
       "permission": {
         "edit": {
@@ -50,5 +71,6 @@
       "command": ["npx", "-y", "@wonderwhy-er/desktop-commander@latest"],
       "enabled": true
     }
-  }
+  },
+  "snapshot": false
 }

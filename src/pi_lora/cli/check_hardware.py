@@ -20,6 +20,12 @@ from typing import Literal, cast
 
 import typer
 
+from pi_lora.drivers.lora_detection import (
+    LoRaModuleConfig,
+    LoRaModuleDetector,
+    ValidationResult,
+)
+
 # Add project root to Python path if not already present
 current_dir = os.path.abspath(os.path.dirname(__file__))
 project_root = os.path.abspath(os.path.join(current_dir, '..', '..'))
@@ -28,7 +34,10 @@ if project_root not in sys.path:
     sys.path.append(project_root)
     print(f"✅ Added project root to sys.path: {project_root}")
 
-from pi_lora.drivers.lora_detection import LoRaModuleDetector
+
+def _ensure_logged() -> None:
+    from pi_lora.cli.main import setup_logging
+    setup_logging()
 
 
 def _normalise_module_type(value: str | None) -> Literal["rfm95w", "rfm98w", "none"] | None:
@@ -93,8 +102,6 @@ def detect_modules(
         print(f"  ✅ {result}")
 
     if ce0 is not None or ce1 is not None:
-        from pi_lora.drivers.lora_detection import LoRaModuleConfig, ValidationResult
-
         config = LoRaModuleConfig(
             ce0_expected_module_type=cast(Literal["rfm95w", "rfm98w", "none"], ce0) if ce0 is not None else None,  # Already normalised by callback
             ce1_expected_module_type=cast(Literal["rfm95w", "rfm98w", "none"], ce1) if ce1 is not None else None,  # Already normalised by callback
@@ -119,6 +126,8 @@ def detect_modules(
 @app.callback(invoke_without_command=True)
 def main_callback(ctx: typer.Context) -> None:
     """MeshCore hardware check utility — show help when invoked without subcommand."""
+    _ensure_logged()
+
     if ctx.invoked_subcommand is None:
         typer.echo("Usage: check-hardware [command]")
         typer.echo("Available commands:")

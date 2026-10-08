@@ -21,20 +21,29 @@ using a shared ``state_instances`` dictionary to avoid redundant object creation
 
 
 import asyncio
+import logging
+from collections import defaultdict, deque
+from collections.abc import Callable
 from contextlib import suppress
+from dataclasses import dataclass
+from typing import Any
 
 from .rfm9x_sx127x_handler import FrequencyCalculationConfig, Rfm9xSx127xHandler
-from .rfm9x_sx127x_modes import (
-    LoraMode,
-    ModeBits,
-    Rfm9xSx127xMode,
-    StateBits,
-    StateBitsMapping,
-)
+from .rfm9x_sx127x_modes import Rfm9xSx127xMode, StateBitsMapping
 from .rfm9x_sx127x_radio_instance import RadioInstanceConfig
 from .spi.bus import SpiBus
 from .spi.factory import SpiBusFactory
-from ..framework.events import ModuleEvent, StopMode
+from ..framework.events import EventType, ModuleEvent, StopMode, is_state_change_event
+from ..types import LoraMode, ModeBits, StateBits
+
+logger = logging.getLogger(__name__)
+
+
+@dataclass
+class _EventWaiter:
+    predicate: Callable[[ModuleEvent[Any]], bool]
+    event: asyncio.Event
+    result: ModuleEvent[Any] | None = None
 
 
 class Rfm9xSx127xModule:
@@ -62,10 +71,14 @@ class Rfm9xSx127xModule:
         )
 
         # Event loop infrastructure
-        self.event_queue: asyncio.Queue[ModuleEvent] = asyncio.Queue()
+        self.event_queue: asyncio.Queue[ModuleEvent[Any]] = asyncio.Queue()
         self.event_loop_task: asyncio.Task[None] | None = None
         self._stop_mode: StopMode = StopMode.DRAIN
         self._paused: bool = False
+        self._event_buffer: dict[EventType, deque[ModuleEvent[Any]]] = defaultdict(
+            lambda: deque(maxlen=1000)
+        )
+        self._event_waiters: dict[EventType, list[_EventWaiter]] = defaultdict(list)
 
     # ------------------------------------------------------------------
     # Internal helpers
@@ -110,7 +123,7 @@ class Rfm9xSx127xModule:
             current_cls = type(self.current_state_instance)
             cached = self.state_instances.get(current_cls)
             if cached is not None and isinstance(cached, Rfm9xSx127xMode):
-                cached.on_exit()
+                cached.on_exit(self)
 
         new_instance = self.state_instances.get(StateBitsMapping.from_bits(state).value)
         if new_instance is None:
@@ -118,7 +131,7 @@ class Rfm9xSx127xModule:
             self.state_instances[type(new_instance)] = new_instance
 
         self.current_state_instance = new_instance
-        self.current_state_instance.on_entry()
+        self.current_state_instance.on_entry(self)
 
     def is_in_state(self, state: StateBits) -> bool:
         """Return ``True`` when the current active instance matches *state*."""
@@ -206,15 +219,99 @@ class Rfm9xSx127xModule:
                     await asyncio.sleep(0.01)  # Brief sleep while paused
                     continue
                 event = await self.event_queue.get()
-                if self.current_state_instance is not None:
-                    await self.current_state_instance.on_event(event)
+
+                # Buffer all events for waiters (never lose events even if dispatch fails)
+                self._event_buffer[event.event_type].append(event)
+
+                # Notify waiters atomically (before dispatch so waiters get the event)
+                for waiter in self._event_waiters[event.event_type]:
+                    if waiter.predicate(event) and waiter.result is None:
+                        waiter.result = event
+                        waiter.event.set()
+
+                # THEN dispatch — exceptions here don't affect buffering/waiters
+                try:
+                    # Intercept STATE_CHANGE at module level
+                    if event.event_type == EventType.STATE_CHANGE and is_state_change_event(event):
+                        new_state: StateBits = event.payload.new_state if event.payload is not None else StateBits.UNDEFINED_STATE
+                        self.set_current_state(new_state)
+
+                    if self.current_state_instance is not None:
+                        await self.current_state_instance.on_event(event, self)
+                except Exception:
+                    logger.exception(
+                        "Event dispatch failed for event_type=%s; continuing loop",
+                        event.event_type,
+                    )
+                    continue
         except asyncio.CancelledError:
             if self._stop_mode == StopMode.DRAIN:
                 while not self.event_queue.empty():
                     try:
                         ev = self.event_queue.get_nowait()
                         if self.current_state_instance is not None:
-                            await self.current_state_instance.on_event(ev)
+                            await self.current_state_instance.on_event(ev, self)
                     except Exception:
                         break
             raise
+
+    async def wait_for_event(
+        self,
+        event_type: EventType,
+        predicate: Callable[[ModuleEvent[Any]], bool] | None = None,
+        timeout: float = 5.0,
+    ) -> ModuleEvent[Any] | None:
+        """Wait for an event matching predicate, with timeout. Replays already-buffered events."""
+        check_pred = predicate or (lambda _: True)
+
+        # Replay check: return buffered events that already match (race-free: nothing else runs between check and registration)
+        buffered = self._event_buffer.get(event_type)
+        if buffered is not None:
+            events: list[ModuleEvent[Any]] = list(buffered)
+            for ev in reversed(events):
+                if check_pred(ev):
+                    found: ModuleEvent[Any] = ev
+                    return found
+
+        # No match yet — register and wait
+        waiter = _EventWaiter(
+            predicate=check_pred,
+            event=asyncio.Event(),
+        )
+        self._event_waiters[event_type].append(waiter)
+
+        try:
+            try:
+                await asyncio.wait_for(waiter.event.wait(), timeout=timeout)
+            except asyncio.TimeoutError:
+                return None
+            return waiter.result
+        finally:
+            # Clean up waiter from registry to prevent memory leak
+            with suppress(ValueError):
+                self._event_waiters[event_type].remove(waiter)
+
+    def drain_events(self, event_type: EventType) -> list[ModuleEvent[Any]]:
+        """Return and clear all buffered events of the given type."""
+        buffer = self._event_buffer.get(event_type)
+        if not buffer:
+            return []
+        events = list(buffer)
+        buffer.clear()
+        return events
+
+    def get_event_history(self, event_type: EventType, limit: int | None = None) -> list[ModuleEvent[Any]]:
+        """Return a copy of recent events of the given type, up to limit."""
+        buffer = self._event_buffer.get(event_type)
+        if not buffer:
+            return []
+        if limit is None or limit >= len(buffer):
+            return list(buffer)
+        if limit <= 0:
+            return []
+        return list(buffer)[-limit:]
+
+    def get_last_event(self, event_type: EventType) -> ModuleEvent[Any] | None:
+        """Return the most recent event of the given type, or None if empty."""
+        buffer = self._event_buffer.get(event_type)
+        return buffer[-1] if buffer else None

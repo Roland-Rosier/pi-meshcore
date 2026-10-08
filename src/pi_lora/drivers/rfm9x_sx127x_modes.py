@@ -25,10 +25,47 @@ Bit layout of RegOpMode:
   - Bit 7: LoRa mode flag (0x80 = LoRa, 0x00 = FSK/OOK)
 """
 
+import logging
 from enum import Enum, IntFlag
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
-from ..framework.events import ModuleEvent
+if TYPE_CHECKING:
+    from .rfm9x_sx127x_module import Rfm9xSx127xModule
+    from ..framework.events import ModuleEvent
+
+from ..types import LoraMode, MetaModeBits, ModeBits, StateBits
+
+logger = logging.getLogger(__name__)
+
+__all__: list[str] = [
+    "RegisterLayout",
+    "StateBits",
+    "ModeBits",
+    "MetaModeBits",
+    "LoraMode",
+    "Rfm9xSx127xMode",
+    "StateBitsMapping",
+    # Concrete state classes (alphabetical)
+    "ErrorState",
+    "FskOokFsrxState",
+    "FskOokFstxState",
+    "FskOokRxState",
+    "FskOokSleepState",
+    "FskOokStandbyState",
+    "FskOokTxState",
+    "LoraCadState",
+    "LoraFsrxState",
+    "LoraFstxState",
+    "LoraRxContinuousState",
+    "LoraRxSingleState",
+    "LoraSleepState",
+    "LoraStandbyState",
+    "LoraTxState",
+    "NotARfm9xSx127xDeviceState",
+    "ResetState",
+    "UndefinedState",
+    "UnknownState",
+]
 
 
 class RegisterLayout:
@@ -347,62 +384,6 @@ class RegisterLayout:
         MASK_PLL = 0xFFFFFFFF
 
 
-class StateBits(Enum):
-    """Immutable bit patterns for all device states."""
-
-    FSK_OOK_SLEEP = 0x00
-    LORA_SLEEP = 0x08
-    FSK_OOK_STANDBY = 0x01
-    LORA_STANDBY = 0x09
-    FSK_OOK_FSTX = 0x02
-    LORA_FSTX = 0x0A
-    FSK_OOK_FSRX = 0x04
-    LORA_FSRX = 0x0C
-    FSK_OOK_TX = 0x03
-    LORA_TX = 0x0B
-    FSK_OOK_RX = 0x05
-    LORA_RXCONTINUOUS = 0x0D
-    LORA_RXSINGLE = 0x0E
-    LORA_CAD = 0x0F
-    ERROR_STATE = 0x10
-    NOT_A_RFM9X_SX127X_DEVICE = 0x20
-    UNDEFINED_STATE = 0x30
-    UNKNOWN_STATE = 0x40
-    RESET_STATE = 0x50
-
-
-class ModeBits(Enum):
-    """Lower 3 bits of RegOpMode -- operational mode classification."""
-
-    SLEEP_OR_ERROR_OR_NOT_A_DEVICE_OR_UNKNOWN_OR_RESET = 0x00
-    STANDBY = 0x01
-    FSTX = 0x02
-    TX = 0x03
-    FSRX = 0x04
-    RX_OR_RXCONTINUOUS = 0x05
-    RXSINGLE = 0x06
-    CAD = 0x07
-
-
-class MetaModeBits(Enum):
-    """Bits 4-6 of StateBits.value -- housekeeping state classification."""
-
-    DEVICE_IN_KNOWN_MODE = 0x00
-    ERROR_STATE = 0x01
-    NOT_A_RFM9X_SX127X_DEVICE = 0x02
-    UNDEFINED_STATE = 0x03
-    UNKNOWN_STATE = 0x04
-    RESET_STATE = 0x05
-
-
-class LoraMode(Enum):
-    """LoRa mode flag (bit 3 of internal StateBits representation)."""
-
-    FSK_OOK = False
-    LORA = True
-    LORA_STATE_BIT = 0x08
-
-
 class _ConstantsMeta(type):
     """Metaclass providing read-only class-level getters for mode constants.
 
@@ -456,17 +437,36 @@ class Rfm9xSx127xMode(metaclass=_ConstantsMeta):
     class _Constants(Enum):
         STATE_BITS = StateBits.UNDEFINED_STATE
 
-    def on_entry(self) -> None:
+    def on_entry(self, module: "Rfm9xSx127xModule") -> None:
         """Called when the device is entered into this mode."""
-        pass
+        logger.info(
+            "[SPI:%s CE:%s] Entering state: %s",
+            module.get_spi_device_id(),
+            module.get_ce_number(),
+            type(self).__name__,
+        )
 
-    def on_exit(self) -> None:
+    def on_exit(self, module: "Rfm9xSx127xModule") -> None:
         """Called when the device is exited from this mode."""
-        pass
+        logger.info(
+            "[SPI:%s CE:%s] Exiting state: %s",
+            module.get_spi_device_id(),
+            module.get_ce_number(),
+            type(self).__name__,
+        )
 
-    async def on_event(self, event: ModuleEvent) -> None:
+    async def on_event(self, event: "ModuleEvent[Any]", module: "Rfm9xSx127xModule") -> None:
         """Default no-op handler. Concrete states override."""
         pass
+
+    async def on_jiffy(self, module: "Rfm9xSx127xModule") -> None:
+        raise NotImplementedError(f"{type(self).__name__}.on_jiffy not implemented")
+
+    async def on_idle(self, module: "Rfm9xSx127xModule") -> None:
+        raise NotImplementedError(f"{type(self).__name__}.on_idle not implemented")
+
+    async def on_interrupt(self, gpio_pin: int, module: "Rfm9xSx127xModule") -> None:
+        raise NotImplementedError(f"{type(self).__name__}.on_interrupt not implemented")
 
 
 class ErrorState(Rfm9xSx127xMode):
@@ -502,6 +502,22 @@ class ResetState(Rfm9xSx127xMode):
 
     class _Constants(Enum):
         STATE_BITS = StateBits.RESET_STATE
+
+    async def on_event(self, event: "ModuleEvent[Any]", module: "Rfm9xSx127xModule") -> None:
+        """No-op by design: the event loop must survive dispatch into RESET_STATE.
+
+        Buffering and waiter notification happen BEFORE this dispatch, so they are not lost even if dispatch fails.
+        """
+        pass
+
+    async def on_jiffy(self, module: "Rfm9xSx127xModule") -> None:
+        raise NotImplementedError("ResetState.on_jiffy not implemented")
+
+    async def on_idle(self, module: "Rfm9xSx127xModule") -> None:
+        raise NotImplementedError("ResetState.on_idle not implemented")
+
+    async def on_interrupt(self, gpio_pin: int, module: "Rfm9xSx127xModule") -> None:
+        raise NotImplementedError("ResetState.on_interrupt not implemented")
 
 
 class FskOokSleepState(Rfm9xSx127xMode):
@@ -627,3 +643,15 @@ class StateBitsMapping(Enum):
     def from_bits(cls, bits: StateBits) -> "StateBitsMapping":
         # mypy accepts looking up by .name string safely
         return cls[bits.name]
+
+
+def _assert_state_bits_mapping_complete() -> None:
+    mapped = {m.value.STATE_BITS for m in StateBitsMapping}
+    all_bits = set(StateBits)
+    missing = all_bits - mapped
+    extra = mapped - all_bits
+    if missing or extra:
+        raise RuntimeError(f"StateBitsMapping incomplete: missing={missing}, extra={extra}")
+
+
+_assert_state_bits_mapping_complete()

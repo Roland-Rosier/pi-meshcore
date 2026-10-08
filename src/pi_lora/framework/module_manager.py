@@ -17,13 +17,12 @@
 from __future__ import annotations
 
 from contextlib import suppress
-from typing import TYPE_CHECKING, Any
-
-if TYPE_CHECKING:
-    from ..drivers.rfm9x_sx127x_module import Rfm9xSx127xModule
+from typing import Any
 
 from .scheduler import Scheduler
+from ..drivers.rfm9x_sx127x_module import Rfm9xSx127xModule
 from ..drivers.rfm9x_sx127x_radio_instance import DeviceIdentity, RadioInstanceConfig
+from ..types import StateBits
 
 
 class ModuleManager:
@@ -49,9 +48,6 @@ class ModuleManager:
         ``RadioInstanceConfig``. Uses ``radio_config.dio_gpio_mappings`` for
         ``interrupt_gpio_pins``. Keys modules by ``radio_config.device_id_key`` (DeviceIdentity).
         """
-        from ..drivers.rfm9x_sx127x_modes import StateBits
-        from ..drivers.rfm9x_sx127x_module import Rfm9xSx127xModule
-
         for radio_config in radio_configs:
             module = Rfm9xSx127xModule(
                 radio_config=radio_config,

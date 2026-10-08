@@ -17,11 +17,13 @@
 from __future__ import annotations
 
 import asyncio  # noqa: F401
+import logging
 from pathlib import Path
-from typing import TYPE_CHECKING, Any, cast
+from typing import TYPE_CHECKING, Any
 
 if TYPE_CHECKING:
     from ..drivers.rfm9x_sx127x_config_model import Rfm9xSx127xConfig  # noqa: F401
+    from ..drivers.rfm9x_sx127x_module import Rfm9xSx127xModule  # noqa: F401
 
 from .command_bus import CommandBus
 from .events import StopMode
@@ -34,6 +36,8 @@ from ..drivers.rfm9x_sx127x_radio_instance import (
     RadioInstanceConfig,
     create_radio_instance,
 )
+
+logger = logging.getLogger(__name__)
 
 
 class Application:
@@ -52,17 +56,27 @@ class Application:
             self.spi_factory = RealSpiBusFactory()
         self._config: "Rfm9xSx127xConfig | None" = None
         self._config_path: Path | None = None
+        self._started_modules: list[Rfm9xSx127xModule] = []
+        self._scheduler_started: bool = False
 
-    async def start(self) -> None:
+    async def start(self, assembly_name: str = "default") -> None:
         """Initialize the application: load modules, register scheduler, start loops."""
-        assembly_result = self.get_assembly_config("default")
-        radio_configs: list[RadioInstanceConfig] = assembly_result if isinstance(assembly_result, list) else [assembly_result]
-        self.module_manager.load_from_config(radio_configs, self.scheduler, self.spi_factory)
-        self.command_bus.set_module_resolver(self._resolve_module_for_command)
-        await self.scheduler.start()
-        for module in self.module_manager.get_all_modules():
-            await module.init_spi_bus()  # Initialize SPI bus
-            await module.start_event_loop()
+        self._started_modules = []
+        self._scheduler_started = False
+        try:
+            assembly_result = self.get_assembly_config(assembly_name)
+            radio_configs: list[RadioInstanceConfig] = assembly_result if isinstance(assembly_result, list) else [assembly_result]
+            self.module_manager.load_from_config(radio_configs, self.scheduler, self.spi_factory)
+            self.command_bus.set_module_resolver(self._resolve_module_for_command)
+            await self.scheduler.start()
+            self._scheduler_started = True
+            for module in self.module_manager.get_all_modules():
+                await module.init_spi_bus()  # Initialize SPI bus
+                self._started_modules.append(module)  # Track after SPI init
+                await module.start_event_loop()
+        except (Exception, asyncio.CancelledError):
+            await self._cleanup_partial_start()
+            raise
 
     async def stop(self) -> None:
         """Gracefully stop all modules and the scheduler."""
@@ -70,6 +84,40 @@ class Application:
             await module.stop_event_loop(StopMode.DRAIN)
             await module.close_spi()
         await self.scheduler.stop()
+        self._started_modules.clear()
+        self._scheduler_started = False
+
+    async def _cleanup_partial_start(self) -> None:
+        """Mirror stop() for partially-started modules on failure.
+
+        Each module is drained and closed independently so that a failure on one
+        module does not prevent the remaining modules (and the scheduler) from
+        being cleaned up.
+        """
+        for module in self._started_modules:
+            try:
+                await module.stop_event_loop(StopMode.DRAIN)
+            except (Exception, asyncio.CancelledError):
+                logger.exception(
+                    "stop_event_loop failed for SPI device=%s CE=%s",
+                    module.get_spi_device_id(),
+                    module.get_ce_number(),
+                )
+            try:
+                await module.close_spi()
+            except (Exception, asyncio.CancelledError):
+                logger.exception(
+                    "close_spi failed for SPI device=%s CE=%s",
+                    module.get_spi_device_id(),
+                    module.get_ce_number(),
+                )
+        if self._scheduler_started:
+            try:
+                await self.scheduler.stop()
+            except (Exception, asyncio.CancelledError):
+                logger.exception("scheduler.stop() failed during cleanup")
+        self._started_modules.clear()
+        self._scheduler_started = False
 
     async def run_blocking_command(self, cmd: Any) -> Any:
         """Execute *cmd* synchronously via CommandBus.execute()."""
@@ -124,7 +172,7 @@ class Application:
         if self._config is not None:
             return self._config
 
-        config = cast("Rfm9xSx127xConfig", get_preloaded_config())
+        config = get_preloaded_config()
         self._config = config
         return config
 
@@ -137,12 +185,12 @@ class Application:
         Returns:
             The reloaded Rfm9xSx127xConfig instance.
         """
-        config = cast("Rfm9xSx127xConfig", get_preloaded_config(force_reload=True, config_path=config_path))
+        config = get_preloaded_config(force_reload=True, config_path=config_path)
         self._config_path = config_path
         self._config = config
         return config
 
-    def list_assemblies(self, verbose: bool = False) -> list[dict[str, Any]]:
+    def list_assemblies(self, verbose: bool = False, config_path: str | Path | None = None) -> list[dict[str, Any]]:
         """Return list of available assemblies.
 
         Args:
@@ -151,7 +199,8 @@ class Application:
         Returns:
             List of dicts with assembly info.
         """
-        config = self._load_config()
+        resolved_path: Path | None = Path(config_path) if isinstance(config_path, str) else config_path
+        config = self._load_config(resolved_path)
         results: list[dict[str, Any]] = []
         for assembly_name, assembly in config.assemblies.items():
             if verbose:
