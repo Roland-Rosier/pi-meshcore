@@ -16,6 +16,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import json
 import sys
 from pathlib import Path
@@ -101,8 +102,7 @@ def _format_config_json(config: RadioInstanceConfig | list[RadioInstanceConfig])
     return json.dumps(_serialize(config), indent=2)
 
 
-@app.command("list-assemblies")
-async def list_assemblies(
+async def list_assemblies_impl(
     verbose: bool = typer.Option(False, "--verbose", "-v", help="Show module name and device count"),
     json_output: bool = typer.Option(False, "--json", help="Output as JSON"),
     config_file: str | None = typer.Option(None, "--config", "-c", help="Custom config file path"),
@@ -137,8 +137,33 @@ async def list_assemblies(
             typer.echo(f"  {a['assembly_name']}")
 
 
-@app.command("show-config")
-async def show_config(
+def list_assemblies_sync(
+    verbose: bool = False,
+    json_output: bool = False,
+    config_file: str | None = None,
+) -> None:
+    """Sync wrapper for Typer CLI — ensures async function is awaited."""
+    asyncio.run(
+        list_assemblies_impl(
+            verbose=verbose,
+            json_output=json_output,
+            config_file=config_file,
+        )
+    )
+
+
+@app.command("list-assemblies")
+def list_assemblies(
+    verbose: bool = typer.Option(False, "--verbose", "-v", help="Show module name and device count"),
+    json_output: bool = typer.Option(False, "--json", help="Output as JSON"),
+    config_file: str | None = typer.Option(None, "--config", "-c", help="Custom config file path"),
+) -> None:
+    """List available assemblies."""
+    _ensure_logged()
+    list_assemblies_sync(verbose, json_output, config_file)
+
+
+async def show_config_impl(
     assembly_name: str = typer.Argument(..., help="Assembly name to query"),
     spi: int | None = typer.Option(None, "--spi", help="SPI device ID (e.g., 0)"),
     ce: int | None = typer.Option(None, "--ce", help="CE number (e.g., 0 or 1)"),
@@ -177,6 +202,38 @@ async def show_config(
                 typer.echo()
         else:
             typer.echo(_format_config_text(result))
+
+
+def show_config_sync(
+    assembly_name: str,
+    spi: int | None = None,
+    ce: int | None = None,
+    json_output: bool = False,
+    config_file: str | None = None,
+) -> None:
+    """Sync wrapper for Typer CLI — ensures async function is awaited."""
+    asyncio.run(
+        show_config_impl(
+            assembly_name=assembly_name,
+            spi=spi,
+            ce=ce,
+            json_output=json_output,
+            config_file=config_file,
+        )
+    )
+
+
+@app.command("show-config")
+def show_config(
+    assembly_name: str = typer.Argument(..., help="Assembly name to query"),
+    spi: int | None = typer.Option(None, "--spi", help="SPI device ID (e.g., 0)"),
+    ce: int | None = typer.Option(None, "--ce", help="CE number (e.g., 0 or 1)"),
+    json_output: bool = typer.Option(False, "--json", help="Output as JSON"),
+    config_file: str | None = typer.Option(None, "--config", "-c", help="Custom config file path"),
+) -> None:
+    """Show configuration for an assembly."""
+    _ensure_logged()
+    show_config_sync(assembly_name, spi, ce, json_output, config_file)
 
 
 if __name__ == "__main__":
