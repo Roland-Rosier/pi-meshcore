@@ -54,6 +54,7 @@ def _build_mock_application() -> MagicMock:
     app = MagicMock()
     app.start = AsyncMock()
     app.stop = AsyncMock()
+    app.get_assembly_config = AsyncMock()
     return app
 
 
