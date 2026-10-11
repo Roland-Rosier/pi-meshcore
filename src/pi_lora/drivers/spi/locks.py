@@ -22,9 +22,10 @@ from typing import Any, Protocol
 class SpiLock(Protocol):
     """Protocol defining a SPI critical-section lock.
 
-    Implementations must support both synchronous (blocking) and
-    asynchronous (awaitable) acquisition/release patterns so that
-    ``SpiBus.xfer2`` can operate correctly in either context.
+    Implementations provide an async-compatible acquisition pattern.
+    The `acquire()` method returns an awaitable; callers must ``await`` it.
+    Blocking acquisition is offloaded to a thread pool for sync-compatible
+    lock implementations so it does not block the event loop.
     """
 
     def acquire(self) -> Any:
@@ -35,7 +36,10 @@ class SpiLock(Protocol):
 
 
 class _AsyncSpiLock:
-    """Wraps ``aiologic.LowLevelLock`` for async/sync dual compatibility."""
+    """Wraps ``aiologic.LowLevelLock`` for async compatibility.
+
+    The underlying ``aiologic.LowLevelLock.acquire()`` returns an awaitable.
+    """
 
     def __init__(self, underlying: Any) -> None:
         self._underlying: Any = underlying
@@ -48,7 +52,12 @@ class _AsyncSpiLock:
 
 
 class _SyncSpiLock:
-    """Wraps ``threading.Lock`` for async/sync dual compatibility."""
+    """Wraps ``threading.Lock`` for async compatibility.
+
+    Blocking acquisition is offloaded to a worker thread via ``asyncio.to_thread``
+    so it does not block the event loop. Callers must ``await lock.acquire()``.
+    Requires a running asyncio event loop.
+    """
 
     def __init__(self, underlying: Any | None = None) -> None:
         self._underlying: Any = underlying if underlying is not None else threading.Lock()
