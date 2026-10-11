@@ -27,8 +27,8 @@ import pytest
 import typer
 
 from pi_lora.cli.config import (
-    list_assemblies,
-    show_config,
+    list_assemblies_impl,
+    show_config_impl,
 )
 from pi_lora.framework.exceptions import (
     AssemblyNotFoundError,
@@ -36,33 +36,61 @@ from pi_lora.framework.exceptions import (
 )
 
 
-async def _invoke_cli(
-    command: Any,
+async def _run_list_assemblies(
+    capture: io.StringIO,
     mock_application: MagicMock,
-    *args: Any,
     **kwargs: Any,
-) -> tuple[str, int]:
-    """Invoke an async CLI command directly with a mocked Application.
+) -> int:
+    """Invoke ``list_assemblies_impl`` directly with a mocked Application.
 
-    ``typer.testing.CliRunner`` does not await async commands (the coroutine is
-    never run), and the ``@app.command`` decorator injects ``typer.OptionInfo``
-    for any option not supplied, so the command body is exercised by calling the
-    command function directly with explicit option values after patching
-    ``Application``. Rich/typer output is captured via ``sys.stdout`` swap and
-    restored in a ``finally``. Returns ``(output, exit_code)``.
+    ``typer.testing.CliRunner`` does not await async commands, so the command
+    body is exercised by calling ``list_assemblies_impl`` directly after
+    patching ``Application``. Output is captured by swapping ``sys.stdout`` /
+    ``sys.stderr`` to ``capture`` (rich ``Console`` and ``typer.echo`` both write
+    to ``sys.stdout``). Returns the exit code produced (0 on success, 1 on error).
     """
-    capture: io.StringIO = io.StringIO()
     _old_stdout: object = sys.stdout
+    _old_stderr: object = sys.stderr
     sys.stdout = capture
+    sys.stderr = capture
     exit_code: int = 0
     with patch("pi_lora.cli.config.Application", return_value=mock_application):
         try:
-            await command(*args, **kwargs)
+            await list_assemblies_impl(**kwargs)
         except (SystemExit, typer.Exit) as exc:
             exit_code = getattr(exc, "code", 1)
         finally:
             sys.stdout = _old_stdout
-    return capture.getvalue(), exit_code
+            sys.stderr = _old_stderr
+    return exit_code
+
+
+async def _run_show_config(
+    capture: io.StringIO,
+    mock_application: MagicMock,
+    **kwargs: Any,
+) -> int:
+    """Invoke ``show_config_impl`` directly with a mocked Application.
+
+    Patches ``pi_lora.cli.config.Application`` and swaps ``sys.stdout`` /
+    ``sys.stderr`` to ``capture`` so the rich ``Console`` output and the
+    ``typer.echo(..., file=sys.stderr)`` error path are both captured. Returns
+    the exit code produced (0 on success, 1 on error).
+    """
+    _old_stdout: object = sys.stdout
+    _old_stderr: object = sys.stderr
+    sys.stdout = capture
+    sys.stderr = capture
+    exit_code: int = 0
+    with patch("pi_lora.cli.config.Application", return_value=mock_application):
+        try:
+            await show_config_impl(**kwargs)
+        except (SystemExit, typer.Exit) as exc:
+            exit_code = getattr(exc, "code", 1)
+        finally:
+            sys.stdout = _old_stdout
+            sys.stderr = _old_stderr
+    return exit_code
 
 
 class TestListAssembliesCli:
@@ -71,23 +99,21 @@ class TestListAssembliesCli:
     @pytest.mark.asyncio
     async def test_list_assemblies_basic(self) -> None:
         """Verify list-assemblies returns assembly names."""
+        capture = io.StringIO()
         mock_application = MagicMock()
         mock_application.list_assemblies = AsyncMock(return_value=[
             {"assembly_name": "default"},
         ])
-        output, exit_code = await _invoke_cli(
-            list_assemblies,
-            mock_application,
-            verbose=False,
-            json_output=False,
-            config_file=None,
+        exit_code = await _run_list_assemblies(
+            capture, mock_application, verbose=False, json_output=False, config_file=None
         )
         assert exit_code == 0
-        assert "default" in output
+        assert "default" in capture.getvalue()
 
     @pytest.mark.asyncio
     async def test_list_assemblies_verbose(self) -> None:
         """Verify list-assemblies --verbose shows module name and device count."""
+        capture = io.StringIO()
         mock_application = MagicMock()
         mock_application.list_assemblies = AsyncMock(return_value=[
             {
@@ -96,33 +122,26 @@ class TestListAssembliesCli:
                 "device_count": 2,
             },
         ])
-        output, exit_code = await _invoke_cli(
-            list_assemblies,
-            mock_application,
-            verbose=True,
-            json_output=False,
-            config_file=None,
+        exit_code = await _run_list_assemblies(
+            capture, mock_application, verbose=True, json_output=False, config_file=None
         )
         assert exit_code == 0
-        assert "default" in output
-        assert "lora_pi_434_868" in output
+        assert "default" in capture.getvalue()
+        assert "lora_pi_434_868" in capture.getvalue()
 
     @pytest.mark.asyncio
     async def test_list_assemblies_json(self) -> None:
         """Verify list-assemblies --json outputs valid JSON."""
+        capture = io.StringIO()
         mock_application = MagicMock()
         mock_application.list_assemblies = AsyncMock(return_value=[
             {"assembly_name": "default"},
         ])
-        output, exit_code = await _invoke_cli(
-            list_assemblies,
-            mock_application,
-            verbose=False,
-            json_output=True,
-            config_file=None,
+        exit_code = await _run_list_assemblies(
+            capture, mock_application, verbose=False, json_output=True, config_file=None
         )
         assert exit_code == 0
-        parsed = json.loads(output)
+        parsed = json.loads(capture.getvalue())
         assert isinstance(parsed, list)
         assert parsed[0]["assembly_name"] == "default"
 
@@ -133,6 +152,7 @@ class TestShowConfigCli:
     @pytest.mark.asyncio
     async def test_show_config_valid_assembly(self) -> None:
         """Verify show-config works with valid assembly name."""
+        capture = io.StringIO()
         mock_application = MagicMock()
         mock_result = MagicMock()
         mock_result.module_name = "lora_pi_434_868"
@@ -140,21 +160,16 @@ class TestShowConfigCli:
         mock_result.ce_number = 0
         mock_result.device_name = "RFM95"
         mock_application.get_assembly_config = AsyncMock(return_value=[mock_result])
-        output, exit_code = await _invoke_cli(
-            show_config,
-            mock_application,
-            "default",
-            spi=None,
-            ce=None,
-            json_output=False,
-            config_file=None,
+        exit_code = await _run_show_config(
+            capture, mock_application, assembly_name="default", spi=None, ce=None, json_output=False, config_file=None
         )
         assert exit_code == 0
-        assert "RFM95" in output
+        assert "RFM95" in capture.getvalue()
 
     @pytest.mark.asyncio
     async def test_show_config_with_spi_ce(self) -> None:
         """Verify show-config --spi --ce filters to single device."""
+        capture = io.StringIO()
         mock_application = MagicMock()
         mock_result = MagicMock()
         mock_result.module_name = "lora_pi_434_868"
@@ -162,14 +177,8 @@ class TestShowConfigCli:
         mock_result.ce_number = 0
         mock_result.device_name = "RFM95"
         mock_application.get_assembly_config = AsyncMock(return_value=[mock_result])
-        output, exit_code = await _invoke_cli(
-            show_config,
-            mock_application,
-            "default",
-            spi=0,
-            ce=0,
-            json_output=False,
-            config_file=None,
+        exit_code = await _run_show_config(
+            capture, mock_application, assembly_name="default", spi=0, ce=0, json_output=False, config_file=None
         )
         assert exit_code == 0
         mock_application.get_assembly_config.assert_called_with(
@@ -178,47 +187,38 @@ class TestShowConfigCli:
             ce_number=0,
             config_path=None,
         )
-        assert "RFM95" in output
+        assert "RFM95" in capture.getvalue()
 
     @pytest.mark.asyncio
     async def test_show_config_invalid_assembly(self) -> None:
         """Verify show-config exits with code 1 for invalid assembly."""
+        capture = io.StringIO()
         mock_application = MagicMock()
         mock_application.get_assembly_config = AsyncMock(
             side_effect=AssemblyNotFoundError("test")
         )
-        _, exit_code = await _invoke_cli(
-            show_config,
-            mock_application,
-            "nonexistent",
-            spi=None,
-            ce=None,
-            json_output=False,
-            config_file=None,
+        exit_code = await _run_show_config(
+            capture, mock_application, assembly_name="nonexistent", spi=None, ce=None, json_output=False, config_file=None
         )
         assert exit_code == 1
 
     @pytest.mark.asyncio
     async def test_show_config_invalid_spi_ce(self) -> None:
         """Verify show-config exits with code 1 for invalid SPI/CE."""
+        capture = io.StringIO()
         mock_application = MagicMock()
         mock_application.get_assembly_config = AsyncMock(
             side_effect=DeviceAttachmentNotFoundError("mod", 99, 99)
         )
-        _, exit_code = await _invoke_cli(
-            show_config,
-            mock_application,
-            "default",
-            spi=99,
-            ce=99,
-            json_output=False,
-            config_file=None,
+        exit_code = await _run_show_config(
+            capture, mock_application, assembly_name="default", spi=99, ce=99, json_output=False, config_file=None
         )
         assert exit_code == 1
 
     @pytest.mark.asyncio
     async def test_show_config_json(self) -> None:
         """Verify show-config --json outputs valid JSON."""
+        capture = io.StringIO()
         mock_application = MagicMock()
 
         @dataclass
@@ -238,17 +238,11 @@ class TestShowConfigCli:
 
         mock_result = MockRadioConfig()
         mock_application.get_assembly_config = AsyncMock(return_value=mock_result)
-        output, exit_code = await _invoke_cli(
-            show_config,
-            mock_application,
-            "default",
-            spi=None,
-            ce=None,
-            json_output=True,
-            config_file=None,
+        exit_code = await _run_show_config(
+            capture, mock_application, assembly_name="default", spi=None, ce=None, json_output=True, config_file=None
         )
         assert exit_code == 0
-        parsed = json.loads(output)
+        parsed = json.loads(capture.getvalue())
         assert isinstance(parsed, dict)
 
 
@@ -258,6 +252,7 @@ class TestShowConfigCustomConfig:
     @pytest.mark.asyncio
     async def test_show_config_with_custom_config(self) -> None:
         """Verify show-config --config loads custom config."""
+        capture = io.StringIO()
         mock_application = MagicMock()
         mock_result = MagicMock()
         mock_result.module_name = "test_module"
@@ -265,14 +260,8 @@ class TestShowConfigCustomConfig:
         mock_result.ce_number = 0
         mock_result.device_name = "RFM95"
         mock_application.get_assembly_config = AsyncMock(return_value=[mock_result])
-        _, exit_code = await _invoke_cli(
-            show_config,
-            mock_application,
-            "default",
-            spi=None,
-            ce=None,
-            json_output=False,
-            config_file="/path/to/config.yaml",
+        exit_code = await _run_show_config(
+            capture, mock_application, assembly_name="default", spi=None, ce=None, json_output=False, config_file="/path/to/config.yaml"
         )
         assert exit_code == 0
         call_kwargs = mock_application.get_assembly_config.call_args
@@ -280,6 +269,5 @@ class TestShowConfigCustomConfig:
 
 
 if __name__ == "__main__":
-    import sys
     exit_code = pytest.main([__file__, "-v"])
     sys.exit(exit_code)
