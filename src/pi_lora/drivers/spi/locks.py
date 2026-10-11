@@ -52,22 +52,16 @@ class _SyncSpiLock:
 
     def __init__(self, underlying: Any | None = None) -> None:
         self._underlying: Any = underlying if underlying is not None else threading.Lock()
-        self._loop: asyncio.AbstractEventLoop = asyncio.get_event_loop()
 
-    def acquire(self) -> asyncio.Future[None]:
+    def acquire(self) -> Any:
         """Return an awaitable that runs the blocking ``acquire`` in a thread pool.
 
         The blocking ``threading.Lock.acquire`` cannot be awaited directly, so it
-        is executed on the loop's executor and wrapped as an ``asyncio.Future``
-        that resolves once the blocking call completes.
+        is offloaded to a worker thread via ``asyncio.to_thread``; the returned
+        awaitable resolves once the lock is acquired. Callers should always
+        ``await lock.acquire()``.
         """
-
-        def _block_acquire() -> None:
-            self._underlying.acquire()
-
-        return asyncio.wrap_future(
-            self._loop.run_in_executor(None, _block_acquire)
-        )
+        return asyncio.to_thread(self._underlying.acquire)
 
     def release(self) -> None:
         self._underlying.release()
@@ -81,8 +75,9 @@ def get_bus_lock(bus_number: int) -> SpiLock:
     """Get or create a lock for the given bus number.
 
     The returned lock is compatible with both synchronous and asynchronous
-    contexts. In async code ``await lock.acquire()`` should be used; in
-    sync code ``lock.acquire()`` works directly.
+    contexts. Callers should always ``await lock.acquire()``; the returned
+    awaitable resolves once the lock is acquired (blocking acquisition is
+    offloaded to a worker thread in the sync fallback).
 
     Args:
         bus_number: The bus identifier to lock.
