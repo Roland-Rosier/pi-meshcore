@@ -14,6 +14,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import threading
 from typing import Any, Protocol
 
@@ -49,11 +50,24 @@ class _AsyncSpiLock:
 class _SyncSpiLock:
     """Wraps ``threading.Lock`` for async/sync dual compatibility."""
 
-    def __init__(self, underlying: threading.Lock | None = None) -> None:
-        self._underlying: threading.Lock = underlying if underlying is not None else threading.Lock()
+    def __init__(self, underlying: Any | None = None) -> None:
+        self._underlying: Any = underlying if underlying is not None else threading.Lock()
+        self._loop: asyncio.AbstractEventLoop = asyncio.get_event_loop()
 
-    def acquire(self) -> None:
-        self._underlying.acquire()
+    def acquire(self) -> asyncio.Future[None]:
+        """Return an awaitable that runs the blocking ``acquire`` in a thread pool.
+
+        The blocking ``threading.Lock.acquire`` cannot be awaited directly, so it
+        is executed on the loop's executor and wrapped as an ``asyncio.Future``
+        that resolves once the blocking call completes.
+        """
+
+        def _block_acquire() -> None:
+            self._underlying.acquire()
+
+        return asyncio.wrap_future(
+            self._loop.run_in_executor(None, _block_acquire)
+        )
 
     def release(self) -> None:
         self._underlying.release()
