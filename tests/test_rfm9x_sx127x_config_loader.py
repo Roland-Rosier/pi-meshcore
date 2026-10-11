@@ -36,9 +36,10 @@ class TestLoadConfig:
         assert len(config.families) > 0
         assert len(config.modules) > 0
 
-    def test_load_preloaded_config(self) -> None:
+    @pytest.mark.asyncio
+    async def test_load_preloaded_config(self) -> None:
         """Test that get_preloaded_config returns the cached instance."""
-        config = get_preloaded_config()
+        config = await get_preloaded_config()
         assert config is not None
         assert "rfm95" in config.devices
         assert "rfm98" in config.devices
@@ -81,30 +82,34 @@ class TestLoadFamilyConfig:
 class TestGetPreloadedConfig:
     """Tests for the new lazy singleton get_preloaded_config API."""
 
-    def test_lazy_loading_returns_cached_instance(self) -> None:
+    @pytest.mark.asyncio
+    async def test_lazy_loading_returns_cached_instance(self) -> None:
         """Test that first call loads, second call returns same instance."""
-        config1 = get_preloaded_config()
-        config2 = get_preloaded_config()
+        config1 = await get_preloaded_config()
+        config2 = await get_preloaded_config()
         assert config1 is config2
 
-    def test_force_reload_creates_new_instance(self) -> None:
+    @pytest.mark.asyncio
+    async def test_force_reload_creates_new_instance(self) -> None:
         """Test that force_reload=True creates a new instance."""
-        config1 = get_preloaded_config()
-        config2 = get_preloaded_config(force_reload=True)
+        config1 = await get_preloaded_config()
+        config2 = await get_preloaded_config(force_reload=True)
         assert config1 is not config2
 
-    def test_config_path_override_bypasses_cache(self) -> None:
+    @pytest.mark.asyncio
+    async def test_config_path_override_bypasses_cache(self) -> None:
         """Test that config_path override bypasses cache and loads from path."""
-        default_config = get_preloaded_config()
-        override_config = get_preloaded_config(
+        default_config = await get_preloaded_config()
+        override_config = await get_preloaded_config(
             config_path=Path("/home/rpiuser/TestMeshcore/src/pi_lora/drivers/configs/rfm9x_sx127x_config.yaml")
         )
         assert override_config is not default_config
         assert len(override_config.devices) > 0
 
-    def test_force_reload_with_config_path_works(self) -> None:
+    @pytest.mark.asyncio
+    async def test_force_reload_with_config_path_works(self) -> None:
         """Test that force_reload=True with config_path works (path takes priority)."""
-        override_config = get_preloaded_config(
+        override_config = await get_preloaded_config(
             force_reload=True,
             config_path=Path("/home/rpiuser/TestMeshcore/src/pi_lora/drivers/configs/rfm9x_sx127x_config.yaml")
         )

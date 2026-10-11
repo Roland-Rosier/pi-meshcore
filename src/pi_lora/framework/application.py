@@ -64,7 +64,7 @@ class Application:
         self._started_modules = []
         self._scheduler_started = False
         try:
-            assembly_result = self.get_assembly_config(assembly_name)
+            assembly_result = await self.get_assembly_config(assembly_name)
             radio_configs: list[RadioInstanceConfig] = assembly_result if isinstance(assembly_result, list) else [assembly_result]
             self.module_manager.load_from_config(radio_configs, self.scheduler, self.spi_factory)
             self.command_bus.set_module_resolver(self._resolve_module_for_command)
@@ -154,7 +154,7 @@ class Application:
             raise ValueError(f"No module for target {target}")
         raise ValueError(f"Invalid command target: {target}")
 
-    def _load_config(self, config_path: Path | None = None) -> "Rfm9xSx127xConfig":
+    async def _load_config(self, config_path: Path | None = None) -> "Rfm9xSx127xConfig":
         """Load configuration, caching it for subsequent calls.
 
         Args:
@@ -164,7 +164,7 @@ class Application:
             The loaded Rfm9xSx127xConfig instance.
         """
         if config_path is not None:
-            config = get_preloaded_config(config_path=config_path)
+            config = await get_preloaded_config(config_path=config_path)
             self._config_path = config_path
             self._config = config
             return config
@@ -172,11 +172,11 @@ class Application:
         if self._config is not None:
             return self._config
 
-        config = get_preloaded_config()
+        config = await get_preloaded_config()
         self._config = config
         return config
 
-    def reload_config(self, config_path: Path | None = None) -> "Rfm9xSx127xConfig":
+    async def reload_config(self, config_path: Path | None = None) -> "Rfm9xSx127xConfig":
         """Force reload configuration.
 
         Args:
@@ -185,12 +185,12 @@ class Application:
         Returns:
             The reloaded Rfm9xSx127xConfig instance.
         """
-        config = get_preloaded_config(force_reload=True, config_path=config_path)
+        config = await get_preloaded_config(force_reload=True, config_path=config_path)
         self._config_path = config_path
         self._config = config
         return config
 
-    def list_assemblies(self, verbose: bool = False, config_path: str | Path | None = None) -> list[dict[str, Any]]:
+    async def list_assemblies(self, verbose: bool = False, config_path: str | Path | None = None) -> list[dict[str, Any]]:
         """Return list of available assemblies.
 
         Args:
@@ -200,7 +200,7 @@ class Application:
             List of dicts with assembly info.
         """
         resolved_path: Path | None = Path(config_path) if isinstance(config_path, str) else config_path
-        config = self._load_config(resolved_path)
+        config = await self._load_config(resolved_path)
         results: list[dict[str, Any]] = []
         for assembly_name, assembly in config.assemblies.items():
             if verbose:
@@ -213,7 +213,7 @@ class Application:
                 results.append({"assembly_name": assembly_name})
         return results
 
-    def get_assembly_config(
+    async def get_assembly_config(
         self,
         assembly_name: str,
         spi_device_id: int | None = None,
@@ -236,7 +236,7 @@ class Application:
             AssemblyNotFoundError: If assembly not found.
             DeviceAttachmentNotFoundError: If SPI/CE filter doesn't match any device.
         """
-        config = self._load_config(config_path)
+        config = await self._load_config(config_path)
 
         if assembly_name not in config.assemblies:
             raise AssemblyNotFoundError(f"Assembly '{assembly_name}' not found in configuration")
@@ -252,7 +252,7 @@ class Application:
         configs: list[RadioInstanceConfig] = []
         for attachment in module_obj.devices:
             try:
-                radio_config = create_radio_instance(
+                radio_config = await create_radio_instance(
                     assembly_name=assembly_name,
                     spi_device_id=attachment.spi_device_id,
                     ce_number=attachment.ce_number,

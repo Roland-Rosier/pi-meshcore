@@ -102,7 +102,7 @@ def _format_config_json(config: RadioInstanceConfig | list[RadioInstanceConfig])
 
 
 @app.command("list-assemblies")
-def list_assemblies(
+async def list_assemblies(
     verbose: bool = typer.Option(False, "--verbose", "-v", help="Show module name and device count"),
     json_output: bool = typer.Option(False, "--json", help="Output as JSON"),
     config_file: str | None = typer.Option(None, "--config", "-c", help="Custom config file path"),
@@ -115,7 +115,7 @@ def list_assemblies(
 
     application = Application(config=None)
 
-    assemblies = application.list_assemblies(verbose=verbose, config_path=custom_path)
+    assemblies = await application.list_assemblies(verbose=verbose, config_path=custom_path)
 
     if json_output:
         typer.echo(json.dumps(assemblies, indent=2))
@@ -138,7 +138,7 @@ def list_assemblies(
 
 
 @app.command("show-config")
-def show_config(
+async def show_config(
     assembly_name: str = typer.Argument(..., help="Assembly name to query"),
     spi: int | None = typer.Option(None, "--spi", help="SPI device ID (e.g., 0)"),
     ce: int | None = typer.Option(None, "--ce", help="CE number (e.g., 0 or 1)"),
@@ -155,7 +155,7 @@ def show_config(
     application = Application(config=None)
 
     try:
-        result = application.get_assembly_config(
+        result = await application.get_assembly_config(
             assembly_name=assembly_name,
             spi_device_id=spi,
             ce_number=ce,

@@ -48,7 +48,7 @@ async def test_hardware_impl(
     application = Application(config=None)
 
     try:
-        radio_configs = application.get_assembly_config(
+        radio_configs = await application.get_assembly_config(
             assembly_name=assembly_name,
             spi_device_id=spi,
             ce_number=ce,

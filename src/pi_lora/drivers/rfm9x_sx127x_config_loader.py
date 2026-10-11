@@ -129,11 +129,14 @@ def load_family_config(
     return config
 
 
-def get_preloaded_config(
+async def get_preloaded_config(
     force_reload: bool = False,
     config_path: Path | None = None,
 ) -> Rfm9xSx127xConfig:
     """Return the pre-loaded default configuration with lazy singleton support.
+
+    This coroutine guards the singleton cache with an ``aiologic.Lock`` so the
+    first load is performed safely under concurrency.
 
     Args:
         force_reload: If True, forces re-reading from disk regardless of cache.
@@ -155,7 +158,7 @@ def get_preloaded_config(
     if _config_cache is not None:
         return _config_cache
 
-    with _config_lock:
+    async with _config_lock:
         if _config_cache is not None:
             return _config_cache  # type: ignore[unreachable]  # pragma: no cover
         _config_cache = load_config()

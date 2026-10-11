@@ -170,37 +170,40 @@ class TestEmptyConfig:
 class TestListAssemblies:
     """Tests for Application.list_assemblies()."""
 
-    def test_list_assemblies_basic(self) -> None:
+    @pytest.mark.asyncio
+    async def test_list_assemblies_basic(self) -> None:
         """Verify list_assemblies returns assembly names."""
         application = Application(config=None)
         application._config = None
         application._config_path = None
 
-        assemblies = application.list_assemblies(verbose=False)
+        assemblies = await application.list_assemblies(verbose=False)
         assert len(assemblies) >= 1
         names = [a["assembly_name"] for a in assemblies]
         assert "default" in names
 
-    def test_list_assemblies_verbose(self) -> None:
+    @pytest.mark.asyncio
+    async def test_list_assemblies_verbose(self) -> None:
         """Verify list_assemblies verbose includes module_name and device_count."""
         application = Application(config=None)
         application._config = None
         application._config_path = None
 
-        assemblies = application.list_assemblies(verbose=True)
+        assemblies = await application.list_assemblies(verbose=True)
         assert len(assemblies) >= 1
         for a in assemblies:
             assert "assembly_name" in a
             assert "module_name" in a
             assert "device_count" in a
 
-    def test_list_assemblies_json_format(self) -> None:
+    @pytest.mark.asyncio
+    async def test_list_assemblies_json_format(self) -> None:
         """Verify list_assemblies returns dict format suitable for JSON."""
         application = Application(config=None)
         application._config = None
         application._config_path = None
 
-        assemblies = application.list_assemblies(verbose=False)
+        assemblies = await application.list_assemblies(verbose=False)
         assert isinstance(assemblies, list)
         for a in assemblies:
             assert isinstance(a, dict)
@@ -209,25 +212,28 @@ class TestListAssemblies:
 class TestGetAssemblyConfig:
     """Tests for Application.get_assembly_config()."""
 
-    def test_get_assembly_config_all_devices(self) -> None:
+    @pytest.mark.asyncio
+    async def test_get_assembly_config_all_devices(self) -> None:
         """Verify get_assembly_config returns config for default assembly."""
         application = Application(config=None)
         application._config = None
         application._config_path = None
 
-        result = application.get_assembly_config("default")
+        result = await application.get_assembly_config("default")
         assert result is not None
 
-    def test_get_assembly_config_single_device(self) -> None:
+    @pytest.mark.asyncio
+    async def test_get_assembly_config_single_device(self) -> None:
         """Verify get_assembly_config returns config for a specific SPI/CE slot."""
         application = Application(config=None)
         application._config = None
         application._config_path = None
 
-        result = application.get_assembly_config("default", spi_device_id=0, ce_number=0)
+        result = await application.get_assembly_config("default", spi_device_id=0, ce_number=0)
         assert result is not None
 
-    def test_get_assembly_config_not_found(self) -> None:
+    @pytest.mark.asyncio
+    async def test_get_assembly_config_not_found(self) -> None:
         """Verify get_assembly_config raises AssemblyNotFoundError for missing assembly."""
         from src.pi_lora.framework.exceptions import AssemblyNotFoundError
 
@@ -236,9 +242,10 @@ class TestGetAssemblyConfig:
         application._config_path = None
 
         with pytest.raises(AssemblyNotFoundError):
-            application.get_assembly_config("nonexistent")
+            await application.get_assembly_config("nonexistent")
 
-    def test_get_assembly_config_device_not_found(self) -> None:
+    @pytest.mark.asyncio
+    async def test_get_assembly_config_device_not_found(self) -> None:
         """Verify get_assembly_config raises DeviceAttachmentNotFoundError for invalid SPI/CE."""
         from unittest.mock import MagicMock, patch
 
@@ -256,40 +263,43 @@ class TestGetAssemblyConfig:
             "src.pi_lora.framework.application.create_radio_instance",
             return_value=mock_radio_config,
         ), pytest.raises(DeviceAttachmentNotFoundError):
-            application.get_assembly_config("default", spi_device_id=99, ce_number=99)
+            await application.get_assembly_config("default", spi_device_id=99, ce_number=99)
 
-    def test_get_assembly_config_validation_error_propagates(self) -> None:
+    @pytest.mark.asyncio
+    async def test_get_assembly_config_validation_error_propagates(self) -> None:
         """Verify get_assembly_config returns config without raising ConfigConsistencyError."""
         application = Application(config=None)
         application._config = None
         application._config_path = None
 
-        result = application.get_assembly_config("default")
+        result = await application.get_assembly_config("default")
         assert result is not None
 
 
 class TestConfigLoading:
     """Tests for config loading behavior."""
 
-    def test_lazy_load(self) -> None:
+    @pytest.mark.asyncio
+    async def test_lazy_load(self) -> None:
         """Verify config is only loaded on first query."""
         application = Application(config=None)
         application._config = None
         application._config_path = None
 
         assert application._config is None
-        assemblies = application.list_assemblies()
+        assemblies = await application.list_assemblies()
         assert len(assemblies) >= 1
         assert application._config is not None
 
-    def test_reload_config(self) -> None:
+    @pytest.mark.asyncio
+    async def test_reload_config(self) -> None:
         """Verify reload_config forces reload."""
         application = Application(config=None)
         application._config = None
         application._config_path = None
 
-        application.list_assemblies()
-        reloaded = application.reload_config()
+        await application.list_assemblies()
+        reloaded = await application.reload_config()
         assert reloaded is not None
 
 

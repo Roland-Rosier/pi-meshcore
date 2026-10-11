@@ -138,11 +138,11 @@ class ConfigConsistencyError(RadioInstanceError):
         super().__init__(message, context)
 
 
-def create_radio_instance(
+async def create_radio_instance(
     assembly_name: str,
     spi_device_id: int,
     ce_number: int,
-    config: Rfm9xSx127xConfig,
+    config: "Rfm9xSx127xConfig | None" = None,
 ) -> RadioInstanceConfig:
     """Resolve and aggregate configuration for a single radio instance.
 
@@ -150,7 +150,7 @@ def create_radio_instance(
         assembly_name: Assembly identifier (e.g., "default").
         spi_device_id: SPI bus number (e.g., 0).
         ce_number: Chip enable slot (e.g., 0 or 1).
-        config: Pre-loaded config (REQUIRED - no global default).
+        config: Pre-loaded config. If None, the preloaded default config is loaded.
 
     Returns:
         Fully populated RadioInstanceConfig.
@@ -163,6 +163,10 @@ def create_radio_instance(
         FamilyNotFoundError: If no family contains the device_name.
         ConfigConsistencyError: If cross-reference validation fails.
     """
+    if config is None:
+        from pi_lora.drivers.rfm9x_sx127x_config_loader import get_preloaded_config
+        config = await get_preloaded_config()
+
     # 1. Get assembly (physical deployment unit with antenna config)
     if assembly_name not in config.assemblies:
         raise AssemblyNotFoundError(assembly_name, DeviceIdentity(spi_device_id, ce_number))
@@ -266,11 +270,12 @@ def create_radio_instance(
     return result
 
 
-def create_radio_instance_from_default(
+async def create_radio_instance_from_default(
     assembly_name: str,
     spi_device_id: int,
     ce_number: int,
 ) -> RadioInstanceConfig:
     """Convenience wrapper using the preloaded default config."""
     from pi_lora.drivers.rfm9x_sx127x_config_loader import get_preloaded_config
-    return create_radio_instance(assembly_name, spi_device_id, ce_number, get_preloaded_config())
+    config = await get_preloaded_config()
+    return await create_radio_instance(assembly_name, spi_device_id, ce_number, config)
