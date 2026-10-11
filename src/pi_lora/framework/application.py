@@ -58,34 +58,58 @@ class Application:
         self._config_path: Path | None = None
         self._started_modules: list[Rfm9xSx127xModule] = []
         self._scheduler_started: bool = False
+        self._started: bool = False
+        self._start_lock: asyncio.Lock = asyncio.Lock()
+        self._stop_lock: asyncio.Lock = asyncio.Lock()
 
     async def start(self, assembly_name: str = "default") -> None:
         """Initialize the application: load modules, register scheduler, start loops."""
-        self._started_modules = []
-        self._scheduler_started = False
-        try:
-            assembly_result = await self.get_assembly_config(assembly_name)
-            radio_configs: list[RadioInstanceConfig] = assembly_result if isinstance(assembly_result, list) else [assembly_result]
-            self.module_manager.load_from_config(radio_configs, self.scheduler, self.spi_factory)
-            self.command_bus.set_module_resolver(self._resolve_module_for_command)
-            await self.scheduler.start()
-            self._scheduler_started = True
-            for module in self.module_manager.get_all_modules():
-                await module.init_spi_bus()  # Initialize SPI bus
-                self._started_modules.append(module)  # Track after SPI init
-                await module.start_event_loop()
-        except (Exception, asyncio.CancelledError):
-            await self._cleanup_partial_start()
-            raise
+        async with self._start_lock:
+            self._started_modules = []
+            self._scheduler_started = False
+            try:
+                assembly_result = await self.get_assembly_config(assembly_name)
+                radio_configs: list[RadioInstanceConfig] = assembly_result if isinstance(assembly_result, list) else [assembly_result]
+                self.module_manager.load_from_config(radio_configs, self.scheduler, self.spi_factory)
+                self.command_bus.set_module_resolver(self._resolve_module_for_command)
+                await self.scheduler.start()
+                self._scheduler_started = True
+                for module in self.module_manager.get_all_modules():
+                    await module.init_spi_bus()
+                    self._started_modules.append(module)
+                    await module.start_event_loop()
+                self._started = True
+            except (Exception, asyncio.CancelledError):
+                await self._cleanup_partial_start()
+                raise
 
     async def stop(self) -> None:
         """Gracefully stop all modules and the scheduler."""
-        for module in self.module_manager.get_all_modules():
-            await module.stop_event_loop(StopMode.DRAIN)
-            await module.close_spi()
-        await self.scheduler.stop()
-        self._started_modules.clear()
-        self._scheduler_started = False
+        async with self._stop_lock:
+            for module in self.module_manager.get_all_modules():
+                try:
+                    await module.stop_event_loop(StopMode.DRAIN)
+                except (Exception, asyncio.CancelledError):
+                    logger.exception(
+                        "stop_event_loop failed for SPI device=%s CE=%s",
+                        module.get_spi_device_id(),
+                        module.get_ce_number(),
+                    )
+                try:
+                    await module.close_spi()
+                except (Exception, asyncio.CancelledError):
+                    logger.exception(
+                        "close_spi failed for SPI device=%s CE=%s",
+                        module.get_spi_device_id(),
+                        module.get_ce_number(),
+                    )
+            try:
+                await self.scheduler.stop()
+            except (Exception, asyncio.CancelledError):
+                logger.exception("scheduler.stop() failed during stop")
+            self._started_modules.clear()
+            self._scheduler_started = False
+            self._started = False
 
     async def _cleanup_partial_start(self) -> None:
         """Mirror stop() for partially-started modules on failure.
