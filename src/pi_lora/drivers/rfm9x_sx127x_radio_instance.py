@@ -142,7 +142,7 @@ async def create_radio_instance(
     assembly_name: str,
     spi_device_id: int,
     ce_number: int,
-    config: "Rfm9xSx127xConfig | None" = None,
+    config: Rfm9xSx127xConfig | None = None,
 ) -> RadioInstanceConfig:
     """Resolve and aggregate configuration for a single radio instance.
 

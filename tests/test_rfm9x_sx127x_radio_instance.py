@@ -299,9 +299,10 @@ def config_multi_family_same_device() -> Rfm9xSx127xConfig:
 class TestSuccessfulCreation:
     """Test successful RadioInstanceConfig creation."""
 
-    def test_create_rfm98_on_0_1(self, default_config: Rfm9xSx127xConfig) -> None:
+    @pytest.mark.asyncio
+    async def test_create_rfm98_on_0_1(self, default_config: Rfm9xSx127xConfig) -> None:
         """Test creating RFM98 instance at SPI:0 CE:1."""
-        result: RadioInstanceConfig = create_radio_instance(
+        result: RadioInstanceConfig = await create_radio_instance(
             assembly_name="default",
             spi_device_id=0,
             ce_number=1,
@@ -321,9 +322,10 @@ class TestSuccessfulCreation:
         assert result.antenna_type == "parabolic"
         assert result.antenna_gain_db == 24.0
 
-    def test_create_rfm95_on_0_0(self, default_config: Rfm9xSx127xConfig) -> None:
+    @pytest.mark.asyncio
+    async def test_create_rfm95_on_0_0(self, default_config: Rfm9xSx127xConfig) -> None:
         """Test creating RFM95 instance at SPI:0 CE:0."""
-        result: RadioInstanceConfig = create_radio_instance(
+        result: RadioInstanceConfig = await create_radio_instance(
             assembly_name="default",
             spi_device_id=0,
             ce_number=0,
@@ -343,9 +345,10 @@ class TestSuccessfulCreation:
         assert result.antenna_type == "parabolic"
         assert result.antenna_gain_db == 25.0
 
-    def test_create_returns_frozen_dataclass(self, default_config: Rfm9xSx127xConfig) -> None:
+    @pytest.mark.asyncio
+    async def test_create_returns_frozen_dataclass(self, default_config: Rfm9xSx127xConfig) -> None:
         """Test that the returned instance is a frozen dataclass (immutable)."""
-        result: RadioInstanceConfig = create_radio_instance(
+        result: RadioInstanceConfig = await create_radio_instance(
             assembly_name="default",
             spi_device_id=0,
             ce_number=0,
@@ -363,9 +366,10 @@ class TestSuccessfulCreation:
 class TestComputedProperties:
     """Test frequency_range_hz, device_id_key, supported_frequencies_hz."""
 
-    def test_frequency_range_hz_rfm98(self, default_config: Rfm9xSx127xConfig) -> None:
+    @pytest.mark.asyncio
+    async def test_frequency_range_hz_rfm98(self, default_config: Rfm9xSx127xConfig) -> None:
         """Test frequency_range_hz returns correct tuple for RFM98."""
-        result: RadioInstanceConfig = create_radio_instance(
+        result: RadioInstanceConfig = await create_radio_instance(
             assembly_name="default",
             spi_device_id=0,
             ce_number=1,
@@ -374,9 +378,10 @@ class TestComputedProperties:
 
         assert result.frequency_range_hz == (434000000, 460000000)
 
-    def test_frequency_range_hz_rfm95(self, default_config: Rfm9xSx127xConfig) -> None:
+    @pytest.mark.asyncio
+    async def test_frequency_range_hz_rfm95(self, default_config: Rfm9xSx127xConfig) -> None:
         """Test frequency_range_hz returns correct tuple for RFM95."""
-        result: RadioInstanceConfig = create_radio_instance(
+        result: RadioInstanceConfig = await create_radio_instance(
             assembly_name="default",
             spi_device_id=0,
             ce_number=0,
@@ -385,9 +390,10 @@ class TestComputedProperties:
 
         assert result.frequency_range_hz == (868000000, 915000000)
 
-    def test_device_id_key_rfm98(self, default_config: Rfm9xSx127xConfig) -> None:
+    @pytest.mark.asyncio
+    async def test_device_id_key_rfm98(self, default_config: Rfm9xSx127xConfig) -> None:
         """Test device_id_key returns correct DeviceIdentity for RFM98."""
-        result: RadioInstanceConfig = create_radio_instance(
+        result: RadioInstanceConfig = await create_radio_instance(
             assembly_name="default",
             spi_device_id=0,
             ce_number=1,
@@ -399,9 +405,10 @@ class TestComputedProperties:
         assert key.ce_number == 1
         assert str(key) == "0:1"
 
-    def test_device_id_key_rfm95(self, default_config: Rfm9xSx127xConfig) -> None:
+    @pytest.mark.asyncio
+    async def test_device_id_key_rfm95(self, default_config: Rfm9xSx127xConfig) -> None:
         """Test device_id_key returns correct DeviceIdentity for RFM95."""
-        result: RadioInstanceConfig = create_radio_instance(
+        result: RadioInstanceConfig = await create_radio_instance(
             assembly_name="default",
             spi_device_id=0,
             ce_number=0,
@@ -413,9 +420,10 @@ class TestComputedProperties:
         assert key.ce_number == 0
         assert str(key) == "0:0"
 
-    def test_supported_frequencies_hz_rfm98(self, default_config: Rfm9xSx127xConfig) -> None:
+    @pytest.mark.asyncio
+    async def test_supported_frequencies_hz_rfm98(self, default_config: Rfm9xSx127xConfig) -> None:
         """Test supported_frequencies_hz returns (min, max) tuple for RFM98."""
-        result: RadioInstanceConfig = create_radio_instance(
+        result: RadioInstanceConfig = await create_radio_instance(
             assembly_name="default",
             spi_device_id=0,
             ce_number=1,
@@ -425,9 +433,10 @@ class TestComputedProperties:
         freqs: tuple[int, int] = result.supported_frequencies_hz
         assert freqs == (434000000, 460000000)
 
-    def test_supported_frequencies_hz_rfm95(self, default_config: Rfm9xSx127xConfig) -> None:
+    @pytest.mark.asyncio
+    async def test_supported_frequencies_hz_rfm95(self, default_config: Rfm9xSx127xConfig) -> None:
         """Test supported_frequencies_hz returns (min, max) tuple for RFM95."""
-        result: RadioInstanceConfig = create_radio_instance(
+        result: RadioInstanceConfig = await create_radio_instance(
             assembly_name="default",
             spi_device_id=0,
             ce_number=0,
@@ -437,7 +446,8 @@ class TestComputedProperties:
         freqs: tuple[int, int] = result.supported_frequencies_hz
         assert freqs == (868000000, 915000000)
 
-    def test_supported_frequencies_hz_empty_exclusions(self) -> None:
+    @pytest.mark.asyncio
+    async def test_supported_frequencies_hz_empty_exclusions(self) -> None:
         """Test supported_frequencies_hz returns bounds tuple."""
         devices: dict[str, DeviceConfig] = {
             "RFM95": DeviceConfig(
@@ -485,7 +495,7 @@ class TestComputedProperties:
             assemblies=assemblies,
         )
 
-        result: RadioInstanceConfig = create_radio_instance(
+        result: RadioInstanceConfig = await create_radio_instance(
             assembly_name="test_asm",
             spi_device_id=0,
             ce_number=0,
@@ -495,9 +505,10 @@ class TestComputedProperties:
         freqs: tuple[int, int] = result.supported_frequencies_hz
         assert freqs == (868000000, 915000000)
 
-    def test_device_identity_str_format(self, default_config: Rfm9xSx127xConfig) -> None:
+    @pytest.mark.asyncio
+    async def test_device_identity_str_format(self, default_config: Rfm9xSx127xConfig) -> None:
         """Test DeviceIdentity __str__ format."""
-        result: RadioInstanceConfig = create_radio_instance(
+        result: RadioInstanceConfig = await create_radio_instance(
             assembly_name="default",
             spi_device_id=0,
             ce_number=1,
@@ -515,7 +526,8 @@ class TestComputedProperties:
 class TestExceptions:
     """Test all exception types and their context payloads."""
 
-    def test_module_not_found_error(self) -> None:
+    @pytest.mark.asyncio
+    async def test_module_not_found_error(self) -> None:
         """Test ModuleNotFoundError when assembly module_name not in config.modules."""
         devices: dict[str, DeviceConfig] = {
             "RFM95": DeviceConfig(
@@ -568,7 +580,7 @@ class TestExceptions:
         )
 
         with pytest.raises(ModuleNotFoundError) as exc_info:
-            create_radio_instance(
+            await create_radio_instance(
                 assembly_name="test_asm",
                 spi_device_id=0,
                 ce_number=0,
@@ -579,12 +591,13 @@ class TestExceptions:
         assert "nonexistent_mod" in str(exc)
         assert isinstance(exc, RadioInstanceError)
 
-    def test_device_attachment_not_found_error(self) -> None:
+    @pytest.mark.asyncio
+    async def test_device_attachment_not_found_error(self) -> None:
         """Test DeviceAttachmentNotFoundError for wrong SPI/CE."""
         config: Rfm9xSx127xConfig = _make_full_default_config()
 
         with pytest.raises(DeviceAttachmentNotFoundError) as exc_info:
-            create_radio_instance(
+            await create_radio_instance(
                 assembly_name="default",
                 spi_device_id=1,
                 ce_number=0,
@@ -598,7 +611,8 @@ class TestExceptions:
         assert exc.context["ce_number"] == 0
         assert isinstance(exc, RadioInstanceError)
 
-    def test_assembly_not_found_error(self) -> None:
+    @pytest.mark.asyncio
+    async def test_assembly_not_found_error(self) -> None:
         """Test AssemblyNotFoundError when module has no assembly."""
         devices: dict[str, DeviceConfig] = {
             "RFM95": DeviceConfig(
@@ -640,7 +654,7 @@ class TestExceptions:
         )
 
         with pytest.raises(AssemblyNotFoundError) as exc_info:
-            create_radio_instance(
+            await create_radio_instance(
                 assembly_name="nonexistent_asm",
                 spi_device_id=0,
                 ce_number=0,
@@ -652,7 +666,8 @@ class TestExceptions:
         assert "0:0" in exc.context["device_key"]
         assert isinstance(exc, RadioInstanceError)
 
-    def test_device_spec_not_found_error(self) -> None:
+    @pytest.mark.asyncio
+    async def test_device_spec_not_found_error(self) -> None:
         """Test DeviceSpecNotFoundError when device_name not in config.devices."""
         devices: dict[str, DeviceConfig] = {}  # empty devices
 
@@ -699,7 +714,7 @@ class TestExceptions:
         )
 
         with pytest.raises(DeviceSpecNotFoundError) as exc_info:
-            create_radio_instance(
+            await create_radio_instance(
                 assembly_name="test_asm",
                 spi_device_id=0,
                 ce_number=0,
@@ -711,7 +726,8 @@ class TestExceptions:
         assert exc.context == {"device_name": "RFM95"}
         assert isinstance(exc, RadioInstanceError)
 
-    def test_family_not_found_error(self) -> None:
+    @pytest.mark.asyncio
+    async def test_family_not_found_error(self) -> None:
         """Test FamilyNotFoundError when device not in any family."""
         devices: dict[str, DeviceConfig] = {
             "RFM95": DeviceConfig(
@@ -763,7 +779,7 @@ class TestExceptions:
         )
 
         with pytest.raises(FamilyNotFoundError) as exc_info:
-            create_radio_instance(
+            await create_radio_instance(
                 assembly_name="test_asm",
                 spi_device_id=0,
                 ce_number=0,
@@ -775,7 +791,8 @@ class TestExceptions:
         assert exc.context == {"device_name": "RFM95"}
         assert isinstance(exc, RadioInstanceError)
 
-    def test_config_consistency_error_duplicate_attachment(self) -> None:
+    @pytest.mark.asyncio
+    async def test_config_consistency_error_duplicate_attachment(self) -> None:
         """Test ConfigConsistencyError when multiple attachments match same SPI/CE."""
         devices: dict[str, DeviceConfig] = {
             "RFM95": DeviceConfig(
@@ -837,7 +854,7 @@ class TestExceptions:
         )
 
         with pytest.raises(ConfigConsistencyError) as exc_info:
-            create_radio_instance(
+            await create_radio_instance(
                 assembly_name="default",
                 spi_device_id=0,
                 ce_number=0,
@@ -849,7 +866,8 @@ class TestExceptions:
         assert exc.context["module_name"] == "lora_pi_434_868"
         assert isinstance(exc, RadioInstanceError)
 
-    def test_excluded_freq_out_of_range_accepted(self) -> None:
+    @pytest.mark.asyncio
+    async def test_excluded_freq_out_of_range_accepted(self) -> None:
         """Test out-of-range excluded frequency is accepted (validation removed)."""
         devices: dict[str, DeviceConfig] = {
             "RFM95": DeviceConfig(
@@ -897,7 +915,7 @@ class TestExceptions:
             assemblies=assemblies,
         )
 
-        result: RadioInstanceConfig = create_radio_instance(
+        result: RadioInstanceConfig = await create_radio_instance(
             assembly_name="test_asm",
             spi_device_id=0,
             ce_number=0,
@@ -907,7 +925,8 @@ class TestExceptions:
         assert result.device_name == "RFM95"
         assert 100000 in result.test_invalid_frequencies_hz
 
-    def test_config_consistency_error_antenna_gain_out_of_range(self) -> None:
+    @pytest.mark.asyncio
+    async def test_config_consistency_error_antenna_gain_out_of_range(self) -> None:
         """Test ConfigConsistencyError when antenna gain is physically impossible."""
         devices: dict[str, DeviceConfig] = {
             "RFM95": DeviceConfig(
@@ -959,7 +978,7 @@ class TestExceptions:
         )
 
         with pytest.raises(ConfigConsistencyError) as exc_info:
-            create_radio_instance(
+            await create_radio_instance(
                 assembly_name="default",
                 spi_device_id=0,
                 ce_number=0,
@@ -979,13 +998,14 @@ class TestExceptions:
 class TestCreateFromDefault:
     """Test the convenience wrapper using preloaded config."""
 
-    def test_from_default_rfm95(self) -> None:
+    @pytest.mark.asyncio
+    async def test_from_default_rfm95(self) -> None:
         """Test create_radio_instance_from_default for RFM95 (0:0).
 
         The preloaded YAML config has out-of-range exclusion but validation is removed,
         so this now succeeds with the excluded frequency included.
         """
-        result: RadioInstanceConfig = create_radio_instance_from_default(
+        result: RadioInstanceConfig = await create_radio_instance_from_default(
             assembly_name="default",
             spi_device_id=0,
             ce_number=0,
@@ -993,13 +1013,14 @@ class TestCreateFromDefault:
 
         assert result.device_name == "RFM95"
 
-    def test_from_default_rfm98(self) -> None:
+    @pytest.mark.asyncio
+    async def test_from_default_rfm98(self) -> None:
         """Test create_radio_instance_from_default for RFM98 (0:1).
 
         The preloaded YAML config has out-of-range exclusion but validation is removed,
         so this now succeeds with the excluded frequency included.
         """
-        result: RadioInstanceConfig = create_radio_instance_from_default(
+        result: RadioInstanceConfig = await create_radio_instance_from_default(
             assembly_name="default",
             spi_device_id=0,
             ce_number=1,
@@ -1007,19 +1028,21 @@ class TestCreateFromDefault:
 
         assert result.device_name == "RFM98"
 
-    def test_from_default_raises_module_not_found(self) -> None:
+    @pytest.mark.asyncio
+    async def test_from_default_raises_module_not_found(self) -> None:
         """Test create_radio_instance_from_default raises for nonexistent assembly."""
         with pytest.raises(AssemblyNotFoundError):
-            create_radio_instance_from_default(
+            await create_radio_instance_from_default(
                 assembly_name="nonexistent",
                 spi_device_id=0,
                 ce_number=0,
             )
 
-    def test_from_default_raises_attachment_not_found(self) -> None:
+    @pytest.mark.asyncio
+    async def test_from_default_raises_attachment_not_found(self) -> None:
         """Test create_radio_instance_from_default raises for nonexistent SPI/CE."""
         with pytest.raises(DeviceAttachmentNotFoundError):
-            create_radio_instance_from_default(
+            await create_radio_instance_from_default(
                 assembly_name="default",
                 spi_device_id=99,
                 ce_number=99,
@@ -1033,7 +1056,8 @@ class TestCreateFromDefault:
 class TestFrequencyEdgeCases:
     """Test frequency computation edge cases."""
 
-    def test_min_max_equal_device(self) -> None:
+    @pytest.mark.asyncio
+    async def test_min_max_equal_device(self) -> None:
         """Test supported_frequencies_hz when min=max (single value tuple)."""
         devices: dict[str, DeviceConfig] = {
             "TEST": DeviceConfig(
@@ -1080,7 +1104,7 @@ class TestFrequencyEdgeCases:
             assemblies=assemblies,
         )
 
-        result: RadioInstanceConfig = create_radio_instance(
+        result: RadioInstanceConfig = await create_radio_instance(
             assembly_name="test_asm",
             spi_device_id=0,
             ce_number=0,
@@ -1091,7 +1115,8 @@ class TestFrequencyEdgeCases:
         # Returns (min, max) — both 500000000
         assert freqs == (500000000, 500000000)
 
-    def test_excluded_at_min_boundary(self) -> None:
+    @pytest.mark.asyncio
+    async def test_excluded_at_min_boundary(self) -> None:
         """Test excluded frequency exactly at min_radio_freq_hz — still returns (min, max)."""
         devices: dict[str, DeviceConfig] = {
             "TEST": DeviceConfig(
@@ -1138,7 +1163,7 @@ class TestFrequencyEdgeCases:
             assemblies=assemblies,
         )
 
-        result: RadioInstanceConfig = create_radio_instance(
+        result: RadioInstanceConfig = await create_radio_instance(
             assembly_name="test_asm",
             spi_device_id=0,
             ce_number=0,
@@ -1148,7 +1173,8 @@ class TestFrequencyEdgeCases:
         freqs: tuple[int, int] = result.supported_frequencies_hz
         assert freqs == (500000000, 600000000)
 
-    def test_excluded_at_max_boundary(self) -> None:
+    @pytest.mark.asyncio
+    async def test_excluded_at_max_boundary(self) -> None:
         """Test excluded frequency exactly at max_radio_freq_hz — returns (min, max)."""
         devices: dict[str, DeviceConfig] = {
             "TEST": DeviceConfig(
@@ -1195,7 +1221,7 @@ class TestFrequencyEdgeCases:
             assemblies=assemblies,
         )
 
-        result: RadioInstanceConfig = create_radio_instance(
+        result: RadioInstanceConfig = await create_radio_instance(
             assembly_name="test_asm",
             spi_device_id=0,
             ce_number=0,
@@ -1205,7 +1231,8 @@ class TestFrequencyEdgeCases:
         freqs: tuple[int, int] = result.supported_frequencies_hz
         assert freqs == (500000000, 600000000)
 
-    def test_empty_exclusions_tuple(self) -> None:
+    @pytest.mark.asyncio
+    async def test_empty_exclusions_tuple(self) -> None:
         """Test test_invalid_frequencies_hz contains the exclusion from family."""
         devices: dict[str, DeviceConfig] = {
             "RFM95": DeviceConfig(
@@ -1253,7 +1280,7 @@ class TestFrequencyEdgeCases:
             assemblies=assemblies,
         )
 
-        result: RadioInstanceConfig = create_radio_instance(
+        result: RadioInstanceConfig = await create_radio_instance(
             assembly_name="test_asm",
             spi_device_id=0,
             ce_number=0,
@@ -1271,9 +1298,10 @@ class TestFrequencyEdgeCases:
 class TestPartialAssemblyConfig:
     """Test partial assembly config behavior."""
 
-    def test_assembly_exists_but_key_missing(self, config_with_assemblies_only: Rfm9xSx127xConfig) -> None:
+    @pytest.mark.asyncio
+    async def test_assembly_exists_but_key_missing(self, config_with_assemblies_only: Rfm9xSx127xConfig) -> None:
         """Test antenna fields are None when assembly exists but device key is missing."""
-        result: RadioInstanceConfig = create_radio_instance(
+        result: RadioInstanceConfig = await create_radio_instance(
             assembly_name="default",
             spi_device_id=0,
             ce_number=0,
@@ -1285,10 +1313,11 @@ class TestPartialAssemblyConfig:
         # Should not raise an error — missing key yields None fields
         assert result.device_name == "RFM95"
 
-    def test_no_matching_assembly(self, config_no_assemblies: Rfm9xSx127xConfig) -> None:
+    @pytest.mark.asyncio
+    async def test_no_matching_assembly(self, config_no_assemblies: Rfm9xSx127xConfig) -> None:
         """Test ModuleNotFoundError when assembly's module_name doesn't match any module."""
         with pytest.raises(ModuleNotFoundError) as exc_info:
-            create_radio_instance(
+            await create_radio_instance(
                 assembly_name="other",
                 spi_device_id=0,
                 ce_number=0,
@@ -1305,9 +1334,10 @@ class TestPartialAssemblyConfig:
 class TestMultipleFamilies:
     """Test behavior when device appears in multiple families."""
 
-    def test_first_match_wins(self, config_multi_family_same_device: Rfm9xSx127xConfig) -> None:
+    @pytest.mark.asyncio
+    async def test_first_match_wins(self, config_multi_family_same_device: Rfm9xSx127xConfig) -> None:
         """Test that the first matching family's exclusions are used."""
-        result: RadioInstanceConfig = create_radio_instance(
+        result: RadioInstanceConfig = await create_radio_instance(
             assembly_name="test_asm",
             spi_device_id=0,
             ce_number=0,
@@ -1320,9 +1350,10 @@ class TestMultipleFamilies:
         # SX127X exclusion should NOT be present
         assert 880000000 not in result.test_invalid_frequencies_hz
 
-    def test_first_match_wins_supported_freqs(self, config_multi_family_same_device: Rfm9xSx127xConfig) -> None:
+    @pytest.mark.asyncio
+    async def test_first_match_wins_supported_freqs(self, config_multi_family_same_device: Rfm9xSx127xConfig) -> None:
         """Test supported_frequencies returns (min, max) tuple."""
-        result: RadioInstanceConfig = create_radio_instance(
+        result: RadioInstanceConfig = await create_radio_instance(
             assembly_name="test_asm",
             spi_device_id=0,
             ce_number=0,
@@ -1340,7 +1371,8 @@ class TestMultipleFamilies:
 class TestCrossReferenceValidation:
     """Test cross-reference validation raises ConfigConsistencyError."""
 
-    def test_excluded_freq_above_max_accepted(self) -> None:
+    @pytest.mark.asyncio
+    async def test_excluded_freq_above_max_accepted(self) -> None:
         """Test out-of-range excluded frequency above max is accepted (validation removed)."""
         devices: dict[str, DeviceConfig] = {
             "TEST": DeviceConfig(
@@ -1387,7 +1419,7 @@ class TestCrossReferenceValidation:
             assemblies=assemblies,
         )
 
-        result: RadioInstanceConfig = create_radio_instance(
+        result: RadioInstanceConfig = await create_radio_instance(
             assembly_name="test_asm",
             spi_device_id=0,
             ce_number=0,
@@ -1397,7 +1429,8 @@ class TestCrossReferenceValidation:
         assert result.device_name == "TEST"
         assert 600000000 in result.test_invalid_frequencies_hz
 
-    def test_osc_freq_out_of_range(self) -> None:
+    @pytest.mark.asyncio
+    async def test_osc_freq_out_of_range(self) -> None:
         """Test ConfigConsistencyError when osc_freq is physically impossible."""
         devices: dict[str, DeviceConfig] = {
             "TEST": DeviceConfig(
@@ -1446,7 +1479,7 @@ class TestCrossReferenceValidation:
         )
 
         with pytest.raises(ConfigConsistencyError) as exc_info:
-            create_radio_instance(
+            await create_radio_instance(
                 assembly_name="test_asm",
                 spi_device_id=0,
                 ce_number=0,
@@ -1456,9 +1489,10 @@ class TestCrossReferenceValidation:
         assert "OSC frequency" in str(exc_info.value)
         assert exc_info.value.context["osc_freq_hz"] == 20_000_000_000
 
-    def test_valid_cross_reference_no_error(self, default_config: Rfm9xSx127xConfig) -> None:
+    @pytest.mark.asyncio
+    async def test_valid_cross_reference_no_error(self, default_config: Rfm9xSx127xConfig) -> None:
         """Test no ConfigConsistencyError for valid cross-reference combinations."""
-        result: RadioInstanceConfig = create_radio_instance(
+        result: RadioInstanceConfig = await create_radio_instance(
             assembly_name="default",
             spi_device_id=0,
             ce_number=0,
@@ -1467,9 +1501,10 @@ class TestCrossReferenceValidation:
 
         assert result.device_name == "RFM95"
 
-    def test_valid_cross_reference_rfm98(self, default_config: Rfm9xSx127xConfig) -> None:
+    @pytest.mark.asyncio
+    async def test_valid_cross_reference_rfm98(self, default_config: Rfm9xSx127xConfig) -> None:
         """Test RFM98 cross-reference passes validation (450MHz within [434M, 460M])."""
-        result: RadioInstanceConfig = create_radio_instance(
+        result: RadioInstanceConfig = await create_radio_instance(
             assembly_name="default",
             spi_device_id=0,
             ce_number=1,
@@ -1478,7 +1513,8 @@ class TestCrossReferenceValidation:
 
         assert result.device_name == "RFM98"
 
-    def test_valid_cross_reference_with_in_range_exclusion(self) -> None:
+    @pytest.mark.asyncio
+    async def test_valid_cross_reference_with_in_range_exclusion(self) -> None:
         """Test no error when excluded frequency is within device range."""
         devices: dict[str, DeviceConfig] = {
             "test": DeviceConfig(
@@ -1526,7 +1562,7 @@ class TestCrossReferenceValidation:
             assemblies=assemblies,
         )
 
-        result: RadioInstanceConfig = create_radio_instance(
+        result: RadioInstanceConfig = await create_radio_instance(
             assembly_name="test_asm",
             spi_device_id=0,
             ce_number=0,
@@ -1544,9 +1580,10 @@ class TestCrossReferenceValidation:
 class TestDataClassBehavior:
     """Test frozen dataclass behavior and __repr__."""
 
-    def test_repr_format(self, default_config: Rfm9xSx127xConfig) -> None:
+    @pytest.mark.asyncio
+    async def test_repr_format(self, default_config: Rfm9xSx127xConfig) -> None:
         """Test __repr__ output format."""
-        result: RadioInstanceConfig = create_radio_instance(
+        result: RadioInstanceConfig = await create_radio_instance(
             assembly_name="default",
             spi_device_id=0,
             ce_number=0,
@@ -1558,9 +1595,10 @@ class TestDataClassBehavior:
         assert "device=DeviceIdentity(spi_device_id=0, ce_number=0)" in repr_str or "0:0" in repr_str
         assert "freq_range=(868000000, 915000000)" in repr_str
 
-    def test_frozen_dataclass_immutability(self, default_config: Rfm9xSx127xConfig) -> None:
+    @pytest.mark.asyncio
+    async def test_frozen_dataclass_immutability(self, default_config: Rfm9xSx127xConfig) -> None:
         """Test that RadioInstanceConfig is immutable (frozen=True)."""
-        result: RadioInstanceConfig = create_radio_instance(
+        result: RadioInstanceConfig = await create_radio_instance(
             assembly_name="default",
             spi_device_id=0,
             ce_number=0,
@@ -1570,9 +1608,10 @@ class TestDataClassBehavior:
         with pytest.raises(FrozenInstanceError):
             result.spi_device_id = 99  # type: ignore[assignment]
 
-    def test_frozen_dataclass_hashable(self, default_config: Rfm9xSx127xConfig) -> None:
+    @pytest.mark.asyncio
+    async def test_frozen_dataclass_hashable(self, default_config: Rfm9xSx127xConfig) -> None:
         """Test that frozen dataclass is hashable (can be used in sets/dicts)."""
-        result: RadioInstanceConfig = create_radio_instance(
+        result: RadioInstanceConfig = await create_radio_instance(
             assembly_name="default",
             spi_device_id=0,
             ce_number=0,
