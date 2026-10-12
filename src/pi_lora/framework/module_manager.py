@@ -16,13 +16,29 @@
 
 from __future__ import annotations
 
-from contextlib import suppress
+import logging
 from typing import Any
 
 from .scheduler import Scheduler
 from ..drivers.rfm9x_sx127x_module import Rfm9xSx127xModule
-from ..drivers.rfm9x_sx127x_radio_instance import DeviceIdentity, RadioInstanceConfig
+from ..drivers.rfm9x_sx127x_radio_instance import (
+    DeviceIdentity,
+    RadioInstanceConfig,
+    RadioInstanceError,
+)
 from ..types import StateBits
+
+logger = logging.getLogger(__name__)
+
+
+class DuplicateDeviceIdentityError(RadioInstanceError):
+    """Raised when a ``DeviceIdentity`` already exists in the manager during load."""
+
+    def __init__(self, device_key: DeviceIdentity) -> None:
+        super().__init__(
+            f"Duplicate DeviceIdentity {device_key} in config",
+            {"device_key": str(device_key)},
+        )
 
 
 class ModuleManager:
@@ -48,41 +64,58 @@ class ModuleManager:
         ``RadioInstanceConfig``. Uses ``radio_config.dio_gpio_mappings`` for
         ``interrupt_gpio_pins``. Keys modules by ``radio_config.device_id_key`` (DeviceIdentity).
         """
-        for radio_config in radio_configs:
-            module = Rfm9xSx127xModule(
-                radio_config=radio_config,
-                state=StateBits.UNKNOWN_STATE,
-                spi_factory=spi_factory,
-            )
+        for index, radio_config in enumerate(radio_configs):
+            try:
+                module = Rfm9xSx127xModule(
+                    radio_config=radio_config,
+                    state=StateBits.UNKNOWN_STATE,
+                    spi_factory=spi_factory,
+                )
 
-            # Extract GPIO pins from DIO->GPIO mappings
-            gpio_pins: list[int] = []
-            if radio_config.dio_gpio_mappings:
-                for mapping in radio_config.dio_gpio_mappings:
-                    parts = mapping.split(":")
-                    if len(parts) == 2:
+                # Extract GPIO pins from DIO->GPIO mappings
+                gpio_pins: list[int] = []
+                if radio_config.dio_gpio_mappings:
+                    for mapping in radio_config.dio_gpio_mappings:
+                        parts = mapping.split(":")
+                        if len(parts) != 2:
+                            logger.warning(f"Unparseable GPIO mapping {mapping!r}; skipping")
+                            continue
                         gpio_str = parts[1]
+                        matched_prefix: str | None = None
                         for prefix in ("GPIO", "WPi"):
                             if gpio_str.startswith(prefix):
-                                with suppress(ValueError):
-                                    gpio_pins.append(int(gpio_str[len(prefix):]))
+                                matched_prefix = prefix
                                 break
+                        if matched_prefix is None:
+                            logger.warning(f"Unparseable GPIO mapping {mapping!r}; skipping")
+                            continue
+                        try:
+                            gpio_pins.append(int(gpio_str[len(matched_prefix):]))
+                        except ValueError:
+                            logger.warning(f"Unparseable GPIO mapping {mapping!r}; skipping")
 
-            scheduler.register_module(
-                module,
-                timer_interval=1.0,
-                idle_enabled=True,
-                interrupt_gpio_pins=gpio_pins,
-            )
+                device_key: DeviceIdentity = radio_config.device_id_key
+                if device_key in self.modules_by_id:
+                    raise DuplicateDeviceIdentityError(device_key)
 
-            device_key: DeviceIdentity = radio_config.device_id_key
-            if device_key in self.modules_by_id:
-                import logging
-                logging.getLogger(__name__).warning(
-                    "Duplicate DeviceIdentity %s in config; overwriting previous module", device_key
+                scheduler.register_module(
+                    module,
+                    timer_interval=1.0,
+                    idle_enabled=True,
+                    interrupt_gpio_pins=gpio_pins,
                 )
-            self.modules_by_id[device_key] = module
-            self.modules.append(module)
+
+                self.modules_by_id[device_key] = module
+                self.modules.append(module)
+            except Exception:
+                self.modules.clear()
+                self.modules_by_id.clear()
+                logger.warning(
+                    "Module load failed at config index %d (%s); rolled back partial state",
+                    index,
+                    radio_config.device_id_key,
+                )
+                raise
 
     def get_module(
         self,

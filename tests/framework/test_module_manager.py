@@ -14,9 +14,14 @@
 
 """Unit tests for ModuleManager config loading and module registration."""
 
+from unittest import mock
+
 import pytest
 from src.pi_lora.drivers.rfm9x_sx127x_radio_instance import RadioInstanceConfig
-from src.pi_lora.framework.module_manager import ModuleManager
+from src.pi_lora.framework.module_manager import (
+    DuplicateDeviceIdentityError,
+    ModuleManager,
+)
 from src.pi_lora.framework.scheduler import Scheduler
 
 
@@ -52,6 +57,25 @@ def _make_test_radio_configs() -> list[RadioInstanceConfig]:
             antenna_gain_db=None,
         ),
     ]
+
+
+def _make_duplicate_radio_configs() -> list[RadioInstanceConfig]:
+    """Build two configs sharing the same DeviceIdentity for the duplicate guard test."""
+    base: RadioInstanceConfig = RadioInstanceConfig(
+        module_name="LoPi4",
+        spi_device_id=0,
+        ce_number=0,
+        device_name="RFM95W",
+        min_radio_freq_hz=800000,
+        max_radio_freq_hz=900000,
+        osc_freq_hz=32_000_000,
+        family_name="RFM9X",
+        test_invalid_frequencies_hz=(999999,),
+        dio_gpio_mappings=("DIO0:WPi6", "DIO5:WPi5"),
+        antenna_type=None,
+        antenna_gain_db=None,
+    )
+    return [base, base]
 
 
 class TestLoadFromConfig:
@@ -118,6 +142,68 @@ class TestLoadFromConfig:
         mods = mm.get_all_modules()
         assert len(mods) == 2
         assert mods is not mm.modules
+
+    @pytest.mark.asyncio
+    async def test_duplicate_device_identity_raises(
+        self, caplog: pytest.LogCaptureFixture,
+    ) -> None:
+        mm = ModuleManager()
+        radio_configs = _make_duplicate_radio_configs()
+        scheduler = Scheduler()
+        with pytest.raises(DuplicateDeviceIdentityError) as exc_info:
+            mm.load_from_config(radio_configs, scheduler)
+        assert exc_info.value.context["device_key"] == "0:0"
+        assert any("rolled back" in msg.lower() for msg in caplog.messages)
+
+    @pytest.mark.asyncio
+    async def test_malformed_gpio_mapping_warns(
+        self, caplog: pytest.LogCaptureFixture,
+    ) -> None:
+        mm = ModuleManager()
+        radio_configs: list[RadioInstanceConfig] = [
+            RadioInstanceConfig(
+                module_name="LoPi4",
+                spi_device_id=0,
+                ce_number=0,
+                device_name="RFM95W",
+                min_radio_freq_hz=800000,
+                max_radio_freq_hz=900000,
+                osc_freq_hz=32_000_000,
+                family_name="RFM9X",
+                test_invalid_frequencies_hz=(999999,),
+                dio_gpio_mappings=("DIO0:WPi6", "DIO0:foo"),
+                antenna_type=None,
+                antenna_gain_db=None,
+            ),
+        ]
+        scheduler = Scheduler()
+        mm.load_from_config(radio_configs, scheduler)
+        assert len(mm.modules) == 1
+        assert 6 in scheduler.interrupt_bridge._interrupt_map
+        assert any(
+            "Unparseable GPIO mapping" in msg for msg in caplog.messages
+        )
+
+    @pytest.mark.asyncio
+    async def test_load_failure_rolls_back(
+        self, caplog: pytest.LogCaptureFixture,
+    ) -> None:
+        mm = ModuleManager()
+        radio_configs = _make_test_radio_configs()
+        scheduler = Scheduler()
+
+        def _force_failure(*_args: object, **_kwargs: object) -> None:
+            raise RuntimeError("Module construction failed during load")
+
+        with mock.patch(
+            "src.pi_lora.framework.module_manager.Rfm9xSx127xModule",
+            side_effect=_force_failure,
+        ) as _, pytest.raises(RuntimeError) as exc_info:
+            mm.load_from_config(radio_configs, scheduler)
+        assert isinstance(exc_info.value, RuntimeError)
+        assert len(mm.modules) == 0
+        assert len(mm.modules_by_id) == 0
+        assert any("rolled back" in msg.lower() for msg in caplog.messages)
 
 
 class TestEmptyConfig:
