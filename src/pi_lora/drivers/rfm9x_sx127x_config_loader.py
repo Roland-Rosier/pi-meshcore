@@ -20,7 +20,6 @@ import importlib.resources
 from pathlib import Path
 
 import aiologic
-from pydantic import ValidationError
 from ruamel.yaml import YAML
 
 from pi_lora.drivers.rfm9x_sx127x_config_model import (
@@ -76,10 +75,7 @@ def load_config(
     if not isinstance(yaml_data, dict):
         raise ValueError("YAML root must be a mapping (dict).")
 
-    try:
-        config: Rfm9xSx127xConfig = Rfm9xSx127xConfig.model_validate(yaml_data)
-    except ValidationError as exc:
-        raise exc
+    config: Rfm9xSx127xConfig = Rfm9xSx127xConfig.model_validate(yaml_data)
 
     if config_name is not None:
         key_map: dict[str, object] = {
@@ -121,10 +117,7 @@ def load_family_config(
         raise ValueError("YAML data missing 'families' key.")
 
     family_data: dict[str, object] = {"families": yaml_data["families"]}
-    try:
-        config: Rfm9xSx127xFamilyConfig = Rfm9xSx127xFamilyConfig.model_validate(family_data)
-    except ValidationError as exc:
-        raise exc
+    config: Rfm9xSx127xFamilyConfig = Rfm9xSx127xFamilyConfig.model_validate(family_data)
 
     return config
 

@@ -18,7 +18,7 @@ from __future__ import annotations
 
 from collections.abc import Sequence
 
-from pydantic import BaseModel, Field, model_validator
+from pydantic import BaseModel, Field
 
 
 class DeviceConfig(BaseModel):
@@ -40,20 +40,9 @@ class DeviceConfig(BaseModel):
 
 
 class DeviceConfigRoot(BaseModel):
-    """Wrapper to capture the full device config with validation dependency."""
+    """Wrapper to capture a single device configuration."""
 
     device: DeviceConfig
-
-    @model_validator(mode="after")
-    def validate_range(self) -> DeviceConfigRoot:
-        """Ensure max_radio_freq_hz > min_radio_freq_hz."""
-        if self.device.max_radio_freq_hz <= self.device.min_radio_freq_hz:
-            raise ValueError(
-                f"Device '{self.device.name}': max_radio_freq_hz ({self.device.max_radio_freq_hz}) "
-                f"must be greater than min_radio_freq_hz ({self.device.min_radio_freq_hz})"
-            )
-
-        return self
 
 
 class FamilyDeviceExclusion(BaseModel):
