@@ -14,8 +14,9 @@
 
 """Asyncio framework event types and payloads for Rfm9xSx127xModule instances."""
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from enum import Enum
+from time import monotonic
 from typing import Any, Generic, Protocol, TypeGuard, TypeVar
 
 from ..types import StateBits
@@ -47,7 +48,7 @@ class ModuleEvent(Generic[T]):
 
     event_type: EventType
     payload: T | None = None
-    timestamp: float = 0.0
+    timestamp: float = field(default_factory=lambda: monotonic())
     source: str = ""
 
 

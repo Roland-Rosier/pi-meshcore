@@ -14,6 +14,9 @@
 
 """Unit tests for framework event dataclasses and enums."""
 
+import math
+from time import monotonic
+
 import pytest
 from src.pi_lora.drivers.rfm9x_sx127x_modes import StateBits
 from src.pi_lora.framework.events import (
@@ -78,13 +81,23 @@ class TestModuleEvent:
         event = ModuleEvent(event_type=EventType.IDLE)
         assert event.event_type == EventType.IDLE
         assert event.payload is None
-        assert event.timestamp == 0.0
+        assert isinstance(event.timestamp, float)
+        assert event.timestamp > 0.0
         assert event.source == ""
 
     def test_frozen_immutability(self) -> None:
         event = ModuleEvent(event_type=EventType.COMMAND)
         with pytest.raises(Exception):  # noqa: B017
             event.payload = "modified"
+
+    def test_timestamp_default_is_monotonic(self) -> None:
+        first = ModuleEvent(event_type=EventType.IDLE)
+        second = ModuleEvent(event_type=EventType.TIMER)
+        assert isinstance(first.timestamp, float)
+        assert math.isfinite(first.timestamp)
+        assert first.timestamp > 0.0
+        assert second.timestamp >= first.timestamp
+        assert monotonic() >= first.timestamp
 
 
 class TestTimerEvent:
