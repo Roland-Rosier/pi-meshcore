@@ -50,5 +50,4 @@ class RealSpiBusFactory:
         from .bus import RealSpiBus
 
         bus_instance = RealSpiBus()
-        bus_instance.open(bus=bus, device=device)
-        return bus_instance  # type: ignore[return-value]
+        return bus_instance

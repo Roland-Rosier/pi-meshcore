@@ -46,7 +46,7 @@ class Rfm9xSx127xHandler:
         spi_bus = module.spi_bus
         if spi_bus is None:
             raise RuntimeError("module.spi_bus is None")
-        response = await spi_bus.xfer2([register & 0x7F, 0x00])  # type: ignore[misc]
+        response = await spi_bus.xfer2(bytearray([register & 0x7F, 0x00]))
         return response[1] if len(response) > 1 else 0
 
     @staticmethod
@@ -55,7 +55,7 @@ class Rfm9xSx127xHandler:
         spi_bus = module.spi_bus
         if spi_bus is None:
             raise RuntimeError("module.spi_bus is None")
-        await spi_bus.xfer2([register | 0x80, value])  # type: ignore[misc]
+        await spi_bus.xfer2(bytearray([register | 0x80, value]))
 
     @staticmethod
     async def set_module_mode(module: "Rfm9xSx127xModule", mode: ModeBits) -> bool:  # noqa: UP037

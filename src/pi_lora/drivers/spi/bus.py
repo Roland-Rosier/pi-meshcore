@@ -14,6 +14,7 @@
 
 from __future__ import annotations
 
+import asyncio
 from typing import Any, Protocol
 
 
@@ -26,11 +27,11 @@ class SpiBus(Protocol):
     def close(self) -> None:
         """Close the SPI bus."""
 
-    def xfer2(self, data: list[int]) -> list[int]:
+    async def xfer2(self, data: bytearray) -> list[int]:
         """Transfer data through the SPI bus.
 
         Args:
-            data: List of byte values to transfer.
+            data: Byte array of byte values to transfer.
 
         Returns:
             List of received byte values.
@@ -82,6 +83,9 @@ class RealSpiBus:
         self._spidev: Any | None = None
         self.bus_number: int = 0
         self.device_number: int = 0
+        # Per-instance asyncio lock guarding the SPI critical section so
+        # simultaneous transfers on the same bus cannot interleave.
+        self._lock: asyncio.Lock = asyncio.Lock()
 
     def open(self, bus: int, device: int) -> None:
         """Open the SPI bus for the given device.
@@ -104,14 +108,16 @@ class RealSpiBus:
             self._spidev.close()
             self._spidev = None
 
-    async def xfer2(self, data: list[int]) -> list[int]:
+    async def xfer2(self, data: bytearray) -> list[int]:
         """Transfer data through the SPI bus.
 
-        Acquires the per-bus critical section lock to prevent simultaneous
-        access when multiple devices share the same SPI bus.
+        Acquires the per-instance critical-section lock to prevent simultaneous
+        access, then offloads the blocking ``spidev.SpiDev.xfer2`` call to a
+        worker thread via ``asyncio.to_thread`` so it does not block the event
+        loop.
 
         Args:
-            data: List of byte values to transfer.
+            data: Byte array of byte values to transfer.
 
         Returns:
             List of received byte values.
@@ -119,14 +125,8 @@ class RealSpiBus:
         if self._spidev is None:
             raise RuntimeError("SPI bus not opened")
 
-        from pi_lora.drivers.spi.locks import get_bus_lock
-
-        lock = get_bus_lock(self.bus_number)
-        await lock.acquire()  # type: ignore[misc,unused-ignore]
-        try:
-            return self._spidev.xfer2(data)  # type: ignore[no-any-return]
-        finally:
-            lock.release()
+        async with self._lock:
+            return await asyncio.to_thread(self._spidev.xfer2, data)
 
     @property
     def max_speed_hz(self) -> int:

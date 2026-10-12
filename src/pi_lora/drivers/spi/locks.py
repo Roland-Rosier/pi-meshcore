@@ -76,6 +76,26 @@ class _SyncSpiLock:
         self._underlying.release()
 
 
+class _SpiAsyncContextLock:
+    """Wraps ``threading.Lock`` as an async context manager for per-instance use.
+
+    ``__aenter__`` offloads the blocking ``acquire`` to a worker thread via
+    ``asyncio.to_thread``; ``__aexit__`` offloads ``release`` the same way, so
+    neither blocks the event loop. Usable as ``with self._lock:`` inside an
+    ``async def`` so the entire critical section is atomic per bus instance.
+    """
+
+    def __init__(self, underlying: Any | None = None) -> None:
+        self._underlying: Any = underlying if underlying is not None else threading.Lock()
+
+    async def __aenter__(self) -> _SpiAsyncContextLock:
+        await asyncio.to_thread(self._underlying.acquire)
+        return self
+
+    async def __aexit__(self, exc: Any = None) -> None:
+        await asyncio.to_thread(self._underlying.release)
+
+
 _bus_locks: dict[int, SpiLock] = {}
 _bus_lock_types: dict[int, type[_AsyncSpiLock] | type[_SyncSpiLock]] = {}
 
