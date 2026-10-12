@@ -41,12 +41,20 @@ class TimerScheduler:
     """One async task per module that posts TIMER events at intervals."""
 
     def __init__(self, default_interval: float = 1.0) -> None:
+        self._validate_interval(default_interval)
         self._default_interval = default_interval
         self._intervals: dict[Rfm9xSx127xModule, float] = {}
         self._tasks: dict[Rfm9xSx127xModule, asyncio.Task[None]] = {}
+        self._registered: set[Rfm9xSx127xModule] = set()
         self._running = False
 
+    @staticmethod
+    def _validate_interval(interval: float | None) -> None:
+        if interval is not None and interval <= 0:
+            raise ValueError(f"Timer interval must be positive, got {interval}")
+
     def set_interval(self, module: Rfm9xSx127xModule, interval: float | None) -> None:
+        self._validate_interval(interval)
         if interval is None:
             self._intervals.pop(module, None)
         else:
@@ -57,6 +65,9 @@ class TimerScheduler:
 
     async def start(self) -> None:
         self._running = True
+        for module in list(self._registered):
+            if module not in self._tasks:
+                self._tasks[module] = asyncio.create_task(self._timer_task(module))
 
     async def stop(self) -> None:
         self._running = False
@@ -67,10 +78,10 @@ class TimerScheduler:
     def register_module(
         self, module: Rfm9xSx127xModule, interval: float | None
     ) -> None:
+        self._validate_interval(interval)
         if interval is not None:
             self._intervals[module] = interval
-        if module not in self._tasks:
-            self._tasks[module] = asyncio.create_task(self._timer_task(module))
+        self._registered.add(module)
 
     async def _timer_task(self, module: Rfm9xSx127xModule) -> None:
         while self._running:
@@ -85,10 +96,11 @@ class TimerScheduler:
 class IdlePacer:
     """Single task that paces all idle-enabled modules with IDLE events."""
 
-    def __init__(self) -> None:
+    def __init__(self, min_interval: float = 0.01) -> None:
         self._idle_enabled_modules: set[Rfm9xSx127xModule] = set()
         self._running = False
         self._task: asyncio.Task[None] | None = None
+        self._min_interval: float = min_interval
 
     def set_idle_enabled(self, module: Rfm9xSx127xModule, enabled: bool) -> None:
         if enabled:
@@ -108,8 +120,8 @@ class IdlePacer:
 
     async def _idle_task(self) -> None:
         while self._running:
-            await asyncio.sleep(0)
-            for module in self._idle_enabled_modules:
+            await asyncio.sleep(self._min_interval)
+            for module in list(self._idle_enabled_modules):
                 await module.event_queue.put(ModuleEvent(EventType.IDLE))
 
 
@@ -119,6 +131,7 @@ class InterruptBridge:
     def __init__(self) -> None:
         self._interrupt_map: dict[int, Rfm9xSx127xModule] = {}
         self._interrupt_event: asyncio.Event | None = None
+        self._triggered_pin: int | None = None
         self._running = False
         self._task: asyncio.Task[None] | None = None
 
@@ -144,14 +157,17 @@ class InterruptBridge:
         while self._running:
             if self._interrupt_event is not None:
                 await self._interrupt_event.wait()
-                for gpio_pin, module in self._interrupt_map.items():
-                    await module.event_queue.put(
-                        ModuleEvent(EventType.INTERRUPT, InterruptEvent(gpio_pin))
-                    )
+                for gpio_pin, module in list(self._interrupt_map.items()):
+                    if gpio_pin == self._triggered_pin:
+                        await module.event_queue.put(
+                            ModuleEvent(EventType.INTERRUPT, InterruptEvent(gpio_pin))
+                        )
                 self._interrupt_event.clear()
+                self._triggered_pin = None
 
     def trigger_interrupt(self, gpio_pin: int) -> None:
         """Called by GPIO driver when interrupt fires."""
+        self._triggered_pin = gpio_pin
         if self._interrupt_event is not None:
             self._interrupt_event.set()
 
@@ -170,9 +186,9 @@ class Scheduler:
         await self.interrupt_bridge.start()
 
     async def stop(self) -> None:
-        await self.interrupt_bridge.stop()
-        await self.idle_pacer.stop()
         await self.timer_scheduler.stop()
+        await self.idle_pacer.stop()
+        await self.interrupt_bridge.stop()
 
     def register_module(
         self,

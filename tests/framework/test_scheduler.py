@@ -53,9 +53,13 @@ class TestTimerScheduler:
         assert ts.get_interval(mock_module) is None
 
     @pytest.mark.asyncio
-    async def test_register_module_creates_task(self, mock_module: MagicMock) -> None:
+    async def test_register_module_defers_task_until_start(
+        self, mock_module: MagicMock
+    ) -> None:
         ts = TimerScheduler()
         ts.register_module(mock_module, 1.0)
+        assert mock_module not in ts._tasks
+        await ts.start()
         assert mock_module in ts._tasks
         assert ts._tasks[mock_module] is not None
 

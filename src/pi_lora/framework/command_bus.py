@@ -17,6 +17,7 @@
 from __future__ import annotations
 
 import asyncio
+import logging
 from collections.abc import Callable
 from typing import TYPE_CHECKING, Any
 
@@ -60,7 +61,15 @@ class CommandBus:
         if handler_tuple is None:
             raise ValueError(f"No handler for {type(command).__name__}")
         handler, _priority = handler_tuple
-        result = handler(command)
+        try:
+            result = handler(command)
+        except Exception as exc:
+            logging.getLogger(__name__).warning(
+                "Command '%s' handler raised: %r",
+                type(command).__name__,
+                exc,
+            )
+            raise
         if asyncio.iscoroutine(result):
             return await result
         return result
