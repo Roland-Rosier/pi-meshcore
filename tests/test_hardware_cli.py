@@ -281,6 +281,45 @@ class TestHardwareFilterOptions:
         module_b.wait_for_event.assert_not_awaited()
 
 
+# ---------------------------------------------------------------------------
+# Phase 6 & 7 — narrowed except + module-level traceback import
+# ---------------------------------------------------------------------------
+
+class TestHardwareRuntimeError:
+    """Phase 6: the narrowed ``except (RuntimeError, ValueError, KeyError)`` path."""
+
+    @pytest.mark.asyncio
+    async def test_runtime_error_traceback(self) -> None:
+        """When ``Application.start`` raises RuntimeError, the traceback path runs."""
+        capture = StringIO()
+        mock_application = _build_mock_application()
+        mock_application.get_assembly_config.return_value = [_build_radio_config(0, 0)]
+        module = _build_module(_SUCCESSFUL_EVENT)
+        module.get_spi_device_id.return_value = 0
+        module.get_ce_number.return_value = 0
+        mock_application.module_manager.get_all_modules.return_value = [module]
+        mock_application.start.side_effect = RuntimeError("startup failed")
+
+        exit_code = await _run_hardware(
+            capture, mock_application, assembly_name="default"
+        )
+
+        assert exit_code == 1, f"Expected exit 1, got {exit_code}: {capture.getvalue()}"
+        assert "Traceback" in capture.getvalue()
+        assert "Failed to start application" in capture.getvalue()
+
+
+class TestTracebackModuleLevel:
+    """Phase 7: ``traceback`` is imported at module level in ``pi_lora.cli.test``."""
+
+    def test_traceback_available_in_module_namespace(self) -> None:
+        """``pi_lora.cli.test`` must expose ``traceback`` in its module namespace."""
+        import pi_lora.cli.test as _test_cmd
+
+        assert hasattr(_test_cmd, "traceback")
+        assert "traceback" in _test_cmd.__dict__
+
+
 if __name__ == "__main__":
     exit_code = pytest.main([__file__, "-v"])
     sys.exit(exit_code)

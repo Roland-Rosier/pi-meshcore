@@ -1,22 +1,10 @@
 """Main CLI entry point for pi_lora package."""
 
-import logging
-import os
+from __future__ import annotations
 
 import typer
 
-
-def setup_logging() -> None:
-    """Configure root logger using PI_LORA_LOG_LEVEL environment variable.
-
-    Safe to call multiple times — basicConfig is idempotent after first call.
-    """
-    log_level = os.environ.get("PI_LORA_LOG_LEVEL", "WARNING").upper()
-    logging.basicConfig(
-        level=getattr(logging, log_level, logging.WARNING),
-        format="%(asctime)s %(levelname)s %(name)s: %(message)s",
-    )
-
+from pi_lora.cli._logging import setup_logging
 
 setup_logging()
 

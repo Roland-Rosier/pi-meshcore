@@ -268,6 +268,30 @@ class TestShowConfigCustomConfig:
         assert call_kwargs.kwargs.get("config_path") is not None
 
 
+class TestShowConfigPathImportRemoved:
+    """Phase 42: the redundant local ``from pathlib import Path`` was removed
+    from ``show_config_impl``; the module-level import still covers it."""
+
+    @pytest.mark.asyncio
+    async def test_show_config_impl_runs_with_custom_config(self) -> None:
+        """show_config_impl must resolve a custom config path after removal."""
+        capture = io.StringIO()
+        mock_application = MagicMock()
+        mock_result = MagicMock()
+        mock_result.module_name = "test_module"
+        mock_result.spi_device_id = 0
+        mock_result.ce_number = 0
+        mock_result.device_name = "RFM95"
+        mock_application.get_assembly_config = AsyncMock(return_value=[mock_result])
+        exit_code = await _run_show_config(
+            capture, mock_application, assembly_name="default", spi=None, ce=None, json_output=False, config_file="/path/to/config.yaml"
+        )
+        assert exit_code == 0
+        assert "RFM95" in capture.getvalue()
+        call_kwargs = mock_application.get_assembly_config.call_args
+        assert call_kwargs.kwargs.get("config_path") is not None
+
+
 if __name__ == "__main__":
     exit_code = pytest.main([__file__, "-v"])
     sys.exit(exit_code)

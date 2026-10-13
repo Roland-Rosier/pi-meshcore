@@ -645,6 +645,52 @@ class TestDetectModulesExtendedFlag:
         assert extended_val is False or "extended" not in call_kwargs.kwargs
 
 
+# ---------------------------------------------------------------------------
+# Phase 3 & 4 — no sys.path side effect; detect_modules configures logging
+# ---------------------------------------------------------------------------
+
+class TestLoggingAndSysPath:
+    """Phase 3 & 4: the sys.path side-effect block is gone and
+    ``detect_modules`` configures logging when invoked directly."""
+
+    def test_detect_modules_configures_logging_when_called_directly(self) -> None:
+        """Calling ``detect_modules`` directly must configure logging first."""
+        import pi_lora.cli.check_hardware as _ch
+
+        mock_detector = _build_mock_detector(
+            ce_pins=[0, 1],
+            module_type_strings=[
+                "RFM95W (High-Band 868MHz / Semtech SX1276)",
+                "RFM98W (Low-Band 433Mhz / Semtech SX1278)",
+            ],
+            communication_successes=[True, True],
+        )
+
+        with patch(_DETECTOR_PATCH_PATH, return_value=mock_detector), patch.object(
+            _ch, "_ensure_logged"
+        ) as _spy:
+            _ch.detect_modules(ce0=None, ce1=None, extended=False)
+
+        _spy.assert_called_once()
+
+    def test_no_syspath_side_effect_in_output(self) -> None:
+        """The old ``Added project root to sys.path`` side effect must never appear."""
+        runner = CliRunner()
+        mock_detector = _build_mock_detector(
+            ce_pins=[0, 1],
+            module_type_strings=[
+                "RFM95W (High-Band 868MHz / Semtech SX1276)",
+                "RFM98W (Low-Band 433Mhz / Semtech SX1278)",
+            ],
+            communication_successes=[True, True],
+        )
+
+        with patch(_DETECTOR_PATCH_PATH, return_value=mock_detector):
+            result = runner.invoke(cli_app, ["detect-modules"])
+
+        assert "Added project root to sys.path" not in result.output
+
+
 if __name__ == "__main__":
     """Run tests using pytest."""
     import sys as _sys

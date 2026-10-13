@@ -22,6 +22,7 @@ subcommands (check-hardware, config, test) and that each sub-app's
 from __future__ import annotations
 
 from typing import Any
+from unittest.mock import patch
 
 import pytest
 from typer.testing import CliRunner
@@ -161,6 +162,36 @@ class TestNoArgsShowsHelp:
         assert "check-hardware" in result.output
         assert "config" in result.output
         assert "test" in result.output
+
+
+# ---------------------------------------------------------------------------
+# Test 6 — shared logging module is the single source of truth
+# ---------------------------------------------------------------------------
+
+class TestSharedLogging:
+    """Phase 15: ``pi_lora.cli._logging`` owns the shared logging setup."""
+
+    def test_setup_logging_exists_and_is_callable(self) -> None:
+        """Import and call ``pi_lora.cli._logging.setup_logging`` directly.
+
+        Verify the module exposes ``setup_logging`` and that calling it does
+        not raise.
+        """
+        import pi_lora.cli._logging as _shared
+
+        assert callable(_shared.setup_logging)
+        assert callable(_shared._ensure_logged)
+        _shared.setup_logging()
+        _shared._ensure_logged()
+
+    def test_check_hardware_ensure_logged_delegates(self) -> None:
+        """``check_hardware._ensure_logged`` must delegate to the shared module."""
+        import pi_lora.cli._logging as _shared
+        import pi_lora.cli.check_hardware as _ch
+
+        with patch.object(_shared, "setup_logging", autospec=True) as _spy:
+            _ch._ensure_logged()
+            _spy.assert_called_once()
 
 
 if __name__ == "__main__":

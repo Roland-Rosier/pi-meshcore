@@ -35,7 +35,7 @@ from pi_lora.framework.exceptions import (
 
 
 def _ensure_logged() -> None:
-    from pi_lora.cli.main import setup_logging
+    from pi_lora.cli._logging import setup_logging
     setup_logging()
 
 
@@ -172,8 +172,6 @@ async def show_config_impl(
 ) -> None:
     """Show configuration for an assembly."""
     _ensure_logged()
-
-    from pathlib import Path
 
     custom_path: Path | None = Path(config_file) if config_file else None
 
