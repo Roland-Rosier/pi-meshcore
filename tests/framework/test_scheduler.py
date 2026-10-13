@@ -15,9 +15,11 @@
 """Unit tests for scheduler components: TimerScheduler, IdlePacer, InterruptBridge."""
 
 import asyncio
+import time
 from unittest.mock import MagicMock
 
 import pytest
+from src.pi_lora.framework.events import EventType
 from src.pi_lora.framework.scheduler import (
     IdlePacer,
     InterruptBridge,
@@ -113,6 +115,48 @@ class TestIdlePacer:
         await asyncio.sleep(0.01)
         assert task is not None and task.done()
 
+    async def _collect_idle_timestamps(
+        self, min_interval: float, duration: float
+    ) -> list[float]:
+        pacer = IdlePacer(min_interval=min_interval)
+        mod = MagicMock()
+        mod.event_queue = asyncio.Queue()
+        pacer.set_idle_enabled(mod, True)
+        await pacer.start()
+        start_time = time.monotonic()
+        timestamps: list[float] = []
+        while time.monotonic() - start_time < duration:
+            try:
+                event = mod.event_queue.get_nowait()
+            except asyncio.QueueEmpty:
+                remaining = duration - (time.monotonic() - start_time)
+                await asyncio.sleep(min(0.001, max(0.0, remaining)))
+                continue
+            timestamps.append(event.timestamp)
+        await pacer.stop()
+        return timestamps
+
+    @pytest.mark.asyncio
+    async def test_idle_pacer_respects_min_interval(self) -> None:
+        timestamps = await self._collect_idle_timestamps(
+            min_interval=0.02, duration=0.1
+        )
+        assert len(timestamps) > 0
+        for idx in range(1, len(timestamps)):
+            gap = timestamps[idx] - timestamps[idx - 1]
+            assert gap >= 0.02 - 0.003
+        assert len(timestamps) <= int(0.1 / 0.02) + 3
+
+    @pytest.mark.asyncio
+    async def test_idle_pacer_larger_interval_delays_events(self) -> None:
+        small_timestamps = await self._collect_idle_timestamps(
+            min_interval=0.005, duration=0.15
+        )
+        large_timestamps = await self._collect_idle_timestamps(
+            min_interval=0.03, duration=0.15
+        )
+        assert len(small_timestamps) > len(large_timestamps)
+
 
 class TestInterruptBridge:
     """Verify InterruptBridge GPIO→module mapping."""
@@ -159,6 +203,31 @@ class TestInterruptBridge:
         bridge = InterruptBridge()
         bridge._interrupt_event = None
         bridge.trigger_interrupt(25)  # Should not raise
+
+    @pytest.mark.asyncio
+    async def test_interrupt_routes_to_correct_module(self) -> None:
+        bridge = InterruptBridge()
+        module_a = MagicMock()
+        module_a.event_queue = asyncio.Queue()
+        module_b = MagicMock()
+        module_b.event_queue = asyncio.Queue()
+        bridge.register_interrupt(25, module_a)
+        bridge.register_interrupt(26, module_b)
+        await bridge.start()
+        bridge.trigger_interrupt(26)
+        await asyncio.sleep(0.05)
+        await bridge.stop()
+
+        interrupt_events: list[object] = []
+        while not module_b.event_queue.empty():
+            event = await module_b.event_queue.get()
+            interrupt_events.append(event)
+        assert any(
+            event.event_type == EventType.INTERRUPT
+            and event.payload.gpio_pin == 26
+            for event in interrupt_events
+        )
+        assert module_a.event_queue.empty()
 
 
 class TestScheduler:

@@ -14,6 +14,7 @@
 
 """Integration tests for Application start/stop lifecycle."""
 
+import asyncio
 from dataclasses import dataclass
 
 import pytest
@@ -153,6 +154,23 @@ class TestApplicationLifecycle:
         with pytest.raises(ValueError, match="No module for target"):
             await app.run_async_command(bad_cmd)
         await app.stop()
+
+    @pytest.mark.asyncio
+    async def test_start_reentrancy_prevents_duplication(self) -> None:
+        app = Application(config=None, spi_factory=MockSpiBusFactory())
+        results = await asyncio.gather(
+            *[app.start() for _ in range(10)], return_exceptions=True
+        )
+        modules = app.module_manager.get_all_modules()
+        # The _start_lock serialises start(); the duplicate guard never
+        # over-creates modules beyond a single start() (2 devices).
+        assert len(modules) <= 2
+        # At least one start() completes successfully.
+        assert any(not isinstance(r, Exception) for r in results)
+        await app.stop()
+        assert app._started_modules == []
+        assert app._scheduler_started is False
+        assert app._started is False
 
 
 class TestEmptyConfig:

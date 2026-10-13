@@ -15,6 +15,7 @@
 """Unit tests for CommandBus handler registry and execute/dispatch."""
 
 import asyncio
+import logging
 from dataclasses import dataclass
 from typing import Any
 
@@ -114,6 +115,21 @@ class TestHandlerRegistry:
         bus = CommandBus()
         with pytest.raises(ValueError, match="No handler for"):
             asyncio.run(bus.execute(TestCommand()))
+
+    def test_execute_logs_and_rises_on_exception(self, caplog) -> None:
+        bus = CommandBus()
+
+        def raising_handler(_cmd: TestCommand) -> None:
+            raise ValueError("handler failed")
+
+        bus.register_handler(TestCommand, raising_handler)
+        cmd = TestCommand(action="x")
+        with pytest.raises(ValueError, match="handler failed"):
+            asyncio.run(bus.execute(cmd))
+        assert any(
+            rec.levelno == logging.WARNING and "TestCommand" in rec.message
+            for rec in caplog.records
+        )
 
 
 class TestAsyncDispatch:
