@@ -22,6 +22,12 @@ import pytest
 from src.pi_lora.framework.command_bus import CommandBus
 
 
+def subclass_from_base(base: type[Any], **kwargs: Any) -> Any:
+    """Build a runtime class sharing *base*'s name for subclass dispatch tests."""
+    attrs: dict[str, Any] = {k: v for k, v in kwargs.items()}
+    return type(base.__name__, (base,), attrs)
+
+
 @dataclass(frozen=True)
 class TestCommand:
     """Minimal test command with a target tuple."""
@@ -72,7 +78,7 @@ class TestHandlerRegistry:
         assert len(calls) == 1
         assert calls[0] == 2
 
-    def test_priority_does_not_override_equal(self) -> None:
+    def test_priority_equal_raises(self) -> None:
         bus = CommandBus()
         calls: list[int] = []
 
@@ -83,10 +89,26 @@ class TestHandlerRegistry:
             calls.append(2)
 
         bus.register_handler(TestCommand, first_handler, priority=0)
-        bus.register_handler(TestCommand, second_handler, priority=0)
-        asyncio.run(bus.execute(TestCommand()))
-        assert len(calls) == 1
-        assert calls[0] == 1
+        with pytest.raises(
+            ValueError, match=r"Handler for 'TestCommand' already registered"
+        ):
+            bus.register_handler(TestCommand, second_handler, priority=0)
+
+    def test_subclass_dispatch(self) -> None:
+        bus = CommandBus()
+        calls: list[str] = []
+
+        def base_handler(cmd: TestCommand) -> str:
+            calls.append(cmd.action)
+            return cmd.action
+
+        bus.register_handler(TestCommand, base_handler)
+
+        subclass = subclass_from_base(TestCommand)
+        instance = subclass(action="sub")
+        ret = asyncio.run(bus.execute(instance))
+        assert ret == "sub"
+        assert calls == ["sub"]
 
     def test_no_handler_raises(self) -> None:
         bus = CommandBus()

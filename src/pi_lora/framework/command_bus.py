@@ -29,7 +29,7 @@ class CommandBus:
     """Registry of command handlers keyed by command type with module resolver."""
 
     def __init__(self) -> None:
-        self._handlers: dict[type[Any], tuple[Callable[..., Any], int]] = {}
+        self._handlers: dict[str, tuple[Callable[..., Any], int]] = {}
         self._module_resolver: Callable[[Any], Any] | None = None
 
     def register_handler(
@@ -38,11 +38,19 @@ class CommandBus:
         handler: Callable[..., Any],
         priority: int = 0,
     ) -> None:
-        """Register *handler* for *command_type* with optional *priority*."""
-        existing = self._handlers.get(command_type)
+        """Register *handler* for *command_type* with optional *priority*.
+
+        Raises when an existing handler is already registered at an equal or
+        higher priority.
+        """
+        key = command_type.__name__
+        existing = self._handlers.get(key)
         if existing is not None and existing[1] >= priority:
-            return
-        self._handlers[command_type] = (handler, priority)
+            raise ValueError(
+                f"Handler for '{command_type.__name__}' already registered "
+                f"at priority >= {existing[1]}"
+            )
+        self._handlers[key] = (handler, priority)
 
     def set_module_resolver(
         self,
@@ -52,12 +60,16 @@ class CommandBus:
         self._module_resolver = resolver
 
     async def execute(self, command: Any) -> Any:
-        """Synchronously dispatch *command* to its registered handler.
+        """Directly dispatch *command* to its registered handler.
+
+        Dispatch is immediate (not queued to an event queue); the method is
+        async only so coroutine handlers can be awaited. Handlers keyed by a
+        command's base class also match subclasses.
 
         If the handler is a coroutine function it is awaited; otherwise it
         is called directly.
         """
-        handler_tuple = self._handlers.get(type(command))
+        handler_tuple = self._handlers.get(command.__class__.__name__)
         if handler_tuple is None:
             raise ValueError(f"No handler for {type(command).__name__}")
         handler, _priority = handler_tuple
