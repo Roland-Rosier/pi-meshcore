@@ -14,7 +14,7 @@
 
 from .bus import RealSpiBus, SpiBus
 from .factory import RealSpiBusFactory, SpiBusFactory
-from .locks import get_bus_lock
+from .locks import get_bus_lock, get_bus_lock_sync
 
 __all__: list[str] = [
     "SpiBus",
@@ -22,4 +22,5 @@ __all__: list[str] = [
     "RealSpiBus",
     "RealSpiBusFactory",
     "get_bus_lock",
+    "get_bus_lock_sync",
 ]

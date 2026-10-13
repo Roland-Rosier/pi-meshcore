@@ -17,6 +17,8 @@ from __future__ import annotations
 import asyncio
 from typing import Any, Protocol
 
+from .locks import get_bus_lock
+
 
 class SpiBus(Protocol):
     """Protocol defining the SPI bus interface."""
@@ -83,9 +85,6 @@ class RealSpiBus:
         self._spidev: Any | None = None
         self.bus_number: int = 0
         self.device_number: int = 0
-        # Per-instance asyncio lock guarding the SPI critical section so
-        # simultaneous transfers on the same bus cannot interleave.
-        self._lock: asyncio.Lock = asyncio.Lock()
 
     def open(self, bus: int, device: int) -> None:
         """Open the SPI bus for the given device.
@@ -111,10 +110,11 @@ class RealSpiBus:
     async def xfer2(self, data: bytearray) -> list[int]:
         """Transfer data through the SPI bus.
 
-        Acquires the per-instance critical-section lock to prevent simultaneous
-        access, then offloads the blocking ``spidev.SpiDev.xfer2`` call to a
-        worker thread via ``asyncio.to_thread`` so it does not block the event
-        loop.
+        Acquires the shared per-bus critical-section lock from the lock registry
+        (the same lock instance for every bus on the same bus number) to prevent
+        simultaneous transfers on the same bus from interleaving, then offloads
+        the blocking ``spidev.SpiDev.xfer2`` call to a worker thread via
+        ``asyncio.to_thread`` so it does not block the event loop.
 
         Args:
             data: Byte array of byte values to transfer.
@@ -125,8 +125,12 @@ class RealSpiBus:
         if self._spidev is None:
             raise RuntimeError("SPI bus not opened")
 
-        async with self._lock:
+        lock = await get_bus_lock(self.bus_number)
+        await lock.acquire()
+        try:
             return await asyncio.to_thread(self._spidev.xfer2, data)
+        finally:
+            lock.release()
 
     @property
     def max_speed_hz(self) -> int:
