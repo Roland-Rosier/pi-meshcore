@@ -90,7 +90,7 @@ class RadioInstanceError(Exception):
         self.context: dict[str, object] = context or {}
 
 
-class ModuleNotFoundError(RadioInstanceError):
+class DriverModuleNotFoundError(RadioInstanceError):
     """Raised when a module is not found in the config."""
 
     def __init__(self, module_name: str) -> None:
@@ -156,7 +156,7 @@ async def create_radio_instance(
         Fully populated RadioInstanceConfig.
 
     Raises:
-        ModuleNotFoundError: If module_name not in config.modules.
+        DriverModuleNotFoundError: If module_name not in config.modules.
         DeviceAttachmentNotFoundError: If no attachment matches spi_device_id/ce_number.
         AssemblyNotFoundError: If no assembly found for the module.
         DeviceSpecNotFoundError: If device spec not in config.devices.
@@ -176,7 +176,7 @@ async def create_radio_instance(
     # 2. Get module name from assembly
     module_name = assembly.module_name
     if module_name not in config.modules:
-        raise ModuleNotFoundError(module_name)
+        raise DriverModuleNotFoundError(module_name)
 
     module_obj = config.modules[module_name]
 

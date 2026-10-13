@@ -34,8 +34,8 @@ from pi_lora.drivers.rfm9x_sx127x_radio_instance import (
     DeviceAttachmentNotFoundError,
     DeviceIdentity,
     DeviceSpecNotFoundError,
+    DriverModuleNotFoundError,
     FamilyNotFoundError,
-    ModuleNotFoundError,
     RadioInstanceConfig,
     RadioInstanceError,
     create_radio_instance,
@@ -528,7 +528,7 @@ class TestExceptions:
 
     @pytest.mark.asyncio
     async def test_module_not_found_error(self) -> None:
-        """Test ModuleNotFoundError when assembly module_name not in config.modules."""
+        """Test DriverModuleNotFoundError when assembly module_name not in config.modules."""
         devices: dict[str, DeviceConfig] = {
             "RFM95": DeviceConfig(
                 name="RFM95",
@@ -579,7 +579,7 @@ class TestExceptions:
             assemblies=assemblies,
         )
 
-        with pytest.raises(ModuleNotFoundError) as exc_info:
+        with pytest.raises(DriverModuleNotFoundError) as exc_info:
             await create_radio_instance(
                 assembly_name="test_asm",
                 spi_device_id=0,
@@ -587,7 +587,7 @@ class TestExceptions:
                 config=config,
             )
 
-        exc: ModuleNotFoundError = exc_info.value
+        exc: DriverModuleNotFoundError = exc_info.value
         assert "nonexistent_mod" in str(exc)
         assert isinstance(exc, RadioInstanceError)
 
@@ -1315,8 +1315,8 @@ class TestPartialAssemblyConfig:
 
     @pytest.mark.asyncio
     async def test_no_matching_assembly(self, config_no_assemblies: Rfm9xSx127xConfig) -> None:
-        """Test ModuleNotFoundError when assembly's module_name doesn't match any module."""
-        with pytest.raises(ModuleNotFoundError) as exc_info:
+        """Test DriverModuleNotFoundError when assembly's module_name doesn't match any module."""
+        with pytest.raises(DriverModuleNotFoundError) as exc_info:
             await create_radio_instance(
                 assembly_name="other",
                 spi_device_id=0,
@@ -1632,7 +1632,7 @@ class TestExceptionHierarchy:
 
     def test_all_exceptions_inherit_from_radio_instance_error(self) -> None:
         """Test all custom exceptions inherit from RadioInstanceError."""
-        assert issubclass(ModuleNotFoundError, RadioInstanceError)
+        assert issubclass(DriverModuleNotFoundError, RadioInstanceError)
         assert issubclass(DeviceAttachmentNotFoundError, RadioInstanceError)
         assert issubclass(AssemblyNotFoundError, RadioInstanceError)
         assert issubclass(DeviceSpecNotFoundError, RadioInstanceError)
@@ -1641,12 +1641,12 @@ class TestExceptionHierarchy:
 
     def test_exception_context_default_empty(self) -> None:
         """Test that context defaults to empty dict when not provided."""
-        exc: ModuleNotFoundError = ModuleNotFoundError("test_mod")
+        exc: DriverModuleNotFoundError = DriverModuleNotFoundError("test_mod")
         assert exc.context == {"module_name": "test_mod"}
 
     def test_exception_message_contains_module_name(self) -> None:
         """Test exception messages contain relevant identifiers."""
-        exc1: ModuleNotFoundError = ModuleNotFoundError("my_mod")
+        exc1: DriverModuleNotFoundError = DriverModuleNotFoundError("my_mod")
         assert "my_mod" in str(exc1)
 
         exc2: DeviceAttachmentNotFoundError = DeviceAttachmentNotFoundError("my_mod", 5, 3)
