@@ -14,7 +14,10 @@
 
 from __future__ import annotations
 
-from pi_lora.drivers.spi.bus import SpiBus
+import os
+
+from pi_lora.drivers.spi.bus import RealSpiBus, SpiBus
+from tests.fakes import create_fake_spi_dev, spidev_kernel_patch
 
 
 class MockSpiBus:
@@ -141,3 +144,54 @@ class MockSpiBusFactory:
         mock_bus = MockSpiBus(max_speed_hz=1000000, mode=0, lsbfirst=False, no_cs=False)
         mock_bus.open(bus=bus, device=device)
         return mock_bus
+
+
+def hardware_enabled() -> bool:
+    """Return True when the ``PI_LORA_HARDWARE`` runtime flag is set to ``1``.
+
+    Real-hardware integration tests are gated on this flag so they run only on
+    actual RPi hardware and remain valid no-ops when the flag is unset.
+
+    :return: True when ``os.environ["PI_LORA_HARDWARE"] == "1"``.
+    """
+    return os.environ.get("PI_LORA_HARDWARE", "0") == "1"
+
+
+def spidev_available() -> bool:
+    """Return True when the real ``spidev`` Cython extension is importable.
+
+    :return: True if ``import spidev`` succeeds.
+    """
+    try:
+        import spidev  # noqa: F401
+
+        return True
+    except ImportError:
+        return False
+
+
+class FakeSpiBusKernelFactory:
+    """Produces a ``RealSpiBus`` wired to a fake ``spidev`` kernel SPI.
+
+    The factory builds a real :class:`RealSpiBus`, then opens it inside
+    :func:`spidev_kernel_patch` so ``RealSpiBus.open`` exercises the genuine
+    ``import spidev`` / ``spidev.SpiDev()`` / ``.open()`` path with a
+    :class:`FakeSpiDev` kernel instead of the real Cython extension. This
+    exercises the ``RealSpiBus -> spidev -> kernel SPI`` chain end-to-end.
+    """
+
+    def create(self, bus: int, device: int) -> RealSpiBus:
+        """Return an opened ``RealSpiBus`` whose ``_spidev`` is a :class:`FakeSpiDev`.
+
+        Args:
+            bus: The bus identifier.
+            device: The device identifier.
+
+        Returns:
+            An opened ``RealSpiBus`` whose ``_spidev`` is the fake kernel.
+        """
+        bus_instance: RealSpiBus = RealSpiBus()
+        fake_kernel = create_fake_spi_dev(module_type="rfm95w")
+        with spidev_kernel_patch(fake_kernel):
+            bus_instance.open(bus=bus, device=device)
+        return bus_instance

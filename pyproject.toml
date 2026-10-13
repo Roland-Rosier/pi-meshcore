@@ -147,6 +147,7 @@ markers = [
     "slow: marks tests as slow (deselect with '-m \"not slow\"')",
     "integration: marks tests as integration tests",
     "asyncio: marks tests as async tests",
+    "hardware: marks real-hardware integration tests (gated on PI_LORA_HARDWARE=1)",
 ]
 pythonpath = ["src"]
 asyncio_mode = "strict"

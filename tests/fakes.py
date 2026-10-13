@@ -14,6 +14,10 @@
 
 """Fake SPI driver for testing LoRa module detection."""
 
+import sys
+import types
+from collections.abc import Iterator
+from contextlib import contextmanager
 from unittest.mock import MagicMock
 
 
@@ -428,6 +432,31 @@ def patch_spidev_with_fake(fake_spi: FakeSpiDev) -> MagicMock:
     mock = MagicMock()
     mock.return_value = fake_spi
     return mock
+
+
+@contextmanager
+def spidev_kernel_patch(fake_spi: FakeSpiDev) -> Iterator[object]:
+    """Inject a fake ``spidev`` module into ``sys.modules`` so that
+    ``import spidev`` (as performed by ``RealSpiBus.open``) resolves to a module
+    whose ``SpiDev`` returns *fake_spi*.
+
+    This wires the ``RealSpiBus -> spidev -> kernel SPI`` chain end-to-end without
+    requiring the real ``spidev`` Cython extension to be importable. The injected
+    module is removed (or restored) on exit so no namespace pollution persists.
+
+    :param fake_spi: The FakeSpiDev kernel to expose as ``spidev.SpiDev``.
+    :yield: The injected fake spidev module.
+    """
+    backup: object | None = sys.modules.get("spidev", None)
+    fake_module: types.SimpleNamespace = types.SimpleNamespace(SpiDev=lambda: fake_spi)
+    sys.modules["spidev"] = fake_module  # type: ignore[assignment]
+    try:
+        yield fake_module
+    finally:
+        if backup is None:
+            sys.modules.pop("spidev", None)
+        else:
+            sys.modules["spidev"] = backup  # type: ignore[assignment]
 
 
 def verify_frequency_in_range(fake_spi: FakeSpiDev, frequency_khz: int) -> bool:
