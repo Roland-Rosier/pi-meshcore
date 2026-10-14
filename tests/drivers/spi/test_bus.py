@@ -60,10 +60,11 @@ class TestMockSpiBusOpenClose:
         assert bus.bus_number == 1
         assert bus.device_number == 3
 
-    def test_close_clears_registers(self) -> None:
+    @pytest.mark.asyncio
+    async def test_close_clears_registers(self) -> None:
         bus = MockSpiBus()
         bus.open(bus=0, device=0)
-        bus.xfer2([0x81, 0xFF])
+        await bus.xfer2([0x81, 0xFF])
         bus.close()
         assert bus._registers == {}
 
