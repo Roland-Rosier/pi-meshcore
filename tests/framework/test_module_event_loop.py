@@ -63,8 +63,9 @@ def mock_state(module: Any) -> AsyncMock:
 class TestEventLoopStartStop:
     """Verify event loop start/stop behavior."""
 
-    def test_start_event_loop_creates_task(self, module: Any) -> None:
-        asyncio.run(module.start_event_loop())
+    @pytest.mark.asyncio
+    async def test_start_event_loop_creates_task(self, module: Any) -> None:
+        await module.start_event_loop()
         assert module.event_loop_task is not None
 
     @pytest.mark.asyncio

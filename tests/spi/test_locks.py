@@ -14,7 +14,9 @@
 
 """Tests for the SPI lock registry and context-aware dual-mode locks."""
 
-from unittest.mock import AsyncMock, MagicMock
+import asyncio
+from typing import Any
+from unittest.mock import MagicMock, patch
 
 import pytest
 
@@ -88,22 +90,33 @@ class TestRealSpiBusXfer2:
 
     @pytest.mark.asyncio
     async def test_xfer2_uses_shared_bus_lock(self) -> None:
-        bus_one = RealSpiBus()
-        bus_one.bus_number = 0
-        bus_one._spidev = AsyncMock()
-        bus_one._spidev.xfer2 = MagicMock(return_value=[0, 0, 0])
-
-        bus_two = RealSpiBus()
-        bus_two.bus_number = 0
-        bus_two._spidev = AsyncMock()
-        bus_two._spidev.xfer2 = MagicMock(return_value=[0, 0])
-
         assert await get_bus_lock(0) is await get_bus_lock(0)
 
-        result = await bus_one.xfer2(bytearray([1, 2, 3]))
+        bus = RealSpiBus()
+        bus.bus_number = 0
+        bus._spidev = MagicMock()
+        bus._spidev.xfer2 = MagicMock(return_value=[1, 2, 3])
+
+        real_to_thread = asyncio.to_thread
+        observed: list[tuple[Any, tuple[Any, ...]]] = []
+
+        def _spy(callable_: Any, *args: Any) -> Any:
+            observed.append((callable_, args))
+            return real_to_thread(callable_, *args)
+
+        with patch("asyncio.to_thread", _spy):
+            result = await bus.xfer2(bytearray([1, 2, 3]))
+
+        assert result == [1, 2, 3]
         assert isinstance(result, list)
         assert len(result) == 3
 
-        second_result = await bus_two.xfer2(bytearray([4, 5]))
-        assert isinstance(second_result, list)
-        assert len(second_result) == 2
+        xfer2_calls = [
+            (callable_, args)
+            for callable_, args in observed
+            if callable_ is bus._spidev.xfer2
+        ]
+        assert len(xfer2_calls) == 1
+        called_callable, called_args = xfer2_calls[0]
+        assert called_callable is bus._spidev.xfer2
+        assert called_args[0] == bytearray([1, 2, 3])

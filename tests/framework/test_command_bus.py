@@ -48,7 +48,8 @@ class BroadcastCommand:
 class TestHandlerRegistry:
     """Verify register_handler behavior."""
 
-    def test_register_and_execute(self) -> None:
+    @pytest.mark.asyncio
+    async def test_register_and_execute(self) -> None:
         bus = CommandBus()
         results: list[TestCommand] = []
 
@@ -58,12 +59,13 @@ class TestHandlerRegistry:
 
         bus.register_handler(TestCommand, handler)
         cmd = TestCommand(action="hello")
-        result = asyncio.run(bus.execute(cmd))
+        result = await bus.execute(cmd)
         assert result is cmd
         assert len(results) == 1
         assert results[0].action == "hello"
 
-    def test_priority_overrides_lower(self) -> None:
+    @pytest.mark.asyncio
+    async def test_priority_overrides_lower(self) -> None:
         bus = CommandBus()
         calls: list[int] = []
 
@@ -75,7 +77,7 @@ class TestHandlerRegistry:
 
         bus.register_handler(TestCommand, low_handler, priority=0)
         bus.register_handler(TestCommand, high_handler, priority=1)
-        asyncio.run(bus.execute(TestCommand()))
+        await bus.execute(TestCommand())
         assert len(calls) == 1
         assert calls[0] == 2
 
@@ -95,7 +97,8 @@ class TestHandlerRegistry:
         ):
             bus.register_handler(TestCommand, second_handler, priority=0)
 
-    def test_subclass_dispatch(self) -> None:
+    @pytest.mark.asyncio
+    async def test_subclass_dispatch(self) -> None:
         bus = CommandBus()
         calls: list[str] = []
 
@@ -107,16 +110,18 @@ class TestHandlerRegistry:
 
         subclass = subclass_from_base(TestCommand)
         instance = subclass(action="sub")
-        ret = asyncio.run(bus.execute(instance))
+        ret = await bus.execute(instance)
         assert ret == "sub"
         assert calls == ["sub"]
 
-    def test_no_handler_raises(self) -> None:
+    @pytest.mark.asyncio
+    async def test_no_handler_raises(self) -> None:
         bus = CommandBus()
         with pytest.raises(ValueError, match="No handler for"):
-            asyncio.run(bus.execute(TestCommand()))
+            await bus.execute(TestCommand())
 
-    def test_execute_logs_and_rises_on_exception(self, caplog) -> None:
+    @pytest.mark.asyncio
+    async def test_execute_logs_and_rises_on_exception(self, caplog) -> None:
         bus = CommandBus()
 
         def raising_handler(_cmd: TestCommand) -> None:
@@ -125,7 +130,7 @@ class TestHandlerRegistry:
         bus.register_handler(TestCommand, raising_handler)
         cmd = TestCommand(action="x")
         with pytest.raises(ValueError, match="handler failed"):
-            asyncio.run(bus.execute(cmd))
+            await bus.execute(cmd)
         assert any(
             rec.levelno == logging.WARNING and "TestCommand" in rec.message
             for rec in caplog.records
@@ -137,30 +142,32 @@ class TestAsyncDispatch:
 
     @pytest.fixture
     def mock_module(self) -> Any:
-        import asyncio
         mod = type("MockModule", (), {"event_queue": asyncio.Queue()})()
         return mod  # type: ignore[return-value]
 
-    def test_dispatch_sets_resolver(self, mock_module: Any) -> None:
+    @pytest.mark.asyncio
+    async def test_dispatch_sets_resolver(self, mock_module: Any) -> None:
         bus = CommandBus()
 
         def resolver(cmd: TestCommand) -> Any:
             return mock_module
 
         bus.set_module_resolver(resolver)
-        asyncio.run(bus.dispatch(TestCommand(target=(0, 0))))
+        await bus.dispatch(TestCommand(target=(0, 0)))
         assert not mock_module.event_queue.empty()
 
-    def test_dispatch_without_resolver_raises(self) -> None:
+    @pytest.mark.asyncio
+    async def test_dispatch_without_resolver_raises(self) -> None:
         bus = CommandBus()
         with pytest.raises(RuntimeError, match="Module resolver not set"):
-            asyncio.run(bus.dispatch(TestCommand()))
+            await bus.dispatch(TestCommand())
 
 
 class TestSyncVsAsyncHandler:
     """Verify both sync and async handlers work."""
 
-    def test_sync_handler(self) -> None:
+    @pytest.mark.asyncio
+    async def test_sync_handler(self) -> None:
         bus = CommandBus()
         result_holder: list[int] = []
 
@@ -169,16 +176,17 @@ class TestSyncVsAsyncHandler:
             return 42
 
         bus.register_handler(TestCommand, sync_handler)
-        ret = asyncio.run(bus.execute(TestCommand()))
+        ret = await bus.execute(TestCommand())
         assert ret == 42
         assert result_holder == [42]
 
-    def test_async_handler(self) -> None:
+    @pytest.mark.asyncio
+    async def test_async_handler(self) -> None:
         bus = CommandBus()
 
         async def async_handler(cmd: TestCommand) -> str:
             return f"handled:{cmd.action}"
 
         bus.register_handler(TestCommand, async_handler)
-        ret = asyncio.run(bus.execute(TestCommand(action="x")))
+        ret = await bus.execute(TestCommand(action="x"))
         assert ret == "handled:x"
