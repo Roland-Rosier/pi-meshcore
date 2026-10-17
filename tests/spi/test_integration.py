@@ -64,6 +64,34 @@ class TestRealSpiBusKernelChain:
         await bus_two.xfer2(bytearray([0x42, 0x00]))
 
 
+class TestRealSpiBusFactory:
+    """Tests for ``RealSpiBusFactory.create`` opening the bus itself (Fix #2)."""
+
+    @pytest.mark.asyncio
+    async def test_create_returns_opened_bus(self) -> None:
+        """``create`` must return an already-opened bus so ``xfer2`` does not raise.
+
+        The factory now calls ``open(bus, device)`` itself for backward
+        compatibility, so an external caller that never calls ``open()`` gets a
+        bus whose ``xfer2`` does not raise ``RuntimeError("SPI bus not opened")``.
+        ``spidev`` is exercised safely through :func:`spidev_kernel_patch`.
+        """
+        from pi_lora.drivers.spi.factory import RealSpiBusFactory
+        from tests.fakes import create_fake_spi_dev, spidev_kernel_patch
+
+        fake_kernel = create_fake_spi_dev(module_type="rfm95w")
+        with spidev_kernel_patch(fake_kernel):
+            bus = RealSpiBusFactory().create(bus=0, device=1)
+
+        assert bus.bus_number == 0
+        assert bus.device_number == 1
+
+        result = await bus.xfer2(bytearray([0x01 | 0x80, 0x42]))
+        assert isinstance(result, list)
+        assert len(result) == 2
+        assert result == [0x81, 0x42]
+
+
 class TestMockSpiBusSyncLock:
     """Mock SPI bus exercises the synchronous lock path via ``get_bus_lock_sync``."""
 

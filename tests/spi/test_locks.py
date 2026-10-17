@@ -51,6 +51,22 @@ class TestLockRegistry:
         sync_lock = get_bus_lock_sync(0)
         assert async_lock is sync_lock
 
+    @pytest.mark.asyncio
+    async def test_concurrent_get_bus_lock_no_deadlock(self) -> None:
+        """Concurrent ``await get_bus_lock`` on same/different buses resolve."""
+        results = await asyncio.gather(
+            get_bus_lock(0),
+            get_bus_lock(0),
+            get_bus_lock(1),
+            get_bus_lock(1),
+            get_bus_lock(2),
+        )
+        assert len(results) == 5
+        assert results[0] is results[1]
+        assert results[2] is results[3]
+        assert results[0] is not results[2]
+        assert results[2] is not results[4]
+
 
 class TestLockAcquisition:
     """Tests for acquire/release across both contexts."""
@@ -120,3 +136,86 @@ class TestRealSpiBusXfer2:
         called_callable, called_args = xfer2_calls[0]
         assert called_callable is bus._spidev.xfer2
         assert called_args[0] == bytearray([1, 2, 3])
+
+
+class TestAsyncSpiLockRelease:
+    """Tests for ``_AsyncSpiLock.release`` dual branches (Fix #4)."""
+
+    def test_release_awaitable_is_awaited(self) -> None:
+        """A ``release`` returning an awaitable is awaited so the lock is not leaked."""
+        from pi_lora.drivers.spi.locks import _AsyncSpiLock
+
+        released: bool = False
+
+        async def _release_coroutine() -> None:
+            nonlocal released
+            released = True
+
+        underlying = MagicMock()
+        underlying.release.return_value = _release_coroutine()
+
+        lock = _AsyncSpiLock(underlying)
+        lock.release()
+
+        assert released is True
+
+    def test_release_non_awaitable_is_sync(self) -> None:
+        """A ``release`` returning a non-awaitable is released synchronously."""
+        from pi_lora.drivers.spi.locks import _AsyncSpiLock
+
+        underlying = MagicMock()
+        underlying.release.return_value = None
+
+        lock = _AsyncSpiLock(underlying)
+        lock.release()
+
+        underlying.release.assert_called_once()
+
+
+class TestRealSpiBusExceptionMasking:
+    """Tests that ``RealSpiBus.xfer2`` preserves the acquire() exception (Fix #1).
+
+    When ``await lock.acquire()`` raises (cancellation/timeout), the original
+    exception must propagate out of ``xfer2``. The pre-fix implementation called
+    ``lock.release()`` unconditionally in ``finally`` on an unacquired lock,
+    raising ``RuntimeError: release unlocked lock`` and masking the original
+    exception. The fix tracks acquisition success so ``release()`` runs only
+    when ``acquire()`` succeeded.
+    """
+
+    @pytest.mark.asyncio
+    async def test_acquire_failure_preserves_original_exception(self) -> None:
+        """``xfer2`` raises the original acquire() exception, never the mask.
+
+        ``get_bus_lock`` is replaced with an async stub returning a lock whose
+        ``acquire()`` raises and whose ``release()`` asserts it is never called,
+        proving ``release()`` is skipped when ``acquire()`` failed.
+        """
+        bus = RealSpiBus()
+        bus.bus_number = 0
+        bus._spidev = MagicMock()
+        bus._spidev.xfer2 = MagicMock(return_value=[1, 2, 3])
+
+        original_exception: Exception = RuntimeError("lock acquisition cancelled")
+        release_called: bool = False
+
+        async def _acquire() -> None:
+            raise original_exception
+
+        def _release() -> None:
+            nonlocal release_called
+            release_called = True
+
+        fake_lock = MagicMock()
+        fake_lock.acquire = _acquire
+        fake_lock.release = _release
+
+        with patch(
+            "pi_lora.drivers.spi.bus.get_bus_lock",
+            return_value=fake_lock,
+        ), pytest.raises(RuntimeError) as exc_info:
+            await bus.xfer2(bytearray([1, 2, 3]))
+
+        assert exc_info.value is original_exception
+        assert release_called is False
+        bus._spidev.xfer2.assert_not_called()

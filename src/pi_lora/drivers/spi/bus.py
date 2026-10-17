@@ -29,7 +29,7 @@ class SpiBus(Protocol):
     def close(self) -> None:
         """Close the SPI bus."""
 
-    async def xfer2(self, data: bytearray) -> list[int]:
+    async def xfer2(self, data: list[int] | bytearray) -> list[int]:
         """Transfer data through the SPI bus.
 
         Args:
@@ -107,7 +107,7 @@ class RealSpiBus:
             self._spidev.close()
             self._spidev = None
 
-    async def xfer2(self, data: bytearray) -> list[int]:
+    async def xfer2(self, data: list[int] | bytearray) -> list[int]:
         """Transfer data through the SPI bus.
 
         Acquires the shared per-bus critical-section lock from the lock registry
@@ -115,6 +115,11 @@ class RealSpiBus:
         simultaneous transfers on the same bus from interleaving, then offloads
         the blocking ``spidev.SpiDev.xfer2`` call to a worker thread via
         ``asyncio.to_thread`` so it does not block the event loop.
+
+        If ``await lock.acquire()`` raises (cancellation/timeout), the original
+        exception propagates out of ``xfer2``: ``acquired`` stays ``False`` and
+        ``finally`` skips ``lock.release()`` so it never masks the original
+        exception with ``RuntimeError: release unlocked lock``.
 
         Args:
             data: Byte array of byte values to transfer.
@@ -126,11 +131,14 @@ class RealSpiBus:
             raise RuntimeError("SPI bus not opened")
 
         lock = await get_bus_lock(self.bus_number)
-        await lock.acquire()
+        acquired: bool = False
         try:
+            await lock.acquire()
+            acquired = True
             return await asyncio.to_thread(self._spidev.xfer2, data)
         finally:
-            lock.release()
+            if acquired:
+                lock.release()
 
     @property
     def max_speed_hz(self) -> int:

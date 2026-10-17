@@ -67,7 +67,7 @@ class MockSpiBus:
         self._opened = False
         self._registers = {}
 
-    async def xfer2(self, data: list[int]) -> list[int]:
+    async def xfer2(self, data: list[int] | bytearray) -> list[int]:
         """Transfer data through the SPI bus using in-memory simulation.
 
         Implements address-based register simulation matching ``FakeSpiDev``:

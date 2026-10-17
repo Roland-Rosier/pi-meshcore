@@ -15,8 +15,10 @@
 from __future__ import annotations
 
 import asyncio
+import inspect
 import threading
-from typing import Any, Protocol
+from collections.abc import Coroutine
+from typing import Any, Protocol, cast
 
 
 class SpiLock(Protocol):
@@ -53,7 +55,11 @@ class _AsyncSpiLock:
         return self._underlying.acquire()
 
     def release(self) -> None:
-        self._underlying.release()
+        result: Any = self._underlying.release()
+        if inspect.isawaitable(result):
+            import asyncio
+
+            asyncio.run(cast(Coroutine[Any, Any, None], result))
 
 
 class _SyncSpiLock:
@@ -90,6 +96,7 @@ class _SyncSpiLock:
 
 _bus_locks: dict[int, SpiLock] = {}
 _registry_lock: threading.Lock = threading.Lock()
+_async_registry_lock: asyncio.Lock = asyncio.Lock()
 
 
 def _create_bus_lock() -> SpiLock:
@@ -113,8 +120,8 @@ async def get_bus_lock(bus_number: int) -> SpiLock:
 
     The returned lock is the same instance for a given bus number across every
     caller — synchronous and asynchronous alike — guaranteeing per-bus mutual
-    exclusion. Acquisition is guarded by ``_registry_lock`` so the registry dict
-    mutation is race-free.
+    exclusion. Acquisition is guarded by ``_async_registry_lock`` so the registry
+    dict mutation is race-free without blocking the asyncio event loop.
 
     Args:
         bus_number: The bus identifier to lock.
@@ -122,7 +129,7 @@ async def get_bus_lock(bus_number: int) -> SpiLock:
     Returns:
         A SpiLock for the given bus number.
     """
-    with _registry_lock:
+    async with _async_registry_lock:
         if bus_number not in _bus_locks:
             _bus_locks[bus_number] = _create_bus_lock()
         return _bus_locks[bus_number]
