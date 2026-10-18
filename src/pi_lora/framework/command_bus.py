@@ -29,7 +29,7 @@ class CommandBus:
     """Registry of command handlers keyed by command type with module resolver."""
 
     def __init__(self) -> None:
-        self._handlers: dict[str, tuple[Callable[..., Any], int]] = {}
+        self._handlers: dict[type[Any], tuple[Callable[..., Any], int]] = {}
         self._module_resolver: Callable[[Any], Any] | None = None
 
     def register_handler(
@@ -43,14 +43,13 @@ class CommandBus:
         Raises when an existing handler is already registered at an equal or
         higher priority.
         """
-        key = command_type.__name__
-        existing = self._handlers.get(key)
+        existing = self._handlers.get(command_type)
         if existing is not None and existing[1] >= priority:
             raise ValueError(
                 f"Handler for '{command_type.__name__}' already registered "
                 f"at priority >= {existing[1]}"
             )
-        self._handlers[key] = (handler, priority)
+        self._handlers[command_type] = (handler, priority)
 
     def set_module_resolver(
         self,
@@ -69,22 +68,23 @@ class CommandBus:
         If the handler is a coroutine function it is awaited; otherwise it
         is called directly.
         """
-        handler_tuple = self._handlers.get(command.__class__.__name__)
-        if handler_tuple is None:
-            raise ValueError(f"No handler for {type(command).__name__}")
-        handler, _priority = handler_tuple
-        try:
-            result = handler(command)
-        except Exception as exc:
-            logging.getLogger(__name__).warning(
-                "Command '%s' handler raised: %r",
-                type(command).__name__,
-                exc,
-            )
-            raise
-        if asyncio.iscoroutine(result):
-            return await result
-        return result
+        for registered_type, handler_tuple in self._handlers.items():
+            if not isinstance(command, registered_type):
+                continue
+            handler, _priority = handler_tuple
+            try:
+                result = handler(command)
+            except Exception as exc:
+                logging.getLogger(__name__).warning(
+                    "Command '%s' handler raised: %r",
+                    type(command).__name__,
+                    exc,
+                )
+                raise
+            if asyncio.iscoroutine(result):
+                return await result
+            return result
+        raise ValueError(f"No handler for {type(command).__name__}")
 
     async def dispatch(self, command: Any) -> None:
         """Asynchronously post *command* to its target module's event queue."""

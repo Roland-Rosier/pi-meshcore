@@ -59,12 +59,13 @@ class Application:
         self._started_modules: list[Rfm9xSx127xModule] = []
         self._scheduler_started: bool = False
         self._started: bool = False
-        self._start_lock: asyncio.Lock = asyncio.Lock()
-        self._stop_lock: asyncio.Lock = asyncio.Lock()
+        self._lifecycle_lock: asyncio.Lock = asyncio.Lock()
 
     async def start(self, assembly_name: str = "default") -> None:
         """Initialize the application: load modules, register scheduler, start loops."""
-        async with self._start_lock:
+        async with self._lifecycle_lock:
+            if self._started:
+                return
             self._started_modules = []
             self._scheduler_started = False
             try:
@@ -85,7 +86,9 @@ class Application:
 
     async def stop(self) -> None:
         """Gracefully stop all modules and the scheduler."""
-        async with self._stop_lock:
+        async with self._lifecycle_lock:
+            if not self._started:
+                return
             for module in self.module_manager.get_all_modules():
                 try:
                     await module.stop_event_loop(StopMode.DRAIN)

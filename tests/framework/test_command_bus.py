@@ -45,6 +45,20 @@ class BroadcastCommand:
     target: str = "all"
 
 
+@dataclass(frozen=True)
+class BaseCmd:
+    """Base command for subclass dispatch tests with a distinct name."""
+
+    action: str = "base"
+
+
+@dataclass(frozen=True)
+class DerivedCmd(BaseCmd):
+    """Derived command with a distinct name for subclass dispatch tests."""
+
+    action: str = "derived"
+
+
 class TestHandlerRegistry:
     """Verify register_handler behavior."""
 
@@ -113,6 +127,43 @@ class TestHandlerRegistry:
         ret = await bus.execute(instance)
         assert ret == "sub"
         assert calls == ["sub"]
+
+    @pytest.mark.asyncio
+    async def test_subclass_dispatch_different_name(self) -> None:
+        bus = CommandBus()
+        calls: list[str] = []
+
+        def base_handler(cmd: BaseCmd) -> str:
+            calls.append(cmd.action)
+            return cmd.action
+
+        bus.register_handler(BaseCmd, base_handler)
+        instance = DerivedCmd(action="derived")
+        ret = await bus.execute(instance)
+        assert ret == "derived"
+        assert calls == ["derived"]
+
+    @pytest.mark.asyncio
+    async def test_most_specific_dispatch(self) -> None:
+        bus = CommandBus()
+        derived_calls: list[str] = []
+        base_calls: list[str] = []
+
+        def derived_handler(cmd: DerivedCmd) -> str:
+            derived_calls.append(cmd.action)
+            return "derived"
+
+        def base_handler(cmd: BaseCmd) -> str:
+            base_calls.append(cmd.action)
+            return "base"
+
+        bus.register_handler(DerivedCmd, derived_handler)
+        bus.register_handler(BaseCmd, base_handler)
+        instance = DerivedCmd(action="x")
+        ret = await bus.execute(instance)
+        assert ret == "derived"
+        assert derived_calls == ["x"]
+        assert base_calls == []
 
     @pytest.mark.asyncio
     async def test_no_handler_raises(self) -> None:

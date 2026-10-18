@@ -83,6 +83,16 @@ class TestTimerScheduler:
         await asyncio.sleep(0.05)
         assert initial_task.done()
 
+    def test_unregister_timer_module(self, mock_module: MagicMock) -> None:
+        ts = TimerScheduler()
+        ts.register_module(mock_module, 1.0)
+        assert mock_module in ts._registered
+        assert ts.get_interval(mock_module) == 1.0
+        ts.unregister_module(mock_module)
+        assert ts.get_interval(mock_module) is None
+        assert mock_module not in ts._tasks
+        assert mock_module not in ts._registered
+
 
 class TestIdlePacer:
     """Verify IdlePacer manages idle-enabled modules."""
@@ -180,7 +190,6 @@ class TestInterruptBridge:
     async def test_start_creates_event_and_task(self) -> None:
         bridge = InterruptBridge()
         await bridge.start()
-        assert bridge._interrupt_event is not None
         assert bridge._task is not None
 
     @pytest.mark.asyncio
@@ -195,13 +204,12 @@ class TestInterruptBridge:
 
     def test_trigger_interrupt_sets_event(self) -> None:
         bridge = InterruptBridge()
-        bridge._interrupt_event = asyncio.Event()
         bridge.trigger_interrupt(25)
-        assert bridge._interrupt_event.is_set() is True
+        assert bridge._trigger_queue.get_nowait() == 25
+        assert bridge._trigger_queue.empty()
 
     def test_trigger_interrupt_noop_without_event(self) -> None:
         bridge = InterruptBridge()
-        bridge._interrupt_event = None
         bridge.trigger_interrupt(25)  # Should not raise
 
     @pytest.mark.asyncio
@@ -287,3 +295,39 @@ class TestScheduler:
         sched = Scheduler()
         sched.set_idle_enabled(mock_module, True)
         assert mock_module in sched.idle_pacer._idle_enabled_modules
+
+    @pytest.mark.asyncio
+    async def test_unregister_scheduler_module(self, mock_module: MagicMock) -> None:
+        sched = Scheduler()
+        sched.register_module(
+            mock_module,
+            timer_interval=1.0,
+            idle_enabled=True,
+            interrupt_gpio_pins=[25],
+        )
+        assert 25 in sched.interrupt_bridge._interrupt_map
+        sched.unregister_module(mock_module)
+        assert sched.timer_scheduler.get_interval(mock_module) is None
+        assert mock_module not in sched.idle_pacer._idle_enabled_modules
+        assert 25 not in sched.interrupt_bridge._interrupt_map
+        await sched.stop()
+
+    @pytest.mark.asyncio
+    async def test_stop_reverse_order(self) -> None:
+        sched = Scheduler()
+        order: list[str] = []
+
+        async def record_timer() -> None:
+            order.append("timer")
+
+        async def record_idle() -> None:
+            order.append("idle")
+
+        async def record_interrupt() -> None:
+            order.append("interrupt")
+
+        sched.timer_scheduler.stop = record_timer
+        sched.idle_pacer.stop = record_idle
+        sched.interrupt_bridge.stop = record_interrupt
+        await sched.stop()
+        assert order == ["interrupt", "idle", "timer"]

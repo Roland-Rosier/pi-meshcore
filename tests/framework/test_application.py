@@ -172,6 +172,37 @@ class TestApplicationLifecycle:
         assert app._scheduler_started is False
         assert app._started is False
 
+    @pytest.mark.asyncio
+    async def test_start_stop_no_interleave(self) -> None:
+        app = Application(config=None, spi_factory=MockSpiBusFactory())
+        await app.start()
+        assert app._started is True
+        tasks = [app.start() for _ in range(5)] + [app.stop() for _ in range(5)]
+        results = await asyncio.gather(*tasks, return_exceptions=True)
+        assert any(not isinstance(r, Exception) for r in results)
+        modules = app.module_manager.get_all_modules()
+        assert len(modules) <= 2
+        assert app.scheduler.timer_scheduler._running is False
+        assert app.scheduler.idle_pacer._running is False
+        assert app.scheduler.interrupt_bridge._running is False
+        assert app._started is False
+        assert app._started_modules == []
+        assert app._scheduler_started is False
+
+    @pytest.mark.asyncio
+    async def test_stop_reentrancy_prevents_error(self) -> None:
+        app = Application(config=None, spi_factory=MockSpiBusFactory())
+        await app.start()
+        results = await asyncio.gather(
+            *[app.stop() for _ in range(5)], return_exceptions=True
+        )
+        assert all(isinstance(r, Exception) or r is None for r in results)
+        assert app._started is False
+        assert app._started_modules == []
+        assert app._scheduler_started is False
+        await app.stop()
+        assert app._started is False
+
 
 class TestEmptyConfig:
     """Verify Application handles empty config gracefully."""
