@@ -309,6 +309,45 @@ class TestHardwareRuntimeError:
         assert "Failed to start application" in capture.getvalue()
 
 
+class TestHardwareHardwareException:
+    """Phase 6 (fixed): ``OSError``, ``TimeoutError`` and ``ConnectionError``
+    raised by ``Application.start`` are now caught by the expanded ``except``
+    tuple and exit with code 1.
+
+    ``_SUCCESSFUL_EVENT`` is set so the code path reaches ``start()`` before the
+    exception fires; the exception short-circuits the transition block.
+    """
+
+    @pytest.mark.parametrize(
+        "exc",
+        [
+            OSError("hardware init failed"),
+            TimeoutError("event loop timeout"),
+            ConnectionError("radio bus connection lost"),
+        ],
+    )
+    @pytest.mark.asyncio
+    async def test_hardware_exceptions_crafted(self, exc: OSError) -> None:
+        """Each hardware startup exception prints an error and exits with code 1."""
+        capture = StringIO()
+        mock_application = _build_mock_application()
+        mock_application.get_assembly_config.return_value = [_build_radio_config(0, 0)]
+        module = _build_module(_SUCCESSFUL_EVENT)
+        module.get_spi_device_id.return_value = 0
+        module.get_ce_number.return_value = 0
+        mock_application.module_manager.get_all_modules.return_value = [module]
+        mock_application.start.side_effect = exc
+
+        exit_code = await _run_hardware(
+            capture, mock_application, assembly_name="default"
+        )
+
+        assert exit_code == 1, f"Expected exit 1, got {exit_code}: {capture.getvalue()}"
+        assert "Traceback" in capture.getvalue()
+        assert "Failed to start application" in capture.getvalue()
+        mock_application.stop.assert_not_awaited()
+
+
 class TestTracebackModuleLevel:
     """Phase 7: ``traceback`` is imported at module level in ``pi_lora.cli.test``."""
 

@@ -78,7 +78,14 @@ async def test_hardware_impl(
     except DeviceAttachmentNotFoundError as e:
         console.print(f"[red]Error:[/red] {e}")
         raise typer.Exit(code=1) from None
-    except (RuntimeError, ValueError, KeyError) as e:
+    except (
+        RuntimeError,
+        ValueError,
+        KeyError,
+        OSError,
+        TimeoutError,
+        ConnectionError,
+    ) as e:
         console.print(f"[red]Error:[/red] Failed to start application: {e!r}")
         console.print("[red]Traceback:[/red]")
         traceback.print_exc()
