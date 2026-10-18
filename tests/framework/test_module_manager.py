@@ -205,6 +205,41 @@ class TestLoadFromConfig:
         assert len(mm.modules_by_id) == 0
         assert any("rolled back" in msg.lower() for msg in caplog.messages)
 
+    @pytest.mark.asyncio
+    async def test_partial_load_failure_unregisters_scheduler(
+        self, caplog: pytest.LogCaptureFixture,
+    ) -> None:
+        mm = ModuleManager()
+        radio_configs = _make_test_radio_configs()
+        scheduler = Scheduler()
+
+        module0: object = object()
+
+        _call_count: int = 0
+
+        def _construct(*_args: object, **_kwargs: object) -> object:
+            nonlocal _call_count
+            _call_count += 1
+            if _call_count >= 2:
+                raise RuntimeError("Second module construction failed during load")
+            return module0
+
+        with mock.patch(
+            "src.pi_lora.framework.module_manager.Rfm9xSx127xModule",
+            side_effect=_construct,
+        ), pytest.raises(RuntimeError):
+            mm.load_from_config(radio_configs, scheduler)
+
+        assert len(mm.modules) == 0
+        assert len(mm.modules_by_id) == 0
+        assert any("rolled back" in msg.lower() for msg in caplog.messages)
+        assert scheduler.timer_scheduler._registered == set()
+        assert module0 not in scheduler.idle_pacer._idle_enabled_modules
+        assert all(
+            m is not module0 for m in scheduler.interrupt_bridge._interrupt_map.values()
+        )
+        assert 6 not in scheduler.interrupt_bridge._interrupt_map
+
 
 class TestEmptyConfig:
     """Verify ModuleManager handles empty config gracefully."""

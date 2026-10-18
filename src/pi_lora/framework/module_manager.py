@@ -78,7 +78,11 @@ class ModuleManager:
                     for mapping in radio_config.dio_gpio_mappings:
                         parts = mapping.split(":")
                         if len(parts) != 2:
-                            logger.warning(f"Unparseable GPIO mapping {mapping!r}; skipping")
+                            logger.warning(
+                                "Unparseable GPIO mapping %r at config index %d; skipping",
+                                mapping,
+                                index,
+                            )
                             continue
                         gpio_str = parts[1]
                         matched_prefix: str | None = None
@@ -87,12 +91,20 @@ class ModuleManager:
                                 matched_prefix = prefix
                                 break
                         if matched_prefix is None:
-                            logger.warning(f"Unparseable GPIO mapping {mapping!r}; skipping")
+                            logger.warning(
+                                "Unparseable GPIO mapping %r at config index %d; skipping",
+                                mapping,
+                                index,
+                            )
                             continue
                         try:
                             gpio_pins.append(int(gpio_str[len(matched_prefix):]))
                         except ValueError:
-                            logger.warning(f"Unparseable GPIO mapping {mapping!r}; skipping")
+                            logger.warning(
+                                "Unparseable GPIO mapping %r at config index %d; skipping",
+                                mapping,
+                                index,
+                            )
 
                 device_key: DeviceIdentity = radio_config.device_id_key
                 if device_key in self.modules_by_id:
@@ -108,6 +120,8 @@ class ModuleManager:
                 self.modules_by_id[device_key] = module
                 self.modules.append(module)
             except Exception:
+                for module in list(self.modules):
+                    scheduler.unregister_module(module)
                 self.modules.clear()
                 self.modules_by_id.clear()
                 logger.warning(
