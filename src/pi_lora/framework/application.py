@@ -67,17 +67,16 @@ class Application:
             if self._started:
                 return
             self._started_modules = []
-            self._scheduler_started = False
+            self._scheduler_started = True
             try:
                 assembly_result = await self.get_assembly_config(assembly_name)
                 radio_configs: list[RadioInstanceConfig] = assembly_result if isinstance(assembly_result, list) else [assembly_result]
                 self.module_manager.load_from_config(radio_configs, self.scheduler, self.spi_factory)
                 self.command_bus.set_module_resolver(self._resolve_module_for_command)
                 await self.scheduler.start()
-                self._scheduler_started = True
                 for module in self.module_manager.get_all_modules():
-                    await module.init_spi_bus()
                     self._started_modules.append(module)
+                    await module.init_spi_bus()
                     await module.start_event_loop()
                 self._started = True
             except (Exception, asyncio.CancelledError):

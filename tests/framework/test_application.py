@@ -16,6 +16,7 @@
 
 import asyncio
 from dataclasses import dataclass
+from typing import Any
 
 import pytest
 from src.pi_lora.drivers.rfm9x_sx127x_radio_instance import RadioInstanceConfig
@@ -48,6 +49,36 @@ def _make_test_radio_configs() -> list[RadioInstanceConfig]:
 class SimpleCommand:
     action: str = "noop"
     target: tuple[int, int] | None = (0, 0)
+
+
+class _FailingInitModule:
+    """Controllable module whose ``init_spi_bus()`` raises — used for Fix #2.7 tests."""
+
+    def __init__(self, ce_number: int = 0, spi_device_id: int = 0) -> None:
+        self.ce_number: int = ce_number
+        self.spi_device_id: int = spi_device_id
+        self.close_spi_calls: int = 0
+        self.stop_event_loop_calls: int = 0
+
+    async def init_spi_bus(self) -> None:
+        raise RuntimeError("init_spi_bus() failed")
+
+    async def start_event_loop(self) -> None:
+        return None
+
+    async def stop_event_loop(self) -> None:
+        self.stop_event_loop_calls += 1
+        return None
+
+    async def close_spi(self) -> None:
+        self.close_spi_calls += 1
+        return None
+
+    def get_spi_device_id(self) -> int:
+        return self.spi_device_id
+
+    def get_ce_number(self) -> int:
+        return self.ce_number
 
 
 class TestApplicationLifecycle:
@@ -202,6 +233,80 @@ class TestApplicationLifecycle:
         assert app._scheduler_started is False
         await app.stop()
         assert app._started is False
+
+    @pytest.mark.asyncio
+    async def test_scheduler_started_flag_true_before_scheduler_start(self) -> None:
+        """Fix #2.6: _scheduler_started must be True when scheduler.start() is entered."""
+        app = Application(config=None, spi_factory=MockSpiBusFactory())
+        entries: list[bool] = []
+
+        async def failing_start() -> None:
+            entries.append(app._scheduler_started)
+            raise RuntimeError("scheduler.start() failed partway")
+
+        app.scheduler.start = failing_start  # type: ignore[assignment]
+
+        with pytest.raises(RuntimeError):
+            await app.start()
+
+        assert entries == [True]
+        assert app._scheduler_started is False
+        assert app._started_modules == []
+        assert app._started is False
+
+    @pytest.mark.asyncio
+    async def test_partial_scheduler_failure_triggers_cleanup(self) -> None:
+        """Fix #2.6: a partial scheduler failure must call scheduler.stop() via cleanup."""
+        app = Application(config=None, spi_factory=MockSpiBusFactory())
+        stop_calls: list[int] = []
+
+        async def counting_stop() -> None:
+            stop_calls.append(1)
+
+        async def failing_start() -> None:
+            raise RuntimeError("scheduler.start() failed partway")
+
+        app.scheduler.stop = counting_stop  # type: ignore[assignment]
+        app.scheduler.start = failing_start  # type: ignore[assignment]
+
+        with pytest.raises(RuntimeError):
+            await app.start()
+
+        assert stop_calls == [1]
+        assert app._scheduler_started is False
+        assert app._started_modules == []
+        assert app._started is False
+
+    @pytest.mark.asyncio
+    async def test_scheduler_started_flag_true_after_successful_start(self) -> None:
+        """Flag remains True after a successful start and resets on stop()."""
+        app = Application(config=None, spi_factory=MockSpiBusFactory())
+        await app.start()
+        assert app._scheduler_started is True
+        await app.stop()
+        assert app._scheduler_started is False
+
+    @pytest.mark.asyncio
+    async def test_module_init_failure_triggers_close_spi(self) -> None:
+        """Fix #2.7: a module whose init_spi_bus() fails is tracked BEFORE init
+        (not after), so _cleanup_partial_start() still calls close_spi() on it."""
+        app = Application(config=None, spi_factory=MockSpiBusFactory())
+
+        failing = _FailingInitModule()
+
+        def _get_all_modules() -> list[Any]:
+            return [failing]
+
+        app.module_manager.get_all_modules = _get_all_modules  # type: ignore[assignment]
+
+        with pytest.raises(RuntimeError):
+            await app.start()
+
+        # The failing module was tracked before init_spi_bus() and cleaned up.
+        assert failing.close_spi_calls == 1
+        assert app._started is False
+        assert app._started_modules == []
+        assert app._scheduler_started is False
 
 
 class TestEmptyConfig:
