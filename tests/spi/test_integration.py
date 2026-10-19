@@ -17,16 +17,18 @@
 The end-to-end test wires a real ``RealSpiBus`` to a :class:`FakeSpiDev` kernel
 through :func:`spidev_kernel_patch` and drives :meth:`RealSpiBus.xfer2`, which
 acquires the shared per-bus lock via ``await get_bus_lock`` and offloads the
-blocking transfer to a worker thread. The mock test exercises the synchronous
-lock path via ``get_bus_lock_sync``.
+blocking transfer to a worker thread. The end-to-end test wires a real ``RealSpiBus`` to a :class:`FakeSpiDev` kernel
+through :func:`spidev_kernel_patch` and drives :meth:`RealSpiBus.xfer2`, which
+acquires the shared per-bus lock via ``await get_bus_lock`` and offloads the
+blocking transfer to a worker thread.
 """
 
 from __future__ import annotations
 
 import pytest
 
-from pi_lora.drivers.spi.locks import get_bus_lock, get_bus_lock_sync
-from tests.spi.mock import FakeSpiBusKernelFactory, MockSpiBus
+from pi_lora.drivers.spi.locks import get_bus_lock
+from tests.spi.mock import FakeSpiBusKernelFactory
 
 
 class TestRealSpiBusKernelChain:
@@ -90,18 +92,3 @@ class TestRealSpiBusFactory:
         assert isinstance(result, list)
         assert len(result) == 2
         assert result == [0x81, 0x42]
-
-
-class TestMockSpiBusSyncLock:
-    """Mock SPI bus exercises the synchronous lock path via ``get_bus_lock_sync``."""
-
-    def test_mock_bus_uses_sync_lock(self) -> None:
-        """Acquire the sync per-bus lock and confirm registry returns the same instance."""
-        bus = MockSpiBus()
-        bus.open(bus=0, device=0)
-        assert bus.bus_number == 0
-
-        lock = get_bus_lock_sync(0)
-        lock.acquire()
-        lock.release()
-        assert get_bus_lock_sync(0) is lock

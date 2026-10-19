@@ -12,47 +12,76 @@
 # see the License for the specific language governing permissions and
 # limitations under the License.
 
-"""Tests for the SPI lock registry and context-aware dual-mode locks."""
+"""Tests for the SPI lock registry and ``aiologic.Lock`` context-manager behaviour.
+
+The registry now returns a single :class:`aiologic.Lock` per bus number. The
+lock is acquired with ``async with lock:`` and released on exit; ``lock.locked()``
+reports ownership. ``RealSpiBus.xfer2`` uses that context manager, so an
+``__aenter__`` failure propagates the original exception and never reaches
+``asyncio.to_thread``.
+"""
 
 import asyncio
+import time
+from types import TracebackType
 from typing import Any
 from unittest.mock import MagicMock, patch
 
 import pytest
 
 from pi_lora.drivers.spi.bus import RealSpiBus
-from pi_lora.drivers.spi.locks import _SyncSpiLock, get_bus_lock, get_bus_lock_sync
+from pi_lora.drivers.spi.locks import get_bus_lock
+
+
+class _ExceptionLock:
+    """Concrete async context manager whose ``__aenter__`` raises a fixed error.
+
+    Used to prove that ``RealSpiBus.xfer2`` propagates the original acquisition
+    error rather than masking it. An explicit class is required because
+    ``MagicMock``'s auto-generated async context manager never raises from
+    ``__aenter__``.
+    """
+
+    def __init__(self, error: BaseException) -> None:
+        """Store the error to raise on entry and an unlocked state."""
+        self._error = error
+        self._locked = False
+
+    async def __aenter__(self) -> "_ExceptionLock":
+        """Raise the configured error on entry (no acquisition performed)."""
+        raise self._error
+
+    async def __aexit__(
+        self,
+        exc_type: type[BaseException] | None,
+        exc_value: BaseException | None,
+        traceback: TracebackType | None,
+    ) -> None:
+        """No-op release; never reached because ``__aenter__`` raised."""
+        self._locked = False
+
+    def locked(self) -> bool:
+        """Return whether the lock currently reports ownership."""
+        return self._locked
 
 
 class TestLockRegistry:
-    """Tests for ``get_bus_lock`` / ``get_bus_lock_sync`` registry behaviour."""
-
-    def test_registry_returns_same_instance_sync(self) -> None:
-        lock_a = get_bus_lock_sync(0)
-        lock_b = get_bus_lock_sync(0)
-        assert lock_a is lock_b
+    """Tests for ``get_bus_lock`` registry behaviour."""
 
     @pytest.mark.asyncio
-    async def test_registry_returns_same_instance_async(self) -> None:
+    async def test_same_bus_returns_same_instance(self) -> None:
         lock_a = await get_bus_lock(0)
         lock_b = await get_bus_lock(0)
         assert lock_a is lock_b
 
-    def test_different_buses_return_different_instances(self) -> None:
-        assert get_bus_lock_sync(0) is not get_bus_lock_sync(1)
+    @pytest.mark.asyncio
+    async def test_different_buses_return_different_instances(self) -> None:
+        lock_0 = await get_bus_lock(0)
+        lock_1 = await get_bus_lock(1)
+        assert lock_0 is not lock_1
 
     @pytest.mark.asyncio
-    async def test_different_buses_return_different_instances_async(self) -> None:
-        assert await get_bus_lock(0) is not await get_bus_lock(1)
-
-    @pytest.mark.asyncio
-    async def test_sync_and_async_share_instance(self) -> None:
-        async_lock = await get_bus_lock(0)
-        sync_lock = get_bus_lock_sync(0)
-        assert async_lock is sync_lock
-
-    @pytest.mark.asyncio
-    async def test_concurrent_get_bus_lock_no_deadlock(self) -> None:
+    async def test_concurrent_get_bus_lock_consistency(self) -> None:
         """Concurrent ``await get_bus_lock`` on same/different buses resolve."""
         results = await asyncio.gather(
             get_bus_lock(0),
@@ -67,38 +96,102 @@ class TestLockRegistry:
         assert results[0] is not results[2]
         assert results[2] is not results[4]
 
+    @pytest.mark.asyncio
+    async def test_registry_race_free_many_concurrent(self) -> None:
+        """Many concurrent ``await get_bus_lock`` across several buses resolve.
+
+        Fires a large ``asyncio.gather`` over repeated bus numbers to exercise
+        the single ``asyncio.Lock`` guarding the registry. Each bus number must
+        resolve to exactly one consistent lock instance, and distinct bus
+        numbers must resolve to distinct instances. Any ``threading.Lock`` race
+        on the shared ``_bus_locks`` dict would surface as divergent instances
+        under this fan-out.
+        """
+        bus_numbers: tuple[int, ...] = (0, 1, 2, 3, 4)
+        calls: list[int] = []
+        for _ in range(200):
+            calls.extend(bus_numbers)
+        results = await asyncio.gather(*(get_bus_lock(b) for b in calls))
+        assert len(results) == len(calls)
+
+        per_bus: dict[int, object] = {}
+        for bus_id, lock in zip(calls, results, strict=True):
+            if bus_id not in per_bus:
+                per_bus[bus_id] = lock
+            else:
+                assert per_bus[bus_id] is lock
+        assert len(per_bus) == len(bus_numbers)
+        assert len({id(v) for v in per_bus.values()}) == len(bus_numbers)
+
 
 class TestLockAcquisition:
-    """Tests for acquire/release across both contexts."""
+    """Tests for ``async with lock:`` acquisition/release toggling."""
 
     @pytest.mark.asyncio
-    async def test_acquire_release_async(self) -> None:
+    async def test_async_with_lock_toggles_locked(self) -> None:
+        """``lock.locked()`` is True inside the context and False after."""
         lock = await get_bus_lock(0)
-        await lock.acquire()
-        lock.release()
-
-    def test_sync_acquire_release(self) -> None:
-        lock = get_bus_lock_sync(0)
-        lock.acquire()
-        lock.release()
-
-
-class TestSyncSpiLockDualMode:
-    """Tests for the context-aware dual-mode ``_SyncSpiLock`` branches."""
-
-    def test_sync_context_returns_none_and_blocks(self) -> None:
-        lock = _SyncSpiLock()
-        result = lock.acquire()
-        assert result is None
-        lock.release()
+        assert lock.locked() is False
+        async with lock:
+            assert lock.locked() is True
+        assert lock.locked() is False
 
     @pytest.mark.asyncio
-    async def test_async_context_returns_awaitable(self) -> None:
-        lock = _SyncSpiLock()
-        awaitable = lock.acquire()
-        assert awaitable is not None
-        await awaitable
-        lock.release()
+    async def test_async_acquire_release_marks_owned(self) -> None:
+        """``async_acquire``/``async_release`` toggle ownership on the lock."""
+        lock = await get_bus_lock(0)
+        acquired = await lock.async_acquire()
+        assert acquired is True
+        assert lock.locked() is True
+        lock.async_release()
+        assert lock.locked() is False
+
+    def test_sync_context_ownership_without_running_loop(self) -> None:
+        """``with lock:`` toggles ownership in a pure sync context.
+
+        ``aiologic.Lock`` must work in a synchronous context with no running
+        asyncio event loop. The ``with lock:`` block reports ownership on entry
+        and releases it on exit; no ``RuntimeError`` from a cross-thread release
+        can occur because ownership is tracked per task-context, not per-thread.
+        """
+        lock = asyncio.new_event_loop().run_until_complete(get_bus_lock(0))
+        assert lock.locked() is False
+        with lock:
+            assert lock.locked() is True
+        assert lock.locked() is False
+
+
+class _BlockingKernel:
+    """Sync kernel whose ``xfer2`` toggles a shared ``running`` flag while running.
+
+    Used to prove that transfers on the same bus never overlap. ``RealSpiBus.xfer2``
+    runs the kernel inside ``asyncio.to_thread`` while holding the per-bus lock, so
+    the worker threads are serialized. If the lock were released before the transfer
+    (the old buggy pattern), the two worker threads would run concurrently and the
+    ``running`` flag would be observed ``True`` twice at once. Under the corrected
+    ``async with lock:`` pattern the second transfer cannot start until the first
+    finishes, so the ``overlap`` flag is never set.
+    """
+
+    def __init__(
+        self,
+        running: dict[str, bool],
+        overlap: dict[str, bool],
+        delay: float,
+    ) -> None:
+        """Store the shared ``running``/``overlap`` flags and the blocking delay."""
+        self._running = running
+        self._overlap = overlap
+        self._delay = delay
+
+    def xfer2(self, data: list[int]) -> list[int]:
+        """Mark running, block for ``delay``, then release the running flag."""
+        if self._running.get("active", False):
+            self._overlap["detected"] = True
+        self._running["active"] = True
+        time.sleep(self._delay)
+        self._running["active"] = False
+        return [1, 2, 3]
 
 
 class TestRealSpiBusXfer2:
@@ -137,85 +230,75 @@ class TestRealSpiBusXfer2:
         assert called_callable is bus._spidev.xfer2
         assert called_args[0] == bytearray([1, 2, 3])
 
+    @pytest.mark.asyncio
+    async def test_mutual_exclusion_holds_same_bus(self) -> None:
+        """Two ``RealSpiBus`` on the same bus number never transfer concurrently.
 
-class TestAsyncSpiLockRelease:
-    """Tests for ``_AsyncSpiLock.release`` dual branches (Fix #4)."""
+        Both buses share the single per-bus lock returned by ``get_bus_lock``. Each
+        kernel marks itself ``active`` while its worker thread runs; the lock held
+        across ``asyncio.to_thread`` by the corrected ``async with lock:`` pattern
+        serializes the worker threads, so the second transfer cannot start until
+        the first finishes. If the lock had been released before the transfer the
+        two worker threads would overlap and ``detected`` would become ``True``.
+        """
+        running: dict[str, bool] = {"active": False}
+        overlap: dict[str, bool] = {"detected": False}
+        delay: float = 0.02
 
-    def test_release_awaitable_is_awaited(self) -> None:
-        """A ``release`` returning an awaitable is awaited so the lock is not leaked."""
-        from pi_lora.drivers.spi.locks import _AsyncSpiLock
+        bus_a = RealSpiBus()
+        bus_a.bus_number = 0
+        bus_a._spidev = _BlockingKernel(running, overlap, delay)
 
-        released: bool = False
+        bus_b = RealSpiBus()
+        bus_b.bus_number = 0
+        bus_b._spidev = _BlockingKernel(running, overlap, delay)
 
-        async def _release_coroutine() -> None:
-            nonlocal released
-            released = True
+        results = await asyncio.gather(
+            bus_a.xfer2([1, 2, 3]),
+            bus_b.xfer2([1, 2, 3]),
+        )
 
-        underlying = MagicMock()
-        underlying.release.return_value = _release_coroutine()
-
-        lock = _AsyncSpiLock(underlying)
-        lock.release()
-
-        assert released is True
-
-    def test_release_non_awaitable_is_sync(self) -> None:
-        """A ``release`` returning a non-awaitable is released synchronously."""
-        from pi_lora.drivers.spi.locks import _AsyncSpiLock
-
-        underlying = MagicMock()
-        underlying.release.return_value = None
-
-        lock = _AsyncSpiLock(underlying)
-        lock.release()
-
-        underlying.release.assert_called_once()
+        assert results == [[1, 2, 3], [1, 2, 3]]
+        assert overlap["detected"] is False
+        assert running["active"] is False
 
 
 class TestRealSpiBusExceptionMasking:
-    """Tests that ``RealSpiBus.xfer2`` preserves the acquire() exception (Fix #1).
+    """Tests that ``RealSpiBus.xfer2`` preserves the ``__aenter__`` exception.
 
-    When ``await lock.acquire()`` raises (cancellation/timeout), the original
-    exception must propagate out of ``xfer2``. The pre-fix implementation called
-    ``lock.release()`` unconditionally in ``finally`` on an unacquired lock,
-    raising ``RuntimeError: release unlocked lock`` and masking the original
-    exception. The fix tracks acquisition success so ``release()`` runs only
-    when ``acquire()`` succeeded.
+    When ``async with lock:`` raises on entry (cancellation/timeout), the
+    original exception must propagate out of ``xfer2``. The transfer is never
+    attempted, so ``asyncio.to_thread`` is never called and the kernel SPI
+    ``xfer2`` is never invoked.
     """
 
     @pytest.mark.asyncio
-    async def test_acquire_failure_preserves_original_exception(self) -> None:
-        """``xfer2`` raises the original acquire() exception, never the mask.
-
-        ``get_bus_lock`` is replaced with an async stub returning a lock whose
-        ``acquire()`` raises and whose ``release()`` asserts it is never called,
-        proving ``release()`` is skipped when ``acquire()`` failed.
-        """
+    async def test_aenter_failure_preserves_original_exception(self) -> None:
+        """``xfer2`` raises the original ``__aenter__`` exception, never a mask."""
         bus = RealSpiBus()
         bus.bus_number = 0
         bus._spidev = MagicMock()
         bus._spidev.xfer2 = MagicMock(return_value=[1, 2, 3])
 
         original_exception: Exception = RuntimeError("lock acquisition cancelled")
-        release_called: bool = False
 
-        async def _acquire() -> None:
-            raise original_exception
+        async def _fake_get_bus_lock(bus_number: int) -> _ExceptionLock:
+            return _ExceptionLock(original_exception)
 
-        def _release() -> None:
-            nonlocal release_called
-            release_called = True
+        to_thread_called: bool = False
+        real_to_thread = asyncio.to_thread
 
-        fake_lock = MagicMock()
-        fake_lock.acquire = _acquire
-        fake_lock.release = _release
+        def _spy(callable_: Any, *args: Any) -> Any:
+            nonlocal to_thread_called
+            to_thread_called = True
+            return real_to_thread(callable_, *args)
 
         with patch(
             "pi_lora.drivers.spi.bus.get_bus_lock",
-            return_value=fake_lock,
-        ), pytest.raises(RuntimeError) as exc_info:
+            _fake_get_bus_lock,
+        ), patch("asyncio.to_thread", _spy), pytest.raises(RuntimeError) as exc_info:
             await bus.xfer2(bytearray([1, 2, 3]))
 
         assert exc_info.value is original_exception
-        assert release_called is False
+        assert to_thread_called is False
         bus._spidev.xfer2.assert_not_called()

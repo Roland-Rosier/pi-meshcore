@@ -111,15 +111,20 @@ class RealSpiBus:
         """Transfer data through the SPI bus.
 
         Acquires the shared per-bus critical-section lock from the lock registry
-        (the same lock instance for every bus on the same bus number) to prevent
-        simultaneous transfers on the same bus from interleaving, then offloads
-        the blocking ``spidev.SpiDev.xfer2`` call to a worker thread via
-        ``asyncio.to_thread`` so it does not block the event loop.
+        (the same lock instance for every bus on the same bus number) via an
+        ``async with lock`` context manager, then offloads the blocking
+        ``spidev.SpiDev.xfer2`` call to a worker thread via ``asyncio.to_thread``
+        *inside* the lock scope so it does not block the event loop while still
+        preserving per-bus mutual exclusion. The lock is held for the entire
+        transfer duration, guaranteeing that two ``RealSpiBus`` instances on the
+        same bus number never run their transfers concurrently.
 
-        If ``await lock.acquire()`` raises (cancellation/timeout), the original
-        exception propagates out of ``xfer2``: ``acquired`` stays ``False`` and
-        ``finally`` skips ``lock.release()`` so it never masks the original
-        exception with ``RuntimeError: release unlocked lock``.
+        ``aiologic.Lock`` acquires on entry and releases on exit of the
+        ``async with`` block, so the lock is released automatically on normal
+        completion. If ``__aenter__`` raises (cancellation/timeout) the original
+        exception propagates out of ``xfer2`` and the transfer is never
+        attempted, so ``asyncio.to_thread`` is never called; aiologic.Lock manages
+        cancellation internally and never leaks a release on an unacquired state.
 
         Args:
             data: Byte array of byte values to transfer.
@@ -131,14 +136,8 @@ class RealSpiBus:
             raise RuntimeError("SPI bus not opened")
 
         lock = await get_bus_lock(self.bus_number)
-        acquired: bool = False
-        try:
-            await lock.acquire()
-            acquired = True
+        async with lock:
             return await asyncio.to_thread(self._spidev.xfer2, data)
-        finally:
-            if acquired:
-                lock.release()
 
     @property
     def max_speed_hz(self) -> int:

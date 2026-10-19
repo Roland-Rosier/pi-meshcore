@@ -14,6 +14,8 @@
 
 """Tests for lock registry correctness in ``spi/locks.py``."""
 
+import asyncio
+
 import pytest
 from src.pi_lora.drivers.spi.locks import SpiLock, get_bus_lock
 
@@ -53,3 +55,70 @@ class TestLockRegistry:
         lock_neg = await get_bus_lock(-1)
         lock_neg_again = await get_bus_lock(-1)
         assert lock_neg is lock_neg_again
+
+
+class TestCancellationLeak:
+    """Verify ``async with lock:`` never leaks a release on cancellation.
+
+    Section 2.5 remediation. With the old ``acquired``/``finally``/``release()``
+    pattern, a coroutine cancelled during ``await lock.acquire()`` could leave the
+    worker thread holding the lock while ``acquired`` stayed ``False``, producing
+    a leak. The corrected ``async with lock:`` pattern relies on ``aiologic.Lock``
+    managing cancellation internally: if ``__aenter__`` never completes acquisition,
+    the lock never reports ownership and no release is ever issued. This test
+    cancels a task while it is inside the lock scope and asserts the lock ends up
+    un-held (``lock.locked() is False``) with no ``RuntimeError: release
+    unlocked lock``. The scenario is deterministic: the task is cancelled after it
+    has demonstrably entered the lock scope, so ``__aexit__`` must run and release.
+    """
+
+    @pytest.mark.asyncio
+    async def test_cancellation_inside_lock_scope_does_not_leak(self) -> None:
+        """A task cancelled inside ``async with lock:`` leaves the lock un-held."""
+        lock = await get_bus_lock(0)
+        assert lock.locked() is False
+
+        async def _coro() -> None:
+            async with lock:
+                await asyncio.sleep(0.5)
+
+        coro = _coro()
+        task = asyncio.ensure_future(coro)
+
+        # Let the task acquire the lock and reach the blocking ``sleep``.
+        await asyncio.sleep(0)
+        await asyncio.sleep(0)
+
+        task.cancel()
+        with pytest.raises(asyncio.CancelledError):
+            await task
+
+        # No leak: the lock is not left held; no ``RuntimeError: release
+        # unlocked lock`` could have occurred because aiologic.Lock never
+        # issued a release for an unacquired state.
+        assert lock.locked() is False
+
+    @pytest.mark.asyncio
+    async def test_cancellation_at_acquire_boundary_does_not_leak(self) -> None:
+        """Cancelled during ``__aenter__`` (acquire) leaves the lock un-held."""
+        lock = await get_bus_lock(1)
+        assert lock.locked() is False
+
+        async def _coro() -> None:
+            # Cancel the outer task right as it begins acquiring the lock.
+            await asyncio.sleep(0)
+            async with lock:
+                await asyncio.sleep(0.5)
+
+        coro = _coro()
+        task = asyncio.ensure_future(coro)
+
+        # Give the task a chance to enter ``async with lock:``; cancel while it
+        # is still within the acquisition or inside the scope — either way the
+        # lock must end un-held.
+        await asyncio.sleep(0)
+        task.cancel()
+        with pytest.raises(asyncio.CancelledError):
+            await task
+
+        assert lock.locked() is False

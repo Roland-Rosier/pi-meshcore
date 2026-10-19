@@ -21,7 +21,7 @@ src/pi_lora/drivers/spi/
 | **Interface** | Protocol-based (`SpiBus`, `SpiBusFactory`) | Zero runtime overhead, full static type checking |
 | **Factory Location** | Dedicated `spi/` package | Separation of concerns; SPI abstraction independent of radio logic |
 | **Mock Implementation** | Test-only (`tests/spi/mock.py`) | Production code stays clean; no test dependencies |
-| **Critical Section** | `aiologic.LowLevelLock` per bus number | Prevents concurrent access when multiple CE pins share one SPI bus |
+| **Critical Section** | `aiologic.Lock` per bus number | Prevents concurrent access when multiple CE pins share one SPI bus |
 | **Injection Point** | `Rfm9xSx127xModule.__init__(spi_factory: SpiBusFactory)` | Module owns SPI lifecycle; factory creates bus instances |
 
 ## Core Components
@@ -67,19 +67,18 @@ class RealSpiBus:
         self._spidev.open(bus, device)
 
     async def xfer2(self, data: list[int]) -> list[int]:
-        lock = get_bus_lock(self.bus_number)
-        await lock.acquire()
-        try:
-            return self._spidev.xfer2(data)
-        finally:
-            lock.release()
+        lock = await get_bus_lock(self.bus_number)
+        async with lock:
+            pass  # acquire/release on the same task context
+        return await asyncio.to_thread(self._spidev.xfer2, data)
 ```
 
 **Critical section behavior:**
 - Lock acquired **per bus number** (not per device)
-- Covers entire `xfer2()` call atomically
-- Works in both async (`await lock.acquire()`) and sync (`lock.acquire()`) contexts
-- Falls back to `threading.Lock` if `aiologic` unavailable
+- `async with lock:` acquires and releases on the same coroutine context, so
+  the lock is released before the `asyncio.to_thread` wait.
+- `aiologic.Lock` owns cross-context semantics natively — no `threading.Lock`
+  fallback, no cross-thread release, no `asyncio.run()` in release.
 
 ### 3. `SpiBusFactory` Protocol (`factory.py`)
 
@@ -108,22 +107,23 @@ module_manager.load_from_config(config, scheduler, self.spi_factory)
 ### 5. Per-Bus Locking (`locks.py`)
 
 ```python
-_bus_locks: dict[int, SpiLock] = {}
+_bus_locks: dict[int, aiologic.Lock] = {}
+_registry_lock: asyncio.Lock = asyncio.Lock()
 
-def get_bus_lock(bus_number: int) -> SpiLock:
-    if bus_number not in _bus_locks:
-        try:
-            import aiologic
-            _bus_locks[bus_number] = _AsyncSpiLock(aiologic.LowLevelLock())
-        except (ImportError, AttributeError):
-            _bus_locks[bus_number] = _SyncSpiLock()
-    return _bus_locks[bus_number]
+async def get_bus_lock(bus_number: int) -> aiologic.Lock:
+    async with _registry_lock:
+        if bus_number not in _bus_locks:
+            _bus_locks[bus_number] = aiologic.Lock()
+        return _bus_locks[bus_number]
 ```
 
-**Dual-mode compatibility:**
-- `_AsyncSpiLock` wraps `aiologic.LowLevelLock` — `acquire()` returns awaitable
-- `_SyncSpiLock` wraps `threading.Lock` — `acquire()` blocks synchronously
-- Same lock instance returned for same bus number across all callers
+**Cross-context ownership:**
+- A single `aiologic.Lock` per bus number — the native dual-mode lock manages
+  ownership per task-context, not per-thread.
+- Acquire/release pairs always run on the same coroutine/context, so there is
+  no cross-thread release and no `RuntimeError`.
+- `_AsyncSpiLock`, `_SyncSpiLock`, and the `threading.Lock` fallback are gone.
+- Same lock instance returned for same bus number across all callers.
 
 ## Integration with Radio Module
 
