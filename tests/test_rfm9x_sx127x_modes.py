@@ -14,6 +14,7 @@
 
 """Tests for RFM9x/SX127x device mode classes."""
 
+import asyncio
 from unittest.mock import MagicMock
 
 import pytest
@@ -328,6 +329,34 @@ class TestBaseClassBehavior:
             assert type(cls.MODE_BITS) is ModeBits
             assert type(cls.META_MODE_BITS) is MetaModeBits
             assert type(cls.LORA_MODE) is LoraMode
+
+
+class TestResetStateEventHandlers:
+    """Test ResetState event handler overrides."""
+
+    def test_reset_state_on_event_is_noop(self) -> None:
+        state = ResetState()
+        module = _make_module()
+        event = MagicMock()
+        asyncio.run(state.on_event(event, module))
+
+    def test_reset_state_on_jiffy_raises(self) -> None:
+        state = ResetState()
+        module = _make_module()
+        with pytest.raises(NotImplementedError):
+            asyncio.run(state.on_jiffy(module))
+
+    def test_reset_state_on_idle_raises(self) -> None:
+        state = ResetState()
+        module = _make_module()
+        with pytest.raises(NotImplementedError):
+            asyncio.run(state.on_idle(module))
+
+    def test_reset_state_on_interrupt_raises(self) -> None:
+        state = ResetState()
+        module = _make_module()
+        with pytest.raises(NotImplementedError):
+            asyncio.run(state.on_interrupt(0, module))
 
 
 class TestStateBitsEnum:

@@ -510,6 +510,15 @@ class ResetState(Rfm9xSx127xMode):
         """
         pass
 
+    async def on_jiffy(self, module: "Rfm9xSx127xModule") -> None:
+        raise NotImplementedError("ResetState does not handle jiffy events")
+
+    async def on_idle(self, module: "Rfm9xSx127xModule") -> None:
+        raise NotImplementedError("ResetState does not handle idle events")
+
+    async def on_interrupt(self, gpio_pin: int, module: "Rfm9xSx127xModule") -> None:
+        raise NotImplementedError("ResetState does not handle interrupt events")
+
 
 class FskOokSleepState(Rfm9xSx127xMode):
     """FSK/OOK Sleep mode (0x00)."""
