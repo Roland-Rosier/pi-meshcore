@@ -183,6 +183,17 @@ class TestLoadFromConfig:
         assert any(
             "Unparseable GPIO mapping" in msg for msg in caplog.messages
         )
+        malformed_records = [
+            record
+            for record in caplog.records
+            if "Unparseable GPIO mapping" in record.getMessage()
+        ]
+        assert malformed_records
+        for record in malformed_records:
+            assert record.levelname == "ERROR"
+        assert any(
+            "interrupt handling disabled" in msg.lower() for msg in caplog.messages
+        )
 
     @pytest.mark.asyncio
     async def test_load_failure_rolls_back(

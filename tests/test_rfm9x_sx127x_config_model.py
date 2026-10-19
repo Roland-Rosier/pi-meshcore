@@ -88,6 +88,26 @@ class TestDeviceConfigRoot:
         root: DeviceConfigRoot = DeviceConfigRoot(device=device)
         assert root.device.name == "RFM95"
 
+    def test_invalid_max_less_than_min_root(self) -> None:
+        """Test DeviceConfigRoot rejects max < min."""
+        device: DeviceConfig = DeviceConfig(
+            name="RFM95",
+            min_radio_freq_hz=915000000,
+            max_radio_freq_hz=868000000,
+        )
+        with pytest.raises(ValidationError):
+            DeviceConfigRoot(device=device)
+
+    def test_invalid_max_equal_min_root(self) -> None:
+        """Test DeviceConfigRoot rejects max == min (strict greater required)."""
+        device: DeviceConfig = DeviceConfig(
+            name="RFM95",
+            min_radio_freq_hz=500000000,
+            max_radio_freq_hz=500000000,
+        )
+        with pytest.raises(ValidationError):
+            DeviceConfigRoot(device=device)
+
 
 class TestFamilyDeviceExclusion:
     """Tests for FamilyDeviceExclusion model."""

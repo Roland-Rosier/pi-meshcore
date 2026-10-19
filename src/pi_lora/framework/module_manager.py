@@ -78,10 +78,12 @@ class ModuleManager:
                     for mapping in radio_config.dio_gpio_mappings:
                         parts = mapping.split(":")
                         if len(parts) != 2:
-                            logger.warning(
-                                "Unparseable GPIO mapping %r at config index %d; skipping",
+                            logger.error(
+                                "Unparseable GPIO mapping %r at config index %d "
+                                "(device %r); Interrupt handling DISABLEd for this device",
                                 mapping,
                                 index,
+                                radio_config.device_name,
                             )
                             continue
                         gpio_str = parts[1]
@@ -91,19 +93,23 @@ class ModuleManager:
                                 matched_prefix = prefix
                                 break
                         if matched_prefix is None:
-                            logger.warning(
-                                "Unparseable GPIO mapping %r at config index %d; skipping",
+                            logger.error(
+                                "Unparseable GPIO mapping %r at config index %d "
+                                "(device %r); Interrupt handling DISABLEd for this device",
                                 mapping,
                                 index,
+                                radio_config.device_name,
                             )
                             continue
                         try:
                             gpio_pins.append(int(gpio_str[len(matched_prefix):]))
                         except ValueError:
-                            logger.warning(
-                                "Unparseable GPIO mapping %r at config index %d; skipping",
+                            logger.error(
+                                "Unparseable GPIO mapping %r at config index %d "
+                                "(device %r); Interrupt handling DISABLEd for this device",
                                 mapping,
                                 index,
+                                radio_config.device_name,
                             )
 
                 device_key: DeviceIdentity = radio_config.device_id_key

@@ -18,7 +18,7 @@ from __future__ import annotations
 
 from collections.abc import Sequence
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, model_validator
 
 
 class DeviceConfig(BaseModel):
@@ -40,9 +40,24 @@ class DeviceConfig(BaseModel):
 
 
 class DeviceConfigRoot(BaseModel):
-    """Wrapper to capture a single device configuration."""
+    """Wrapper to capture a single device configuration.
+
+    Performs range validation that ``max_radio_freq_hz`` must be strictly
+    greater than ``min_radio_freq_hz``; equal or inverted values are rejected.
+    """
 
     device: DeviceConfig
+
+    @model_validator(mode="after")
+    def validate_range(self) -> DeviceConfigRoot:
+        """Enforce a strictly-greater-than frequency range on the device."""
+        if self.device.max_radio_freq_hz <= self.device.min_radio_freq_hz:
+            raise ValueError(
+                f"Device '{self.device.name}' has invalid frequency range: "
+                f"max_radio_freq_hz={self.device.max_radio_freq_hz} must be strictly "
+                f"greater than min_radio_freq_hz={self.device.min_radio_freq_hz}."
+            )
+        return self
 
 
 class FamilyDeviceExclusion(BaseModel):
