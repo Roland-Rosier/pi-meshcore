@@ -68,23 +68,35 @@ class CommandBus:
         If the handler is a coroutine function it is awaited; otherwise it
         is called directly.
         """
+        command_mro: tuple[type[Any], ...] = type(command).__mro__
+        command_depth: int = len(command_mro)
+        best_key: type[Any] | None = None
+        best_tuple: tuple[Callable[..., Any], int] | None = None
+        best_depth: int = command_depth
         for registered_type, handler_tuple in self._handlers.items():
             if not isinstance(command, registered_type):
                 continue
-            handler, _priority = handler_tuple
-            try:
-                result = handler(command)
-            except Exception as exc:
-                logging.getLogger(__name__).warning(
-                    "Command '%s' handler raised: %r",
-                    type(command).__name__,
-                    exc,
-                )
-                raise
-            if asyncio.iscoroutine(result):
-                return await result
-            return result
-        raise ValueError(f"No handler for {type(command).__name__}")
+            depth = command_depth - len(registered_type.__mro__)
+            if best_key is None or depth < best_depth:
+                best_key = registered_type
+                best_tuple = handler_tuple
+                best_depth = depth
+        if best_key is None:
+            raise ValueError(f"No handler for {type(command).__name__}")
+        assert best_tuple is not None
+        handler, _priority = best_tuple
+        try:
+            result = handler(command)
+        except Exception as exc:
+            logging.getLogger(__name__).warning(
+                "Command '%s' handler raised: %r",
+                type(command).__name__,
+                exc,
+            )
+            raise
+        if asyncio.iscoroutine(result):
+            return await result
+        return result
 
     async def dispatch(self, command: Any) -> None:
         """Asynchronously post *command* to its target module's event queue."""

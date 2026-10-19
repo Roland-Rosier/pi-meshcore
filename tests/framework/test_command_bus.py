@@ -166,6 +166,29 @@ class TestHandlerRegistry:
         assert base_calls == []
 
     @pytest.mark.asyncio
+    async def test_most_specific_dispatch_runtime_subclass(self) -> None:
+        bus = CommandBus()
+        derived_calls: list[str] = []
+        base_calls: list[str] = []
+
+        def derived_handler(cmd: DerivedCmd) -> str:
+            derived_calls.append(cmd.action)
+            return "derived"
+
+        def base_handler(cmd: BaseCmd) -> str:
+            base_calls.append(cmd.action)
+            return "base"
+
+        bus.register_handler(DerivedCmd, derived_handler)
+        bus.register_handler(BaseCmd, base_handler)
+        subclass = subclass_from_base(DerivedCmd)
+        instance = subclass(action="sub")
+        ret = await bus.execute(instance)
+        assert ret == "derived"
+        assert derived_calls == ["sub"]
+        assert base_calls == []
+
+    @pytest.mark.asyncio
     async def test_no_handler_raises(self) -> None:
         bus = CommandBus()
         with pytest.raises(ValueError, match="No handler for"):

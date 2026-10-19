@@ -17,6 +17,7 @@
 from __future__ import annotations
 
 import asyncio
+import logging
 from typing import TYPE_CHECKING, Protocol
 
 if TYPE_CHECKING:
@@ -81,6 +82,10 @@ class TimerScheduler:
         task = self._tasks.pop(module, None)
         if task is not None and not task.done():
             task.cancel()
+            # Fire-and-forget await to suppress "Task was destroyed but pending"
+            # gather() returns a Future (not a coroutine), so ensure_future is used
+            # instead of create_task to schedule the cancellation without a leak.
+            asyncio.ensure_future(asyncio.gather(task, return_exceptions=True))
 
     def register_module(
         self, module: Rfm9xSx127xModule, interval: float | None
@@ -103,7 +108,13 @@ class TimerScheduler:
 class IdlePacer:
     """Single task that paces all idle-enabled modules with IDLE events."""
 
+    @staticmethod
+    def _validate_interval(interval: float) -> None:
+        if interval <= 0:
+            raise ValueError(f"Idle min_interval must be positive, got {interval}")
+
     def __init__(self, min_interval: float = 0.01) -> None:
+        self._validate_interval(min_interval)
         self._idle_enabled_modules: set[Rfm9xSx127xModule] = set()
         self._running = False
         self._task: asyncio.Task[None] | None = None
@@ -144,9 +155,16 @@ class InterruptBridge:
 
     def register_interrupt(self, gpio_pin: int, module: Rfm9xSx127xModule) -> None:
         self._interrupt_map[gpio_pin] = module
-        if self._task is None or self._task.done():
-            self._running = True
-            self._task = asyncio.create_task(self._interrupt_task())
+        # Task is created in start() only.
+
+    def trigger_interrupt(self, gpio_pin: int) -> None:
+        """Called by GPIO driver when interrupt fires (sync context)."""
+        try:
+            self._trigger_queue.put_nowait(gpio_pin)
+        except asyncio.QueueFull:
+            logging.getLogger(__name__).error(
+                "Interrupt queue full, dropping interrupt for GPIO %d", gpio_pin
+            )
 
     async def start(self) -> None:
         self._running = True
@@ -168,9 +186,11 @@ class InterruptBridge:
                     ModuleEvent(EventType.INTERRUPT, InterruptEvent(gpio_pin))
                 )
 
-    def trigger_interrupt(self, gpio_pin: int) -> None:
-        """Called by GPIO driver when interrupt fires (sync context)."""
-        self._trigger_queue.put_nowait(gpio_pin)
+    def unregister_module(self, module: Rfm9xSx127xModule) -> None:
+        """Remove every GPIO pin entry that references *module*."""
+        for gpio_pin, m in list(self._interrupt_map.items()):
+            if m is module:
+                del self._interrupt_map[gpio_pin]
 
 
 class Scheduler:
@@ -194,9 +214,7 @@ class Scheduler:
     def unregister_module(self, module: Rfm9xSx127xModule) -> None:
         self.timer_scheduler.unregister_module(module)
         self.idle_pacer.set_idle_enabled(module, False)
-        for gpio_pin, m in list(self.interrupt_bridge._interrupt_map.items()):
-            if m is module:
-                del self.interrupt_bridge._interrupt_map[gpio_pin]
+        self.interrupt_bridge.unregister_module(module)
 
     def register_module(
         self,

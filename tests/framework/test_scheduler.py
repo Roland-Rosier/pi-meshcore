@@ -16,7 +16,8 @@
 
 import asyncio
 import time
-from unittest.mock import MagicMock
+import warnings
+from unittest.mock import MagicMock, patch
 
 import pytest
 from src.pi_lora.framework.events import EventType
@@ -93,6 +94,25 @@ class TestTimerScheduler:
         assert mock_module not in ts._tasks
         assert mock_module not in ts._registered
 
+    @pytest.mark.asyncio
+    async def test_unregister_awaits_cancelled_task(self, mock_module: MagicMock) -> None:
+        ts = TimerScheduler()
+        ts.register_module(mock_module, 1.0)
+        await ts.start()
+        task = ts._tasks[mock_module]
+        with warnings.catch_warnings(record=True) as recorded:
+            ts.unregister_module(mock_module)
+            await asyncio.sleep(0.05)
+        assert task.done()
+        for record in recorded:
+            if isinstance(record.warning, RuntimeWarning) and (
+                "destroyed" in str(record.warning).lower()
+                or "pending" in str(record.warning).lower()
+            ):
+                raise AssertionError(
+                    "RuntimeWarning: Task was destroyed but pending future"
+                )
+
 
 class TestIdlePacer:
     """Verify IdlePacer manages idle-enabled modules."""
@@ -107,6 +127,19 @@ class TestIdlePacer:
         pacer.set_idle_enabled(mock_module, True)
         pacer.set_idle_enabled(mock_module, False)
         assert mock_module not in pacer._idle_enabled_modules
+
+    def test_idle_pacer_rejects_non_positive_interval(self) -> None:
+        with pytest.raises(
+            ValueError, match="must be positive"
+        ) as exc_info:
+            IdlePacer(min_interval=0.0)
+        assert "must be positive" in str(exc_info.value)
+        with pytest.raises(ValueError, match="must be positive"):
+            IdlePacer(min_interval=-1.0)
+
+    def test_idle_pacer_accepts_positive_interval(self) -> None:
+        pacer = IdlePacer(min_interval=0.01)
+        assert pacer._min_interval == 0.01
 
     @pytest.mark.asyncio
     async def test_start_creates_task(self) -> None:
@@ -180,11 +213,29 @@ class TestInterruptBridge:
         await bridge.stop()
 
     @pytest.mark.asyncio
+    async def test_register_does_not_start_task(self, mock_module: MagicMock) -> None:
+        bridge = InterruptBridge()
+        bridge.register_interrupt(25, mock_module)
+        assert bridge._task is None
+        assert bridge._running is False
+
+    @pytest.mark.asyncio
     async def test_register_creates_task(self, mock_module: MagicMock) -> None:
         bridge = InterruptBridge()
         bridge.register_interrupt(25, mock_module)
+        assert bridge._task is None
+        await bridge.start()
         assert bridge._task is not None
         await bridge.stop()
+
+    def test_trigger_interrupt_queue_full_drops(self) -> None:
+        bridge = InterruptBridge()
+        bridge._trigger_queue = asyncio.Queue(maxsize=1)
+        bridge.trigger_interrupt(25)
+        assert bridge._trigger_queue.full()
+        with patch("src.pi_lora.framework.scheduler.logging.getLogger") as gl:
+            bridge.trigger_interrupt(26)
+            gl.return_value.error.assert_called_once()
 
     @pytest.mark.asyncio
     async def test_start_creates_event_and_task(self) -> None:
@@ -211,6 +262,23 @@ class TestInterruptBridge:
     def test_trigger_interrupt_noop_without_event(self) -> None:
         bridge = InterruptBridge()
         bridge.trigger_interrupt(25)  # Should not raise
+
+    @pytest.mark.asyncio
+    async def test_unregister_module_removes_all_pins(self) -> None:
+        bridge = InterruptBridge()
+        mod = MagicMock()
+        mod.event_queue = asyncio.Queue()
+        bridge.register_interrupt(25, mod)
+        bridge.register_interrupt(26, mod)
+        bridge.register_interrupt(27, MagicMock())
+        assert 25 in bridge._interrupt_map
+        assert 26 in bridge._interrupt_map
+        assert 27 in bridge._interrupt_map
+        bridge.unregister_module(mod)
+        assert 25 not in bridge._interrupt_map
+        assert 26 not in bridge._interrupt_map
+        assert 27 in bridge._interrupt_map
+        await bridge.stop()
 
     @pytest.mark.asyncio
     async def test_interrupt_routes_to_correct_module(self) -> None:
@@ -313,6 +381,26 @@ class TestScheduler:
         await sched.stop()
 
     @pytest.mark.asyncio
+    async def test_unregister_scheduler_via_public_bridge(
+        self, mock_module: MagicMock
+    ) -> None:
+        sched = Scheduler()
+        sched.register_module(
+            mock_module,
+            timer_interval=1.0,
+            idle_enabled=True,
+            interrupt_gpio_pins=[25, 26],
+        )
+        assert 25 in sched.interrupt_bridge._interrupt_map
+        assert 26 in sched.interrupt_bridge._interrupt_map
+        sched.unregister_module(mock_module)
+        assert 25 not in sched.interrupt_bridge._interrupt_map
+        assert 26 not in sched.interrupt_bridge._interrupt_map
+        assert mock_module not in sched.idle_pacer._idle_enabled_modules
+        assert sched.timer_scheduler.get_interval(mock_module) is None
+        await sched.stop()
+
+    @pytest.mark.asyncio
     async def test_stop_reverse_order(self) -> None:
         sched = Scheduler()
         order: list[str] = []
@@ -331,3 +419,27 @@ class TestScheduler:
         sched.interrupt_bridge.stop = record_interrupt
         await sched.stop()
         assert order == ["interrupt", "idle", "timer"]
+
+    @pytest.mark.asyncio
+    async def test_scheduler_stop_awaits_all_tasks(
+        self, mock_module: MagicMock
+    ) -> None:
+        sched = Scheduler()
+        sched.register_module(
+            mock_module,
+            timer_interval=1.0,
+            idle_enabled=True,
+            interrupt_gpio_pins=[25],
+        )
+        await sched.start()
+        timer_task: asyncio.Task[None] = sched.timer_scheduler._tasks[mock_module]
+        idle_task: asyncio.Task[None] | None = sched.idle_pacer._task
+        interrupt_task: asyncio.Task[None] | None = sched.interrupt_bridge._task
+        await sched.stop()
+        await asyncio.sleep(0.05)
+        assert timer_task.done()
+        assert idle_task is not None and idle_task.done()
+        assert interrupt_task is not None and interrupt_task.done()
+        assert sched.timer_scheduler._running is False
+        assert sched.idle_pacer._running is False
+        assert sched.interrupt_bridge._running is False
