@@ -59,6 +59,27 @@ class DerivedCmd(BaseCmd):
     action: str = "derived"
 
 
+@dataclass(frozen=True)
+class Lvl1:
+    """First level of a three-level subclass chain for dispatch tests."""
+
+    action: str = "lvl1"
+
+
+@dataclass(frozen=True)
+class Lvl2(Lvl1):
+    """Second level of a three-level subclass chain for dispatch tests."""
+
+    action: str = "lvl2"
+
+
+@dataclass(frozen=True)
+class Lvl3(Lvl2):
+    """Most specific level of a three-level subclass chain for dispatch tests."""
+
+    action: str = "lvl3"
+
+
 class TestHandlerRegistry:
     """Verify register_handler behavior."""
 
@@ -186,6 +207,95 @@ class TestHandlerRegistry:
         ret = await bus.execute(instance)
         assert ret == "derived"
         assert derived_calls == ["sub"]
+        assert base_calls == []
+
+    @pytest.mark.asyncio
+    async def test_most_specific_base_registered_first(self) -> None:
+        bus = CommandBus()
+        derived_calls: list[str] = []
+        base_calls: list[str] = []
+
+        def derived_handler(cmd: DerivedCmd) -> str:
+            derived_calls.append(cmd.action)
+            return "derived"
+
+        def base_handler(cmd: BaseCmd) -> str:
+            base_calls.append(cmd.action)
+            return "base"
+
+        bus.register_handler(BaseCmd, base_handler)
+        bus.register_handler(DerivedCmd, derived_handler)
+        instance = DerivedCmd(action="x")
+        ret = await bus.execute(instance)
+        assert ret == "derived"
+        assert derived_calls == ["x"]
+        assert base_calls == []
+
+    @pytest.mark.asyncio
+    async def test_most_specific_three_level(self) -> None:
+        bus = CommandBus()
+        lvl1_calls: list[str] = []
+        lvl3_calls: list[str] = []
+
+        def lvl1_handler(cmd: Lvl1) -> str:
+            lvl1_calls.append(cmd.action)
+            return "lvl1"
+
+        def lvl3_handler(cmd: Lvl3) -> str:
+            lvl3_calls.append(cmd.action)
+            return "lvl3"
+
+        bus.register_handler(Lvl1, lvl1_handler)
+        bus.register_handler(Lvl3, lvl3_handler)
+        instance = Lvl3(action="lvl3")
+        ret = await bus.execute(instance)
+        assert ret == "lvl3"
+        assert lvl3_calls == ["lvl3"]
+        assert lvl1_calls == []
+
+    @pytest.mark.asyncio
+    async def test_most_specific_runtime_subclass(self) -> None:
+        bus = CommandBus()
+        derived_calls: list[str] = []
+        base_calls: list[str] = []
+
+        def derived_handler(cmd: DerivedCmd) -> str:
+            derived_calls.append(cmd.action)
+            return "derived"
+
+        def base_handler(cmd: BaseCmd) -> str:
+            base_calls.append(cmd.action)
+            return "base"
+
+        bus.register_handler(BaseCmd, base_handler)
+        bus.register_handler(DerivedCmd, derived_handler)
+        subclass = subclass_from_base(DerivedCmd)
+        instance = subclass(action="sub")
+        ret = await bus.execute(instance)
+        assert ret == "derived"
+        assert derived_calls == ["sub"]
+        assert base_calls == []
+
+    @pytest.mark.asyncio
+    async def test_most_specific_order_independent(self) -> None:
+        bus = CommandBus()
+        derived_calls: list[str] = []
+        base_calls: list[str] = []
+
+        def derived_handler(cmd: DerivedCmd) -> str:
+            derived_calls.append(cmd.action)
+            return "derived"
+
+        def base_handler(cmd: BaseCmd) -> str:
+            base_calls.append(cmd.action)
+            return "base"
+
+        bus.register_handler(DerivedCmd, derived_handler)
+        bus.register_handler(BaseCmd, base_handler)
+        instance = DerivedCmd(action="x")
+        ret = await bus.execute(instance)
+        assert ret == "derived"
+        assert derived_calls == ["x"]
         assert base_calls == []
 
     @pytest.mark.asyncio
