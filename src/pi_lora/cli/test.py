@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import traceback
 from pathlib import Path
+from typing import Any
 
 import typer
 from async_typer import AsyncTyper
@@ -64,26 +65,37 @@ async def test_hardware_impl(
         console.print("[red]Error:[/red] No modules match the given filters")
         raise typer.Exit(code=1)
 
-    # Start application (creates modules, starts event loops, registers scheduler)
+    # Start application (creates modules, starts event loops, registers scheduler).
+    # start() lives inside an outer try whose finally always calls application.stop(),
+    # guaranteeing clean shutdown even when start() fails.
     try:
-        await application.start(assembly_name=assembly_name)
-    except AssemblyNotFoundError as e:
-        console.print(f"[red]Error:[/red] {e}")
-        raise typer.Exit(code=1) from None
-    except DeviceAttachmentNotFoundError as e:
-        console.print(f"[red]Error:[/red] {e}")
-        raise typer.Exit(code=1) from None
-    except Exception as e:
-        console.print(f"[red]Error:[/red] Failed to start application: {e!r}")
-        console.print("[red]Traceback:[/red]")
-        traceback.print_exc()
-        raise typer.Exit(code=1) from None
+        try:
+            await application.start(assembly_name=assembly_name)
+        except AssemblyNotFoundError as e:
+            console.print(f"[red]Error:[/red] {e}")
+            raise typer.Exit(code=1) from None
+        except DeviceAttachmentNotFoundError as e:
+            console.print(f"[red]Error:[/red] {e}")
+            raise typer.Exit(code=1) from None
+        except Exception as e:
+            console.print(f"[red]Error:[/red] Failed to start application: {e!r}")
+            console.print("[red]Traceback:[/red]")
+            traceback.print_exc()
+            raise typer.Exit(code=1) from None
 
-    try:
+        module_manager: Any = application.module_manager
+        if module_manager is None:
+            console.print("[red]Error:[/red] Module manager is unavailable after start")
+            raise typer.Exit(code=1)
+
+        all_modules = module_manager.get_all_modules()
+        if all_modules is None:
+            all_modules = []
+
         # Filter to target modules
         target_set = {(cfg.spi_device_id, cfg.ce_number) for cfg in radio_configs}
         modules = [
-            m for m in application.module_manager.get_all_modules()
+            m for m in all_modules
             if (m.get_spi_device_id(), m.get_ce_number()) in target_set
         ]
 
@@ -109,9 +121,8 @@ async def test_hardware_impl(
                 raise typer.Exit(code=1)
 
         console.print("[green]✓[/green] All modules transitioned to RESET_STATE successfully")
-
     finally:
-        # Clean shutdown via Application (no StopMode param — current impl)
+        # Clean shutdown via Application — always runs, even when start() failed.
         await application.stop()
 
     raise typer.Exit(code=0)

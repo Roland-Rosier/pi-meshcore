@@ -307,6 +307,7 @@ class TestHardwareRuntimeError:
         assert exit_code == 1, f"Expected exit 1, got {exit_code}: {capture.getvalue()}"
         assert "Traceback" in capture.getvalue()
         assert "Failed to start application" in capture.getvalue()
+        mock_application.stop.assert_awaited_once()
 
 
 class TestHardwareHardwareException:
@@ -345,7 +346,7 @@ class TestHardwareHardwareException:
         assert exit_code == 1, f"Expected exit 1, got {exit_code}: {capture.getvalue()}"
         assert "Traceback" in capture.getvalue()
         assert "Failed to start application" in capture.getvalue()
-        mock_application.stop.assert_not_awaited()
+        mock_application.stop.assert_awaited_once()
 
 
 class TestHardwareGenericException:
@@ -377,7 +378,7 @@ class TestHardwareGenericException:
         assert exit_code == 1, f"Expected exit 1, got {exit_code}: {capture.getvalue()}"
         assert "Traceback" in capture.getvalue()
         assert "Failed to start application" in capture.getvalue()
-        mock_application.stop.assert_not_awaited()
+        mock_application.stop.assert_awaited_once()
 
 
 class TestTracebackModuleLevel:
@@ -389,6 +390,34 @@ class TestTracebackModuleLevel:
 
         assert hasattr(_test_cmd, "traceback")
         assert "traceback" in _test_cmd.__dict__
+
+
+# ---------------------------------------------------------------------------
+# Phase 2 — defensive module-manager NoneType check
+# ---------------------------------------------------------------------------
+
+class TestHardwareModuleManagerNone:
+    """Phase 2, test 6: ``application.module_manager`` is None after ``start()``.
+
+    Verify exit code 1, the "Module manager is unavailable" message, and that
+    ``stop()`` still runs exactly once (the resource-leak fix).
+    """
+
+    @pytest.mark.asyncio
+    async def test_module_manager_unavailable_exits(self) -> None:
+        """Run ``hardware default`` when the module manager is None after start."""
+        capture = StringIO()
+        mock_application = _build_mock_application()
+        mock_application.get_assembly_config.return_value = [_build_radio_config(0, 0)]
+        mock_application.module_manager = None
+
+        exit_code = await _run_hardware(
+            capture, mock_application, assembly_name="default"
+        )
+
+        assert exit_code == 1, f"Expected exit 1, got {exit_code}: {capture.getvalue()}"
+        assert "Module manager is unavailable" in capture.getvalue()
+        mock_application.stop.assert_awaited_once()
 
 
 if __name__ == "__main__":
