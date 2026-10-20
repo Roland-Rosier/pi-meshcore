@@ -125,10 +125,11 @@ dev = [
 # CLI entry points
 # -----------------------------------------------------------------------------
 [project.scripts]
-pi-lora = "pi_lora.cli.main:app"
-check-hardware = "pi_lora.cli.check_hardware:app"
-config = "pi_lora.cli.config:app"
-pi-lora-test = "pi_lora.cli.test:app"
+pi-lora = "pi_lora.cli._entry_points:pi_lora"
+check-hardware = "pi_lora.cli._entry_points:check_hardware"
+config = "pi_lora.cli._entry_points:pi_lora_config"
+pi-lora-config = "pi_lora.cli._entry_points:pi_lora_config"
+pi-lora-test = "pi_lora.cli._entry_points:pi_lora_test"
 
 # No ASGI application module yet — web interface not implemented
 
