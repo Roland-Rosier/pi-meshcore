@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-import typer
+from async_typer import AsyncTyper
 
 from pi_lora.cli._logging import setup_logging
 
@@ -12,7 +12,7 @@ from .check_hardware import app as check_hardware_app
 from .config import app as config_app
 from .test import app as test_app
 
-app = typer.Typer(
+app = AsyncTyper(
     name="pi_lora",
     help="MeshCore Pi LoRa CLI — hardware test, config, and diagnostics",
     no_args_is_help=True,

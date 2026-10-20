@@ -22,6 +22,7 @@ from pathlib import Path
 from typing import Any
 
 import typer
+from async_typer import AsyncTyper
 from rich.console import Console
 from rich.table import Table
 
@@ -33,7 +34,7 @@ from pi_lora.framework.exceptions import (
     DeviceAttachmentNotFoundError,
 )
 
-app = typer.Typer(
+app = AsyncTyper(
     name="config",
     help="Query radio instance configuration.",
 )

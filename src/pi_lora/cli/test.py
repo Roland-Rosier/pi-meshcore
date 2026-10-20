@@ -6,6 +6,7 @@ import traceback
 from pathlib import Path
 
 import typer
+from async_typer import AsyncTyper
 from rich.console import Console
 
 import pi_lora.cli._logging
@@ -23,7 +24,7 @@ from pi_lora.framework.exceptions import (
 )
 from pi_lora.types import StateBits
 
-app = typer.Typer(
+app = AsyncTyper(
     name="test",
     help="Test commands for LoRa hardware.",
 )
