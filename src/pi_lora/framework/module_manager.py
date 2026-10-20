@@ -125,7 +125,7 @@ class ModuleManager:
 
                 self.modules_by_id[device_key] = module
                 self.modules.append(module)
-            except Exception:
+            except BaseException:
                 for module in list(self.modules):
                     scheduler.unregister_module(module)
                 self.modules.clear()

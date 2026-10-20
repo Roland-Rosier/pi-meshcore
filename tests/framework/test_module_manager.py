@@ -14,6 +14,7 @@
 
 """Unit tests for ModuleManager config loading and module registration."""
 
+import asyncio
 from unittest import mock
 
 import pytest
@@ -250,6 +251,28 @@ class TestLoadFromConfig:
             m is not module0 for m in scheduler.interrupt_bridge._interrupt_map.values()
         )
         assert 6 not in scheduler.interrupt_bridge._interrupt_map
+
+    @pytest.mark.asyncio
+    async def test_cancelled_error_rolls_back(
+        self, caplog: pytest.LogCaptureFixture,
+    ) -> None:
+        mm = ModuleManager()
+        radio_configs = _make_test_radio_configs()
+        scheduler = Scheduler()
+
+        def _force_cancelled(*_args: object, **_kwargs: object) -> None:
+            raise asyncio.CancelledError("Module cancelled during load")
+
+        with mock.patch(
+            "src.pi_lora.framework.module_manager.Rfm9xSx127xModule",
+            side_effect=_force_cancelled,
+        ), pytest.raises(asyncio.CancelledError) as exc_info:
+            mm.load_from_config(radio_configs, scheduler)
+        assert isinstance(exc_info.value, asyncio.CancelledError)
+        assert len(mm.modules) == 0
+        assert len(mm.modules_by_id) == 0
+        assert scheduler.timer_scheduler._registered == set()
+        assert any("rolled back" in msg.lower() for msg in caplog.messages)
 
 
 class TestEmptyConfig:
