@@ -292,6 +292,30 @@ class TestShowConfigPathImportRemoved:
         assert call_kwargs.kwargs.get("config_path") is not None
 
 
+class TestEnsureLoggedRemoved:
+    """Fix #2.17: ``_ensure_logged`` was removed from the CLI modules."""
+
+    def test_ensure_logged_absent_from_config(self) -> None:
+        """``pi_lora.cli.config`` must no longer expose ``_ensure_logged``."""
+        import pi_lora.cli.config as _cfg
+
+        assert not hasattr(_cfg, "_ensure_logged")
+        assert "_ensure_logged" not in _cfg.__dict__
+
+    def test_impl_accepts_plain_kwargs(self) -> None:
+        """The ``_impl`` helpers take plain keyword defaults, not Typer annotations."""
+        import inspect
+
+        for impl in (list_assemblies_impl, show_config_impl):
+            sig = inspect.signature(impl)
+            for param in sig.parameters.values():
+                if param.default is inspect._empty:
+                    continue
+                assert param.default in (False, None), (
+                    f"{impl.__name__} param {param.name} default is not a plain value"
+                )
+
+
 if __name__ == "__main__":
     exit_code = pytest.main([__file__, "-v"])
     sys.exit(exit_code)

@@ -18,16 +18,12 @@ from typing import Literal, cast
 
 import typer
 
+import pi_lora.cli._logging
 from pi_lora.drivers.lora_detection import (
     LoRaModuleConfig,
     LoRaModuleDetector,
     ValidationResult,
 )
-
-
-def _ensure_logged() -> None:
-    from pi_lora.cli._logging import setup_logging
-    setup_logging()
 
 
 def _normalise_module_type(value: str | None) -> Literal["rfm95w", "rfm98w", "none"] | None:
@@ -82,7 +78,7 @@ def detect_modules(
     ),
 ) -> None:
     """Scan hardware and optionally validate against an expected configuration."""
-    _ensure_logged()
+    pi_lora.cli._logging.setup_logging()
 
     detector = LoRaModuleDetector(ce_pins=[0, 1])
 
@@ -117,7 +113,7 @@ def detect_modules(
 @app.callback(invoke_without_command=True)
 def main_callback(ctx: typer.Context) -> None:
     """MeshCore hardware check utility — show help when invoked without subcommand."""
-    _ensure_logged()
+    pi_lora.cli._logging.setup_logging()
 
     if ctx.invoked_subcommand is None:
         typer.echo("Usage: check-hardware [command]")

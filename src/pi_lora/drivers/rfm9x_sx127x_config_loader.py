@@ -62,7 +62,7 @@ def load_config(
         Validated Rfm9xSx127xConfig instance.
 
     Raises:
-        ValidationError: If the configuration data fails Pydantic validation.
+        pydantic.ValidationError: If the configuration data fails Pydantic validation.
         FileNotFoundError: If the config file does not exist.
         ValueError: If config_name is provided but not found in YAML.
     """
@@ -104,7 +104,7 @@ def load_family_config(
         Validated Rfm9xSx127xFamilyConfig instance.
 
     Raises:
-        ValidationError: If the configuration data fails Pydantic validation.
+        pydantic.ValidationError: If the configuration data fails Pydantic validation.
         FileNotFoundError: If the config file does not exist.
     """
     path: Path = config_path or _resolve_default_path()
@@ -138,16 +138,18 @@ async def get_preloaded_config(
     Returns:
         A validated Rfm9xSx127xConfig instance.
     """
+    global _config_cache
+
     # Override path bypasses cache entirely.
     if config_path is not None:
         return load_config(config_path=config_path)
 
-    # Force reload bypasses cache.
+    # Force reload re-reads and refreshes the singleton cache.
     if force_reload:
-        return load_config()
+        _config_cache = load_config()
+        return _config_cache
 
     # Lazy singleton: load on first call, cache thereafter.
-    global _config_cache
     if _config_cache is not None:
         return _config_cache
 

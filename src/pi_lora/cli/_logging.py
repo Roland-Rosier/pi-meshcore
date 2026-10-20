@@ -15,7 +15,7 @@
 """Shared logging setup for the ``pi_lora.cli`` sub-apps.
 
 This module is the single source of truth for CLI logging configuration. It
-intentionly imports nothing from ``main``, ``test``, ``check_hardware``, or
+intentionally imports nothing from ``main``, ``test``, ``check_hardware``, or
 ``config`` so that those sub-apps can import :func:`setup_logging` without
 creating a circular import.
 """
@@ -33,8 +33,3 @@ def setup_logging() -> None:
         level=getattr(logging, log_level, logging.WARNING),
         format="%(asctime)s %(levelname)s %(name)s: %(message)s",
     )
-
-
-def _ensure_logged() -> None:
-    """Convenience wrapper that delegates to the shared :func:`setup_logging`."""
-    setup_logging()

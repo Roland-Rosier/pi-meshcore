@@ -16,7 +16,6 @@
 
 from __future__ import annotations
 
-import asyncio
 import json
 import sys
 from pathlib import Path
@@ -26,18 +25,13 @@ import typer
 from rich.console import Console
 from rich.table import Table
 
+import pi_lora.cli._logging
 from pi_lora.drivers.rfm9x_sx127x_radio_instance import RadioInstanceConfig
 from pi_lora.framework.application import Application
 from pi_lora.framework.exceptions import (
     AssemblyNotFoundError,
     DeviceAttachmentNotFoundError,
 )
-
-
-def _ensure_logged() -> None:
-    from pi_lora.cli._logging import setup_logging
-    setup_logging()
-
 
 app = typer.Typer(
     name="config",
@@ -103,13 +97,13 @@ def _format_config_json(config: RadioInstanceConfig | list[RadioInstanceConfig])
 
 
 async def list_assemblies_impl(
-    verbose: bool = typer.Option(False, "--verbose", "-v", help="Show module name and device count"),
-    json_output: bool = typer.Option(False, "--json", help="Output as JSON"),
-    config_file: str | None = typer.Option(None, "--config", "-c", help="Custom config file path"),
+    verbose: bool = False,
+    json_output: bool = False,
+    config_file: str | None = None,
 ) -> None:
     """List available assemblies."""
 
-    _ensure_logged()
+    pi_lora.cli._logging.setup_logging()
 
     custom_path: Path | None = Path(config_file) if config_file else None
 
@@ -137,41 +131,30 @@ async def list_assemblies_impl(
             typer.echo(f"  {a['assembly_name']}")
 
 
-def list_assemblies_sync(
-    verbose: bool = False,
-    json_output: bool = False,
-    config_file: str | None = None,
-) -> None:
-    """Sync wrapper for Typer CLI — ensures async function is awaited."""
-    asyncio.run(
-        list_assemblies_impl(
-            verbose=verbose,
-            json_output=json_output,
-            config_file=config_file,
-        )
-    )
-
-
 @app.command("list-assemblies")
-def list_assemblies(
+async def list_assemblies(
     verbose: bool = typer.Option(False, "--verbose", "-v", help="Show module name and device count"),
     json_output: bool = typer.Option(False, "--json", help="Output as JSON"),
     config_file: str | None = typer.Option(None, "--config", "-c", help="Custom config file path"),
 ) -> None:
     """List available assemblies."""
-    _ensure_logged()
-    list_assemblies_sync(verbose, json_output, config_file)
+    pi_lora.cli._logging.setup_logging()
+    await list_assemblies_impl(
+        verbose=verbose,
+        json_output=json_output,
+        config_file=config_file,
+    )
 
 
 async def show_config_impl(
-    assembly_name: str = typer.Argument(..., help="Assembly name to query"),
-    spi: int | None = typer.Option(None, "--spi", help="SPI device ID (e.g., 0)"),
-    ce: int | None = typer.Option(None, "--ce", help="CE number (e.g., 0 or 1)"),
-    json_output: bool = typer.Option(False, "--json", help="Output as JSON"),
-    config_file: str | None = typer.Option(None, "--config", "-c", help="Custom config file path"),
+    assembly_name: str,
+    spi: int | None = None,
+    ce: int | None = None,
+    json_output: bool = False,
+    config_file: str | None = None,
 ) -> None:
     """Show configuration for an assembly."""
-    _ensure_logged()
+    pi_lora.cli._logging.setup_logging()
 
     custom_path: Path | None = Path(config_file) if config_file else None
 
@@ -202,27 +185,8 @@ async def show_config_impl(
             typer.echo(_format_config_text(result))
 
 
-def show_config_sync(
-    assembly_name: str,
-    spi: int | None = None,
-    ce: int | None = None,
-    json_output: bool = False,
-    config_file: str | None = None,
-) -> None:
-    """Sync wrapper for Typer CLI — ensures async function is awaited."""
-    asyncio.run(
-        show_config_impl(
-            assembly_name=assembly_name,
-            spi=spi,
-            ce=ce,
-            json_output=json_output,
-            config_file=config_file,
-        )
-    )
-
-
 @app.command("show-config")
-def show_config(
+async def show_config(
     assembly_name: str = typer.Argument(..., help="Assembly name to query"),
     spi: int | None = typer.Option(None, "--spi", help="SPI device ID (e.g., 0)"),
     ce: int | None = typer.Option(None, "--ce", help="CE number (e.g., 0 or 1)"),
@@ -230,8 +194,14 @@ def show_config(
     config_file: str | None = typer.Option(None, "--config", "-c", help="Custom config file path"),
 ) -> None:
     """Show configuration for an assembly."""
-    _ensure_logged()
-    show_config_sync(assembly_name, spi, ce, json_output, config_file)
+    pi_lora.cli._logging.setup_logging()
+    await show_config_impl(
+        assembly_name=assembly_name,
+        spi=spi,
+        ce=ce,
+        json_output=json_output,
+        config_file=config_file,
+    )
 
 
 if __name__ == "__main__":

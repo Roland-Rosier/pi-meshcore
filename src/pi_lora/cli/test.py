@@ -2,13 +2,13 @@
 
 from __future__ import annotations
 
-import asyncio
 import traceback
 from pathlib import Path
 
 import typer
 from rich.console import Console
 
+import pi_lora.cli._logging
 from pi_lora.drivers.rfm9x_sx127x_radio_instance import RadioInstanceConfig
 from pi_lora.framework.application import Application
 from pi_lora.framework.events import (
@@ -22,12 +22,6 @@ from pi_lora.framework.exceptions import (
     DeviceAttachmentNotFoundError,
 )
 from pi_lora.types import StateBits
-
-
-def _ensure_logged() -> None:
-    from pi_lora.cli._logging import setup_logging
-    setup_logging()
-
 
 app = typer.Typer(
     name="test",
@@ -78,14 +72,7 @@ async def test_hardware_impl(
     except DeviceAttachmentNotFoundError as e:
         console.print(f"[red]Error:[/red] {e}")
         raise typer.Exit(code=1) from None
-    except (
-        RuntimeError,
-        ValueError,
-        KeyError,
-        OSError,
-        TimeoutError,
-        ConnectionError,
-    ) as e:
+    except Exception as e:
         console.print(f"[red]Error:[/red] Failed to start application: {e!r}")
         console.print("[red]Traceback:[/red]")
         traceback.print_exc()
@@ -129,27 +116,22 @@ async def test_hardware_impl(
     raise typer.Exit(code=0)
 
 
-def test_hardware_sync(
-    assembly_name: str,
-    spi: int | None = None,
-    ce: int | None = None,
-    config_file: str | None = None,
-) -> None:
-    """Sync wrapper for Typer CLI — ensures async function is awaited."""
-    asyncio.run(test_hardware_impl(assembly_name, spi, ce, config_file))
-
-
 @app.command("hardware")
-def test_hardware(
+async def test_hardware(
     assembly_name: str = typer.Argument(..., help="Assembly name to test"),
     spi: int | None = typer.Option(None, "--spi", help="Filter by SPI device ID"),
     ce: int | None = typer.Option(None, "--ce", help="Filter by CE number"),
     config_file: str | None = typer.Option(None, "--config", "-c", help="Custom config file path"),
 ) -> None:
     """Test hardware by transitioning modules to RESET_STATE."""
-    _ensure_logged()
+    pi_lora.cli._logging.setup_logging()
 
-    test_hardware_sync(assembly_name, spi, ce, config_file)
+    await test_hardware_impl(
+        assembly_name=assembly_name,
+        spi=spi,
+        ce=ce,
+        config_file=config_file,
+    )
 
 
 if __name__ == "__main__":

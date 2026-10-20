@@ -154,6 +154,12 @@ class InterruptBridge:
         self._task: asyncio.Task[None] | None = None
 
     def register_interrupt(self, gpio_pin: int, module: Rfm9xSx127xModule) -> None:
+        if gpio_pin in self._interrupt_map:
+            logging.getLogger(__name__).warning(
+                "Duplicate GPIO pin %d already mapped to a module; "
+                "this registration overwrites the previous mapping.",
+                gpio_pin,
+            )
         self._interrupt_map[gpio_pin] = module
         # Task is created in start() only.
 
@@ -181,7 +187,12 @@ class InterruptBridge:
         while self._running:
             gpio_pin = await self._trigger_queue.get()
             module = self._interrupt_map.get(gpio_pin)
-            if module is not None:
+            if module is None:
+                logging.getLogger(__name__).warning(
+                    "Unknown GPIO pin %d has no registered module; interrupt ignored.",
+                    gpio_pin,
+                )
+            else:
                 await module.event_queue.put(
                     ModuleEvent(EventType.INTERRUPT, InterruptEvent(gpio_pin))
                 )

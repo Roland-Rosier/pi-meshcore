@@ -666,8 +666,8 @@ class TestLoggingAndSysPath:
             communication_successes=[True, True],
         )
 
-        with patch(_DETECTOR_PATCH_PATH, return_value=mock_detector), patch.object(
-            _ch, "_ensure_logged"
+        with patch(_DETECTOR_PATCH_PATH, return_value=mock_detector), patch(
+            "pi_lora.cli._logging.setup_logging"
         ) as _spy:
             _ch.detect_modules(ce0=None, ce1=None, extended=False)
 
@@ -689,6 +689,17 @@ class TestLoggingAndSysPath:
             result = runner.invoke(cli_app, ["detect-modules"])
 
         assert "Added project root to sys.path" not in result.output
+
+
+class TestEnsureLoggedRemoved:
+    """Fix #2.17: ``_ensure_logged`` was removed from the CLI modules."""
+
+    def test_ensure_logged_absent_from_check_hardware(self) -> None:
+        """``pi_lora.cli.check_hardware`` must no longer expose ``_ensure_logged``."""
+        import pi_lora.cli.check_hardware as _ch
+
+        assert not hasattr(_ch, "_ensure_logged")
+        assert "_ensure_logged" not in _ch.__dict__
 
 
 if __name__ == "__main__":

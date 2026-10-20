@@ -175,22 +175,29 @@ class TestSharedLogging:
         """Import and call ``pi_lora.cli._logging.setup_logging`` directly.
 
         Verify the module exposes ``setup_logging`` and that calling it does
-        not raise.
+        not raise. ``_ensure_logged`` was removed (Fix #2.17).
         """
         import pi_lora.cli._logging as _shared
 
         assert callable(_shared.setup_logging)
-        assert callable(_shared._ensure_logged)
+        assert not hasattr(_shared, "_ensure_logged")
         _shared.setup_logging()
-        _shared._ensure_logged()
 
-    def test_check_hardware_ensure_logged_delegates(self) -> None:
-        """``check_hardware._ensure_logged`` must delegate to the shared module."""
+    def test_check_hardware_detect_modules_calls_setup_logging(self) -> None:
+        """``check_hardware.detect_modules`` must call ``setup_logging`` exactly once.
+
+        ``_ensure_logged`` was removed (Fix #2.17); the CLI call site now calls
+        ``pi_lora.cli._logging.setup_logging`` directly. Patch both the detector
+        and ``setup_logging`` and invoke ``detect_modules`` with all-None
+        defaults, then assert ``setup_logging`` ran exactly once.
+        """
         import pi_lora.cli._logging as _shared
         import pi_lora.cli.check_hardware as _ch
 
-        with patch.object(_shared, "setup_logging", autospec=True) as _spy:
-            _ch._ensure_logged()
+        with patch("pi_lora.cli.check_hardware.LoRaModuleDetector"), patch.object(
+            _shared, "setup_logging", autospec=True
+        ) as _spy:
+            _ch.detect_modules(ce0=None, ce1=None, extended=False)
             _spy.assert_called_once()
 
 

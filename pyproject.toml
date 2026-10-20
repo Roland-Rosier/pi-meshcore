@@ -59,23 +59,18 @@ dependencies = [
     # Core hardware drivers — required for RPi + LoRa Hat operation
     "spidev>=3.8",
     "gpiod>=2.4",
-
     # CLI framework (Typer, with Click/Rich/Shellingame extras)
-    "typer[all]>=0.19",
-
+    "typer[all]==0.27.3",
     # Configuration system — Pydantic models + YAML parsing
     "pydantic>=2.8",
     "ruamel.yaml>=0.6",
-
     # Async/sync locking primitives (works in both contexts)
     "aiologic>=0.1",
-
     # --- Optional: MeshCore protocol library ---
     # Uncomment the line below if you need MeshCore client/repeater functionality.
     # This package is optional because it may not be ultimately needed, and some
     # users may only want to scan frequencies without the full MeshCore stack.
     # "meshcore>=2.3",
-
     # --- Optional: Web interface (FastAPI + uvicorn) ---
     # Uncomment both lines below if you plan to use the web dashboard.
     # "fastapi>=0.115",
