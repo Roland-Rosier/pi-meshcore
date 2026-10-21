@@ -167,12 +167,8 @@ class InterruptBridge:
 
     def trigger_interrupt(self, gpio_pin: int) -> None:
         """Called by GPIO driver when interrupt fires (sync context)."""
-        try:
-            self._trigger_queue.put_nowait(gpio_pin)
-        except asyncio.QueueFull:
-            logging.getLogger(__name__).error(
-                "Interrupt queue full, dropping interrupt for GPIO %d", gpio_pin
-            )
+        # Queue is unlimited (maxsize=0) — put_nowait never raises QueueFull
+        self._trigger_queue.put_nowait(gpio_pin)
 
     async def start(self) -> None:
         self._running = True

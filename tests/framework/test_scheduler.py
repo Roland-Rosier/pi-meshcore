@@ -17,7 +17,7 @@
 import asyncio
 import time
 import warnings
-from unittest.mock import MagicMock, patch
+from unittest.mock import MagicMock
 
 import pytest
 from src.pi_lora.framework.events import EventType
@@ -254,14 +254,17 @@ class TestInterruptBridge:
         assert bridge._task is not None
         await bridge.stop()
 
-    def test_trigger_interrupt_queue_full_drops(self) -> None:
+    def test_trigger_interrupt_queue_unlimited_accumulates(self) -> None:
         bridge = InterruptBridge()
-        bridge._trigger_queue = asyncio.Queue(maxsize=1)
+        assert bridge._trigger_queue.maxsize == 0
         bridge.trigger_interrupt(25)
-        assert bridge._trigger_queue.full()
-        with patch("src.pi_lora.framework.scheduler.logging.getLogger") as gl:
-            bridge.trigger_interrupt(26)
-            gl.return_value.error.assert_called_once()
+        bridge.trigger_interrupt(26)
+        bridge.trigger_interrupt(27)
+        assert not bridge._trigger_queue.empty()
+        assert bridge._trigger_queue.get_nowait() == 25
+        assert bridge._trigger_queue.get_nowait() == 26
+        assert bridge._trigger_queue.get_nowait() == 27
+        assert bridge._trigger_queue.empty()
 
     @pytest.mark.asyncio
     async def test_start_creates_event_and_task(self) -> None:
