@@ -15,6 +15,8 @@
 """Tests for lock registry correctness in ``spi/locks.py``."""
 
 import asyncio
+import inspect
+import types
 
 import pytest
 from src.pi_lora.drivers.spi.locks import SpiLock, get_bus_lock
@@ -122,3 +124,54 @@ class TestCancellationLeak:
             await task
 
         assert lock.locked() is False
+
+
+class TestLockProtocolSignatures:
+    """Verify the ``SpiLock`` protocol signatures match ``aiologic.Lock``.
+
+    Phase 11 corrections. ``async_acquire`` must be a coroutine (an ``async
+    def``) because the concrete ``aiologic.Lock.async_acquire`` is a coroutine;
+    calling it without ``await`` yields a ``types.CoroutineType`` and awaiting
+    it yields a ``bool``. ``__enter__`` and ``__aenter__`` must return the lock
+    instance itself so they are faithful self-returning context managers.
+
+    Each test exercises a distinct bus number so the shared per-bus
+    :class:`aiologic.Lock` instances never leak ownership across tests.
+    """
+
+    @pytest.mark.asyncio
+    async def test_async_acquire_is_a_coroutine(self) -> None:
+        """``async_acquire`` returns a coroutine object when awaited-less."""
+        lock = await get_bus_lock(0)
+        raw = lock.async_acquire()
+        assert isinstance(raw, types.CoroutineType)
+        raw.close()
+
+    @pytest.mark.asyncio
+    async def test_async_acquire_returns_bool(self) -> None:
+        """Awaited ``async_acquire`` resolves to a boolean."""
+        lock = await get_bus_lock(1)
+        result = await lock.async_acquire()
+        assert isinstance(result, bool)
+        lock.async_release()
+
+    def test_enter_returns_self(self) -> None:
+        """``with lock:`` returns the lock instance itself."""
+        lock = asyncio.new_event_loop().run_until_complete(get_bus_lock(2))
+        with lock as entered:
+            assert entered is lock
+        assert entered is lock
+
+    @pytest.mark.asyncio
+    async def test_aenter_returns_self(self) -> None:
+        """``async with lock:`` returns the lock instance itself."""
+        lock = await get_bus_lock(3)
+        async with lock as entered:
+            assert entered is lock
+        assert entered is lock
+
+    @pytest.mark.asyncio
+    async def test_protocol_async_acquire_is_coroutine_function(self) -> None:
+        """The concrete lock's ``async_acquire`` is a coroutine function."""
+        lock = await get_bus_lock(4)
+        assert inspect.iscoroutinefunction(lock.async_acquire) is True
