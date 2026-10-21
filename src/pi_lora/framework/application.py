@@ -84,66 +84,84 @@ class Application:
                 raise
 
     async def stop(self) -> None:
-        """Gracefully stop all modules and the scheduler."""
+        """Gracefully stop all modules and the scheduler.
+
+        Per-module failures are collected and surfaced as an ``ExceptionGroup``
+        once every module and the scheduler have been drained and the state
+        flags have been reset to a clean baseline.
+        """
+        errors: list[Exception] = []
         async with self._lifecycle_lock:
             if not self._started:
                 return
             for module in self.module_manager.get_all_modules():
                 try:
                     await module.stop_event_loop(StopMode.DRAIN)
-                except (Exception, asyncio.CancelledError):
+                except Exception as exc:
                     logger.exception(
                         "stop_event_loop failed for SPI device=%s CE=%s",
                         module.get_spi_device_id(),
                         module.get_ce_number(),
                     )
+                    errors.append(exc)
                 try:
                     await module.close_spi()
-                except (Exception, asyncio.CancelledError):
+                except Exception as exc:
                     logger.exception(
                         "close_spi failed for SPI device=%s CE=%s",
                         module.get_spi_device_id(),
                         module.get_ce_number(),
                     )
+                    errors.append(exc)
             try:
                 await self.scheduler.stop()
-            except (Exception, asyncio.CancelledError):
+            except Exception as exc:
                 logger.exception("scheduler.stop() failed during stop")
+                errors.append(exc)
             self._started_modules.clear()
             self._scheduler_started = False
             self._started = False
+        if errors:
+            raise ExceptionGroup("Errors during Application.stop()", errors)
 
     async def _cleanup_partial_start(self) -> None:
         """Mirror stop() for partially-started modules on failure.
 
         Each module is drained and closed independently so that a failure on one
         module does not prevent the remaining modules (and the scheduler) from
-        being cleaned up.
+        being cleaned up. Per-module failures are collected and surfaced as an
+        ``ExceptionGroup`` after the state flags are reset to a clean baseline.
         """
+        errors: list[Exception] = []
         for module in self._started_modules:
             try:
                 await module.stop_event_loop(StopMode.DRAIN)
-            except (Exception, asyncio.CancelledError):
+            except Exception as exc:
                 logger.exception(
                     "stop_event_loop failed for SPI device=%s CE=%s",
                     module.get_spi_device_id(),
                     module.get_ce_number(),
                 )
+                errors.append(exc)
             try:
                 await module.close_spi()
-            except (Exception, asyncio.CancelledError):
+            except Exception as exc:
                 logger.exception(
                     "close_spi failed for SPI device=%s CE=%s",
                     module.get_spi_device_id(),
                     module.get_ce_number(),
                 )
+                errors.append(exc)
         if self._scheduler_started:
             try:
                 await self.scheduler.stop()
-            except (Exception, asyncio.CancelledError):
+            except Exception as exc:
                 logger.exception("scheduler.stop() failed during cleanup")
+                errors.append(exc)
         self._started_modules.clear()
         self._scheduler_started = False
+        if errors:
+            raise ExceptionGroup("Errors during Application cleanup", errors)
 
     async def run_blocking_command(self, cmd: Any) -> Any:
         """Execute *cmd* synchronously via CommandBus.execute()."""

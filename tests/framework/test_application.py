@@ -66,9 +66,40 @@ class _FailingInitModule:
     async def start_event_loop(self) -> None:
         return None
 
-    async def stop_event_loop(self) -> None:
+    async def stop_event_loop(self, mode: Any) -> None:
         self.stop_event_loop_calls += 1
         return None
+
+    async def close_spi(self) -> None:
+        self.close_spi_calls += 1
+        return None
+
+    def get_spi_device_id(self) -> int:
+        return self.spi_device_id
+
+    def get_ce_number(self) -> int:
+        return self.ce_number
+
+
+class _FailingStopModule:
+    """Controllable module whose ``stop_event_loop()`` raises — used for Phase 6."""
+
+    def __init__(self, ce_number: int = 0, spi_device_id: int = 0) -> None:
+        self.ce_number: int = ce_number
+        self.spi_device_id: int = spi_device_id
+        self.stop_event_loop_calls: int = 0
+        self.close_spi_calls: int = 0
+        self._stop_error: RuntimeError = RuntimeError("stop_event_loop() failed")
+
+    async def init_spi_bus(self) -> None:
+        return None
+
+    async def start_event_loop(self) -> None:
+        return None
+
+    async def stop_event_loop(self, mode: Any) -> None:
+        self.stop_event_loop_calls += 1
+        raise self._stop_error
 
     async def close_spi(self) -> None:
         self.close_spi_calls += 1
@@ -233,6 +264,47 @@ class TestApplicationLifecycle:
         assert app._scheduler_started is False
         await app.stop()
         assert app._started is False
+
+    @pytest.mark.asyncio
+    async def test_stop_success_does_not_raise(self) -> None:
+        """A clean stop() must not raise an ExceptionGroup (no errors collected)."""
+        app = Application(config=None, spi_factory=MockSpiBusFactory())
+        await app.start()
+        await app.stop()
+        assert app._started is False
+        assert app._started_modules == []
+        assert app._scheduler_started is False
+
+    @pytest.mark.asyncio
+    async def test_stop_surfaces_failures_as_exceptiongroup(self) -> None:
+        """app.stop() surfaces drained failures as an ExceptionGroup containing the
+        exact error, and state flags reset to a clean baseline regardless."""
+        app = Application(config=None, spi_factory=MockSpiBusFactory())
+        await app.start()
+
+        failing = _FailingStopModule()
+
+        def _get_all_modules() -> list[Any]:
+            return [failing]
+
+        app.module_manager.get_all_modules = _get_all_modules  # type: ignore[assignment]
+
+        def _failing_scheduler_stop() -> Any:
+            raise RuntimeError("scheduler.stop() failed")
+
+        app.scheduler.stop = _failing_scheduler_stop  # type: ignore[assignment]
+
+        with pytest.raises(ExceptionGroup) as excinfo:
+            await app.stop()
+
+        surfaced = list(excinfo.value.exceptions)
+        assert surfaced
+        assert failing._stop_error in surfaced
+        assert any(isinstance(e, RuntimeError) for e in surfaced)
+
+        assert app._started is False
+        assert app._started_modules == []
+        assert app._scheduler_started is False
 
     @pytest.mark.asyncio
     async def test_scheduler_started_flag_true_before_scheduler_start(self) -> None:
