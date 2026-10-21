@@ -15,6 +15,8 @@
 from __future__ import annotations
 
 import os
+from collections.abc import Iterator
+from contextlib import contextmanager
 
 from pi_lora.drivers.spi.bus import RealSpiBus, SpiBus
 from tests.fakes import create_fake_spi_dev, spidev_kernel_patch
@@ -178,20 +180,33 @@ class FakeSpiBusKernelFactory:
     ``import spidev`` / ``spidev.SpiDev()`` / ``.open()`` path with a
     :class:`FakeSpiDev` kernel instead of the real Cython extension. This
     exercises the ``RealSpiBus -> spidev -> kernel SPI`` chain end-to-end.
+
+    The factory is a context-manager factory: :meth:`create_bus` must be used
+    inside a ``with`` block so the ``spidev`` patch stays active for the bus's
+    whole lifetime and the bus is closed on block exit.
     """
 
-    def create(self, bus: int, device: int) -> RealSpiBus:
-        """Return an opened ``RealSpiBus`` whose ``_spidev`` is a :class:`FakeSpiDev`.
+    @contextmanager
+    def create_bus(self, bus: int, device: int) -> Iterator[RealSpiBus]:
+        """Yield an opened ``RealSpiBus`` whose ``_spidev`` is a :class:`FakeSpiDev`.
+
+        The ``spidev`` patch remains active for the entire duration the bus is
+        yielded, so any ``import spidev`` performed by ``RealSpiBus`` / ``xfer2``
+        resolves to the injected fake module. The bus is closed on block exit.
 
         Args:
             bus: The bus identifier.
             device: The device identifier.
 
-        Returns:
-            An opened ``RealSpiBus`` whose ``_spidev`` is the fake kernel.
+        Yields:
+            An opened ``RealSpiBus`` whose ``_spidev`` is the fake kernel while
+            the ``spidev`` patch is active.
         """
         bus_instance: RealSpiBus = RealSpiBus()
         fake_kernel = create_fake_spi_dev(module_type="rfm95w")
         with spidev_kernel_patch(fake_kernel):
             bus_instance.open(bus=bus, device=device)
-        return bus_instance
+            try:
+                yield bus_instance
+            finally:
+                bus_instance.close()

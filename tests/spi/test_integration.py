@@ -25,6 +25,8 @@ blocking transfer to a worker thread.
 
 from __future__ import annotations
 
+import sys
+
 import pytest
 
 from pi_lora.drivers.spi.locks import get_bus_lock
@@ -46,24 +48,25 @@ class TestRealSpiBusKernelChain:
         so pre-acquiring it here would deadlock on the non-recursive
         ``aiologic.LowLevelLock``.
         """
-        bus = FakeSpiBusKernelFactory().create(bus=0, device=0)
-        assert bus.bus_number == 0
-        assert bus.device_number == 0
-        result = await bus.xfer2(bytearray([0x01 | 0x80, 0x42]))
-        assert isinstance(result, list)
-        assert len(result) == 2
-        assert result == [0x81, 0x42]
+        with FakeSpiBusKernelFactory().create_bus(bus=0, device=0) as bus:
+            assert bus.bus_number == 0
+            assert bus.device_number == 0
+            result = await bus.xfer2(bytearray([0x01 | 0x80, 0x42]))
+            assert isinstance(result, list)
+            assert len(result) == 2
+            assert result == [0x81, 0x42]
 
     @pytest.mark.asyncio
     async def test_same_bus_lock_is_shared(self) -> None:
         """Two buses on the same bus number share one per-bus lock instance."""
-        bus_one = FakeSpiBusKernelFactory().create(bus=0, device=0)
-        bus_two = FakeSpiBusKernelFactory().create(bus=0, device=1)
+        with (
+            FakeSpiBusKernelFactory().create_bus(bus=0, device=0) as bus_one,
+            FakeSpiBusKernelFactory().create_bus(bus=0, device=1) as bus_two,
+        ):
+            assert await get_bus_lock(bus_one.bus_number) is await get_bus_lock(bus_two.bus_number)
 
-        assert await get_bus_lock(bus_one.bus_number) is await get_bus_lock(bus_two.bus_number)
-
-        await bus_one.xfer2(bytearray([0x81, 0x08]))
-        await bus_two.xfer2(bytearray([0x42, 0x00]))
+            await bus_one.xfer2(bytearray([0x81, 0x08]))
+            await bus_two.xfer2(bytearray([0x42, 0x00]))
 
 
 class TestRealSpiBusFactory:
@@ -92,3 +95,38 @@ class TestRealSpiBusFactory:
         assert isinstance(result, list)
         assert len(result) == 2
         assert result == [0x81, 0x42]
+
+
+class TestFakeSpiBusKernelFactoryContext:
+    """Coverage for the context-manager lifetime semantics of the factory."""
+
+    @pytest.mark.asyncio
+    async def test_patch_active_inside_context(self) -> None:
+        """The ``spidev`` patch is active while the bus is yielded.
+
+        Inside the ``with`` block ``bus._spidev`` must be the injected
+        :class:`FakeSpiDev` and ``import spidev`` must resolve to the injected
+        module, so ``xfer2`` drives the fake kernel SPI.
+        """
+        from tests.fakes import FakeSpiDev
+
+        with FakeSpiBusKernelFactory().create_bus(bus=0, device=0) as bus:
+            assert isinstance(bus._spidev, FakeSpiDev)
+            assert sys.modules.get("spidev") is not None
+            result = await bus.xfer2(bytearray([0x01 | 0x80, 0x42]))
+            assert result == [0x81, 0x42]
+
+    def test_patch_restored_after_context(self) -> None:
+        """After the context exits the bus is closed and the patch is removed.
+
+        Exiting the ``with`` block must close the bus (``_spidev`` set back to
+        ``None``) and restore ``sys.modules`` so no injected ``spidev`` persists.
+        """
+        from tests.fakes import FakeSpiDev
+
+        preexisting: object | None = sys.modules.get("spidev", None)
+        with FakeSpiBusKernelFactory().create_bus(bus=0, device=0) as bus:
+            assert isinstance(bus._spidev, FakeSpiDev)
+
+        assert bus._spidev is None
+        assert sys.modules.get("spidev", None) == preexisting
