@@ -74,6 +74,32 @@ class TestTimerScheduler:
         assert ts._running is True
 
     @pytest.mark.asyncio
+    async def test_register_module_creates_task_when_running(
+        self, mock_module: MagicMock
+    ) -> None:
+        ts = TimerScheduler()
+        await ts.start()
+        assert ts._running is True
+        ts.register_module(mock_module, 1.0)
+        assert mock_module in ts._tasks
+        assert ts._tasks[mock_module] is not None
+        assert mock_module in ts._registered
+        await ts.stop()
+
+    @pytest.mark.asyncio
+    async def test_register_module_repeats_task_when_running(
+        self, mock_module: MagicMock
+    ) -> None:
+        ts = TimerScheduler()
+        await ts.start()
+        ts.register_module(mock_module, 1.0)
+        first_task = ts._tasks[mock_module]
+        ts.register_module(mock_module, 2.0)
+        assert ts._tasks[mock_module] is first_task
+        assert ts.get_interval(mock_module) == 2.0
+        await ts.stop()
+
+    @pytest.mark.asyncio
     async def test_stop_cancels_tasks(self, mock_module: MagicMock) -> None:
         ts = TimerScheduler()
         ts.register_module(mock_module, 1.0)

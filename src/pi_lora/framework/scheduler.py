@@ -94,6 +94,8 @@ class TimerScheduler:
         if interval is not None:
             self._intervals[module] = interval
         self._registered.add(module)
+        if self._running and module not in self._tasks:
+            self._tasks[module] = asyncio.create_task(self._timer_task(module))
 
     async def _timer_task(self, module: Rfm9xSx127xModule) -> None:
         while self._running:
