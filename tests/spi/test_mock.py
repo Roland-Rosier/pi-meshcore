@@ -92,3 +92,52 @@ class TestMockSpiBus:
         assert isinstance(result, list)
         assert len(result) == 2
         bus.close()
+
+
+class TestMockSpiBusFactory:
+    """Tests for the ``MockSpiBusFactory`` class (exercises the moved ``SpiBus`` import)."""
+
+    def test_create_exposes_spi_bus_interface(self) -> None:
+        from tests.spi.mock import MockSpiBusFactory
+
+        bus = MockSpiBusFactory().create(bus=2, device=3)
+        assert callable(bus.open)
+        assert callable(bus.close)
+        assert bus.max_speed_hz == 1000000
+        assert bus.mode == 0
+        assert bus.lsbfirst is False
+        assert bus.no_cs is False
+        bus.open(2, 3)
+        assert bus.bus_number == 2
+        assert bus.device_number == 3
+        bus.close()
+        assert bus._opened is False
+
+
+class TestFakeSpiBusKernelFactory:
+    """Tests for the ``FakeSpiBusKernelFactory`` context-manager factory."""
+
+    @pytest.mark.asyncio
+    async def test_create_bus_wires_fake_kernel_and_closes(self) -> None:
+        from tests.fakes import FakeSpiDev
+        from tests.spi.mock import FakeSpiBusKernelFactory
+
+        with FakeSpiBusKernelFactory().create_bus(bus=0, device=1) as bus:
+            assert bus.bus_number == 0
+            assert bus.device_number == 1
+            assert isinstance(bus._spidev, FakeSpiDev)
+            result = await bus.xfer2([0x01 | 0x80, 0xFF])
+            assert isinstance(result, list)
+            assert result == [0x81, 0xFF]
+        assert bus._spidev is None
+
+
+class TestMockModuleImport:
+    """Defensive coverage that ``tests.spi.mock`` imports without ``spidev``."""
+
+    def test_mock_importable_without_spidev(self) -> None:
+        import tests.spi.mock as mock_module
+
+        assert hasattr(mock_module, "MockSpiBusFactory")
+        assert hasattr(mock_module, "FakeSpiBusKernelFactory")
+        assert mock_module.spidev_available() in (True, False)

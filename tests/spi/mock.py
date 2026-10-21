@@ -17,9 +17,10 @@ from __future__ import annotations
 import os
 from collections.abc import Iterator
 from contextlib import contextmanager
+from typing import TYPE_CHECKING
 
-from pi_lora.drivers.spi.bus import RealSpiBus, SpiBus
-from tests.fakes import create_fake_spi_dev, spidev_kernel_patch
+if TYPE_CHECKING:
+    from pi_lora.drivers.spi.bus import RealSpiBus, SpiBus
 
 
 class MockSpiBus:
@@ -202,6 +203,9 @@ class FakeSpiBusKernelFactory:
             An opened ``RealSpiBus`` whose ``_spidev`` is the fake kernel while
             the ``spidev`` patch is active.
         """
+        from pi_lora.drivers.spi.bus import RealSpiBus
+        from tests.fakes import create_fake_spi_dev, spidev_kernel_patch
+
         bus_instance: RealSpiBus = RealSpiBus()
         fake_kernel = create_fake_spi_dev(module_type="rfm95w")
         with spidev_kernel_patch(fake_kernel):
