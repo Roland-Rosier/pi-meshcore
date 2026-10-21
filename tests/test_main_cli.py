@@ -201,6 +201,56 @@ class TestSharedLogging:
             _spy.assert_called_once()
 
 
+# ---------------------------------------------------------------------------
+# Test 7 — invalid log level validation (Phase 10)
+# ---------------------------------------------------------------------------
+
+class TestSharedLoggingInvalidLevel:
+    """Phase 10: ``setup_logging`` validates ``PI_LORA_LOG_LEVEL``."""
+
+    def test_invalid_level_emits_warning(self) -> None:
+        """``PI_LORA_LOG_LEVEL=INVALID`` triggers a UserWarning and does not crash."""
+        import logging
+        import os
+        import warnings
+
+        import pi_lora.cli._logging as _shared
+
+        with patch.dict(os.environ, {"PI_LORA_LOG_LEVEL": "INVALID"}), warnings.catch_warnings(record=True) as _rw:
+            warnings.simplefilter("always")
+            _shared.setup_logging()
+        assert any(issubclass(w.category, UserWarning) for w in _rw)
+        assert logging.getLogger().level == logging.WARNING
+
+    def test_valid_level_applied_without_warning(self) -> None:
+        """A valid level (``INFO``) is applied and no warning is emitted."""
+        import logging
+        import os
+        import warnings
+
+        import pi_lora.cli._logging as _shared
+
+        with patch.dict(os.environ, {"PI_LORA_LOG_LEVEL": "INFO"}), warnings.catch_warnings(record=True) as _rw:
+            warnings.simplefilter("always")
+            _shared.setup_logging()
+        assert not any(issubclass(w.category, UserWarning) for w in _rw)
+        assert logging.getLogger().level == logging.INFO
+
+    def test_default_level_is_warning_without_warning(self) -> None:
+        """With no env var, the default level is ``WARNING`` and no warning fires."""
+        import logging
+        import os
+        import warnings
+
+        import pi_lora.cli._logging as _shared
+
+        with patch.dict(os.environ, {}, clear=True), warnings.catch_warnings(record=True) as _rw:
+            warnings.simplefilter("always")
+            _shared.setup_logging()
+        assert not any(issubclass(w.category, UserWarning) for w in _rw)
+        assert logging.getLogger().level == logging.WARNING
+
+
 if __name__ == "__main__":
     import sys
 

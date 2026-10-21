@@ -25,11 +25,28 @@ from __future__ import annotations
 import logging
 import os
 
+_LOG_LEVELs: frozenset[str] = frozenset(
+    {"DEBUG", "INFO", "WARNING", "ERROR", "CRITICAL"}
+)
+_DEFAULT_LOG_LEVEL: str = "WARNING"
+
 
 def setup_logging() -> None:
     """Configure root logger using ``PI_LORA_LOG_LEVEL`` environment variable. Idempotent."""
-    log_level = os.environ.get("PI_LORA_LOG_LEVEL", "WARNING").upper()
+    log_level = os.environ.get("PI_LORA_LOG_LEVEL", _DEFAULT_LOG_LEVEL).upper()
+    if log_level not in _LOG_LEVELs:
+        import warnings
+
+        warnings.warn(
+            f"Invalid log level '{log_level}'; valid levels: "
+            f"{', '.join(sorted(_LOG_LEVELs))}. Defaulting to "
+            f"{_DEFAULT_LOG_LEVEL}.",
+            UserWarning,
+            stacklevel=2,
+        )
+        log_level = _DEFAULT_LOG_LEVEL
     logging.basicConfig(
-        level=getattr(logging, log_level, logging.WARNING),
+        level=getattr(logging, log_level),
         format="%(asctime)s %(levelname)s %(name)s: %(message)s",
+        force=True,
     )
