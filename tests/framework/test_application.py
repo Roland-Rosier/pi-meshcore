@@ -112,6 +112,42 @@ class _FailingStopModule:
         return self.ce_number
 
 
+class _FailingStartEventLoopModule:
+    """Controllable module whose ``start_event_loop()`` raises — used for Phase 4.
+
+    ``init_spi_bus()`` succeeds (returns None) so the module IS tracked, but
+    ``start_event_loop()`` raises, so start() fails and _cleanup_partial_start()
+    must drain and close_spi() the already-initialized module.
+    """
+
+    def __init__(self, ce_number: int = 0, spi_device_id: int = 0) -> None:
+        self.ce_number: int = ce_number
+        self.spi_device_id: int = spi_device_id
+        self.stop_event_loop_calls: int = 0
+        self.close_spi_calls: int = 0
+        self._start_error: RuntimeError = RuntimeError("start_event_loop() failed")
+
+    async def init_spi_bus(self) -> None:
+        return None
+
+    async def start_event_loop(self) -> None:
+        raise self._start_error
+
+    async def stop_event_loop(self, mode: Any) -> None:
+        self.stop_event_loop_calls += 1
+        return None
+
+    async def close_spi(self) -> None:
+        self.close_spi_calls += 1
+        return None
+
+    def get_spi_device_id(self) -> int:
+        return self.spi_device_id
+
+    def get_ce_number(self) -> int:
+        return self.ce_number
+
+
 class TestApplicationLifecycle:
     """Verify Application.start() / stop() lifecycle."""
 
@@ -392,6 +428,30 @@ class TestApplicationLifecycle:
         assert app._scheduler_started is False
 
     @pytest.mark.asyncio
+    async def test_start_event_loop_failure_still_tracked_for_cleanup(self) -> None:
+        """A module whose init_spi_bus() succeeds but whose start_event_loop() raises
+        IS tracked (append happens after init succeeds), so _cleanup_partial_start()
+        must drain and close_spi() it even though start() failed."""
+        app = Application(config=None, spi_factory=MockSpiBusFactory())
+
+        failing = _FailingStartEventLoopModule()
+
+        def _get_all_modules() -> list[Any]:
+            return [failing]
+
+        app.module_manager.get_all_modules = _get_all_modules  # type: ignore[assignment]
+
+        with pytest.raises(RuntimeError):
+            await app.start()
+
+        # The module was tracked after init_spi_bus() succeeded, so cleanup drains it.
+        assert failing.close_spi_calls == 1
+        assert failing.stop_event_loop_calls == 1
+        assert app._started is False
+        assert app._started_modules == []
+        assert app._scheduler_started is False
+
+    @pytest.mark.asyncio
     async def test_start_modules_appended_after_init_success(self) -> None:
         """Every module is added to _started_modules only after init_spi_bus() and start_event_loop() succeed; on stop() the list clears."""
         app = Application(config=None, spi_factory=MockSpiBusFactory())
@@ -403,6 +463,18 @@ class TestApplicationLifecycle:
         assert all(mod.spi_bus is not None for mod in started)
         await app.stop()
         assert app._started_modules == []
+
+    @pytest.mark.asyncio
+    async def test_stop_unregisters_modules_before_draining(self) -> None:
+        app = Application(config=None, spi_factory=MockSpiBusFactory())
+        await app.start()
+        modules = app.module_manager.get_all_modules()
+        assert any(m in app.scheduler.timer_scheduler._registered for m in modules)
+        await app.stop()
+        assert app.scheduler.timer_scheduler._registered == set()
+        assert app._started is False
+        assert app._started_modules == []
+        assert app._scheduler_started is False
 
 
 class TestEmptyConfig:

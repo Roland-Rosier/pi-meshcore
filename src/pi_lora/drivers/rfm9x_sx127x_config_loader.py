@@ -19,13 +19,27 @@ from __future__ import annotations
 import importlib.resources
 from pathlib import Path
 
-import aiologic
 from ruamel.yaml import YAML
 
 from pi_lora.drivers.rfm9x_sx127x_config_model import (
     Rfm9xSx127xConfig,
     Rfm9xSx127xFamilyConfig,
 )
+
+
+class _AiologicImportError(ImportError):
+    """Raised when aiologic is unavailable (hard runtime dependency for config locking)."""
+
+    def __init__(self, message: str) -> None:
+        super().__init__(message)
+
+
+try:
+    import aiologic
+except ImportError as _aiologic_import_error:
+    raise _AiologicImportError(
+        "aiologic is required for config locking. Install with: pip install aiologic"
+    ) from _aiologic_import_error
 
 # Default config resource path as configuration string (not magic).
 _DEFAULT_CONFIG_RESOURCE: str = "pi_lora.drivers.configs:rfm9x_sx127x_config.yaml"

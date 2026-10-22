@@ -49,6 +49,4 @@ class RealSpiBusFactory:
         """
         from .bus import RealSpiBus
 
-        bus_instance = RealSpiBus()
-        bus_instance.open(bus=bus, device=device)  # Restore for backward compatibility
-        return bus_instance
+        return RealSpiBus()

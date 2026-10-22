@@ -110,12 +110,13 @@ class TestTimerScheduler:
         await asyncio.sleep(0.05)
         assert initial_task.done()
 
-    def test_unregister_timer_module(self, mock_module: MagicMock) -> None:
+    @pytest.mark.asyncio
+    async def test_unregister_timer_module(self, mock_module: MagicMock) -> None:
         ts = TimerScheduler()
         ts.register_module(mock_module, 1.0)
         assert mock_module in ts._registered
         assert ts.get_interval(mock_module) == 1.0
-        ts.unregister_module(mock_module)
+        await ts.unregister_module(mock_module)
         assert ts.get_interval(mock_module) is None
         assert mock_module not in ts._tasks
         assert mock_module not in ts._registered
@@ -127,7 +128,7 @@ class TestTimerScheduler:
         await ts.start()
         task = ts._tasks[mock_module]
         with warnings.catch_warnings(record=True) as recorded:
-            ts.unregister_module(mock_module)
+            await ts.unregister_module(mock_module)
             await asyncio.sleep(0.05)
         assert task.done()
         for record in recorded:
@@ -545,7 +546,7 @@ class TestScheduler:
             interrupt_gpio_pins=[25],
         )
         assert 25 in sched.interrupt_bridge._interrupt_map
-        sched.unregister_module(mock_module)
+        await sched.unregister_module(mock_module)
         assert sched.timer_scheduler.get_interval(mock_module) is None
         assert mock_module not in sched.idle_pacer._idle_enabled_modules
         assert 25 not in sched.interrupt_bridge._interrupt_map
@@ -564,11 +565,30 @@ class TestScheduler:
         )
         assert 25 in sched.interrupt_bridge._interrupt_map
         assert 26 in sched.interrupt_bridge._interrupt_map
-        sched.unregister_module(mock_module)
+        await sched.unregister_module(mock_module)
         assert 25 not in sched.interrupt_bridge._interrupt_map
         assert 26 not in sched.interrupt_bridge._interrupt_map
         assert mock_module not in sched.idle_pacer._idle_enabled_modules
         assert sched.timer_scheduler.get_interval(mock_module) is None
+        await sched.stop()
+
+    @pytest.mark.asyncio
+    async def test_unregister_scheduler_removes_all_components(
+        self, mock_module: MagicMock
+    ) -> None:
+        sched = Scheduler()
+        sched.register_module(
+            mock_module,
+            timer_interval=1.0,
+            idle_enabled=True,
+            interrupt_gpio_pins=[25],
+        )
+        await sched.start()
+        await sched.unregister_module(mock_module)
+        assert mock_module not in sched.timer_scheduler._registered
+        assert sched.timer_scheduler.get_interval(mock_module) is None
+        assert mock_module not in sched.idle_pacer._idle_enabled_modules
+        assert 25 not in sched.interrupt_bridge._interrupt_map
         await sched.stop()
 
     @pytest.mark.asyncio

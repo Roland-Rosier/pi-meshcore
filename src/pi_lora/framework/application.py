@@ -76,8 +76,12 @@ class Application:
                 self._scheduler_started = True
                 for module in self.module_manager.get_all_modules():
                     await module.init_spi_bus()
-                    await module.start_event_loop()
+                    # Append after init_spi_bus() so SPI handle is tracked for cleanup.
+                    # If start_event_loop() fails, stop_event_loop() handles no-task case cleanly
+                    # and close_spi() releases the bus. Pre-Plan-9 behavior was correct; Plan-9
+                    # over-corrected and leaked resources on start_event_loop() failure.
                     self._started_modules.append(module)
+                    await module.start_event_loop()
                 self._started = True
             except (Exception, asyncio.CancelledError):
                 await self._cleanup_partial_start()
@@ -94,6 +98,10 @@ class Application:
         async with self._lifecycle_lock:
             if not self._started:
                 return
+            # Explicitly unregister each module from scheduler BEFORE stopping event loops
+            # to prevent timer/idle/interrupt tasks from queuing events during shutdown.
+            for module in self.module_manager.get_all_modules():
+                await self.scheduler.unregister_module(module)
             for module in self.module_manager.get_all_modules():
                 try:
                     await module.stop_event_loop(StopMode.DRAIN)

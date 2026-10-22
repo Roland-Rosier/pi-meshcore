@@ -76,16 +76,13 @@ class TimerScheduler:
         self._tasks.clear()
         await asyncio.gather(*tasks, return_exceptions=True)
 
-    def unregister_module(self, module: Rfm9xSx127xModule) -> None:
+    async def unregister_module(self, module: Rfm9xSx127xModule) -> None:
         self._registered.discard(module)
         self._intervals.pop(module, None)
         task = self._tasks.pop(module, None)
         if task is not None and not task.done():
             task.cancel()
-            # Fire-and-forget await to suppress "Task was destroyed but pending"
-            # gather() returns a Future (not a coroutine), so ensure_future is used
-            # instead of create_task to schedule the cancellation without a leak.
-            asyncio.ensure_future(asyncio.gather(task, return_exceptions=True))
+            await asyncio.gather(task, return_exceptions=True)  # Await cancellation
 
     def register_module(
         self, module: Rfm9xSx127xModule, interval: float | None
@@ -255,8 +252,8 @@ class Scheduler:
         await self.idle_pacer.stop()
         await self.timer_scheduler.stop()
 
-    def unregister_module(self, module: Rfm9xSx127xModule) -> None:
-        self.timer_scheduler.unregister_module(module)
+    async def unregister_module(self, module: Rfm9xSx127xModule) -> None:
+        await self.timer_scheduler.unregister_module(module)
         self.idle_pacer.set_idle_enabled(module, False)
         self.interrupt_bridge.unregister_module(module)
 

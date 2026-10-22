@@ -24,10 +24,10 @@ from __future__ import annotations
 
 import importlib.metadata as im
 import re
+import tomllib
 from pathlib import Path
 
 import pytest
-import tomllib
 
 _CLAUSE_RE: re.Pattern[str] = re.compile(r"^(<=|>=|==|!=|<|>)(.+)$")
 _DEPEND_RE: re.Pattern[str] = re.compile(r"^\s*([A-Za-z0-9._-]+)\s*(?:\[[^\]]*\])?\s*(.*)$")

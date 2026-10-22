@@ -16,7 +16,6 @@
 
 from __future__ import annotations
 
-import asyncio
 import logging
 from typing import Any
 
@@ -131,14 +130,8 @@ class ModuleManager:
                 # await any pending scheduler task cancellations before clearing
                 # state (KNOWN_DEFECTS #2.3) so an immediate retry sees a clean
                 # scheduler with no dangling cancelled-task references.
-                pending_tasks: list[asyncio.Task[None]] = []
                 for module in list(self.modules):
-                    task = scheduler.timer_scheduler._tasks.get(module)
-                    if task is not None and not task.done():
-                        pending_tasks.append(task)
-                    scheduler.unregister_module(module)
-                if pending_tasks:
-                    await asyncio.gather(*pending_tasks, return_exceptions=True)
+                    await scheduler.unregister_module(module)  # Public async API
                 self.modules.clear()
                 self.modules_by_id.clear()
                 logger.warning(

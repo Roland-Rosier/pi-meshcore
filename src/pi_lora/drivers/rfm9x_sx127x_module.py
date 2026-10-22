@@ -283,7 +283,7 @@ class Rfm9xSx127xModule:
         try:
             try:
                 await asyncio.wait_for(waiter.event.wait(), timeout=timeout)
-            except asyncio.TimeoutError:
+            except TimeoutError:
                 return None
             return waiter.result
         finally:

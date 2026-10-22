@@ -16,27 +16,43 @@ from __future__ import annotations
 
 from typing import Any, Protocol, Self
 
-import aiologic
+
+class _AiologicImportError(ImportError):
+    """Raised when aiologic is unavailable (hard runtime dependency for SPI locking)."""
+
+    def __init__(self, message: str) -> None:
+        super().__init__(message)
+
+
+try:
+    import aiologic
+except ImportError as _aiologic_import_error:
+    raise _AiologicImportError(
+        "aiologic is required for SPI locking. Install with: pip install aiologic"
+    ) from _aiologic_import_error
 
 
 class SpiLock(Protocol):
-    """Protocol describing the per-bus SPI critical-section lock.
+    """    Protocol describing the per-bus SPI critical-section lock.
 
-    The concrete implementation returned by :func:`get_bus_lock` is an
-    :class:`aiologic.Lock`, a native dual-mode lock usable in both synchronous
-    and asynchronous contexts. In an async context the lock is acquired with
-    ``async with lock:`` or ``await lock.async_acquire()`` and released with
-    ``lock.async_release()``. The registry hands back a single shared instance
-    per bus number so that transfers on the same bus never interleave.
+    Acquisition is async-only: callers must obtain the lock instance by awaiting
+    :func:`get_bus_lock`, which is an async function requiring a running event
+    loop. In synchronous code that path is ``asyncio.run(get_bus_lock(...))`` or
+    similar. The returned instance supports ``async with lock:`` and
+    ``await lock.async_acquire()`` for the async context.
 
-    NOTE: :func:`get_bus_lock` is an async function and requires a running
-    event loop. There is no synchronous-only acquisition path — callers in
-    synchronous code must use ``asyncio.run(get_bus_lock(...))`` or similar
-    to obtain the lock instance before using ``with lock:``.
+    The concrete implementation is an :class:`aiologic.Lock`, a native dual-mode
+    lock that *does* support sync ``with lock:`` at runtime — but only *after*
+    the instance has been obtained by awaiting :func:`get_bus_lock()`. The
+    protocol deliberately does **not** declare sync ``__enter__``/``__exit__``
+    because declaring them would imply the lock is directly usable in a sync
+    context without first awaiting :func:`get_bus_lock()`, which is false. The
+    acquisition contract is async-only; the runtime dual-mode capability is an
+    implementation detail of :class:`aiologic.Lock`, not part of this protocol.
+
+    The registry hands back a single shared instance per bus number so that
+    transfers on the same bus never interleave.
     """
-
-    def __enter__(self) -> Self: ...
-    def __exit__(self, exc_type: Any, exc_val: Any, exc_tb: Any) -> None: ...
 
     async def __aenter__(self) -> Self: ...
     async def __aexit__(self, exc_type: Any, exc_val: Any, exc_tb: Any) -> None: ...

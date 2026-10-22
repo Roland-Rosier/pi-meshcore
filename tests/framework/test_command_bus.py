@@ -110,11 +110,36 @@ class TestHandlerRegistry:
         def high_handler(_cmd: TestCommand) -> None:
             calls.append(2)
 
-        bus.register_handler(TestCommand, low_handler, priority=0)
-        bus.register_handler(TestCommand, high_handler, priority=1)
+        bus.register_handler(TestCommand, low_handler, priority=1)
+        bus.register_handler(TestCommand, high_handler, priority=0)
         await bus.execute(TestCommand())
         assert len(calls) == 1
         assert calls[0] == 2
+
+    def test_priority_override(self) -> None:
+        bus = CommandBus()
+        calls: list[int] = []
+
+        def low_handler(_cmd: TestCommand) -> None:
+            calls.append(1)
+
+        def high_handler(_cmd: TestCommand) -> None:
+            calls.append(2)
+
+        bus.register_handler(TestCommand, low_handler, priority=1)
+        bus.register_handler(TestCommand, high_handler, priority=0)
+        assert bus._handlers[TestCommand] == (high_handler, 0)
+
+        with pytest.raises(
+            ValueError, match=r"Handler for 'TestCommand' already registered"
+        ):
+            bus.register_handler(TestCommand, low_handler, priority=0)
+
+        with pytest.raises(
+            ValueError, match=r"Handler for 'TestCommand' already registered"
+        ):
+            bus.register_handler(TestCommand, low_handler, priority=1)
+        assert bus._handlers[TestCommand] == (high_handler, 0)
 
     def test_priority_equal_raises(self) -> None:
         bus = CommandBus()
