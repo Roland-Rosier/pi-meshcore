@@ -155,7 +155,7 @@ class FakeSpiDev:
         """Set no CS setting (no-op in simulation)."""
         pass
 
-    def xfer2(self, data: list[int]) -> list[int]:
+    def xfer2(self, data: list[int] | bytearray) -> list[int]:
         """Simulate SPI transfer.
 
         :param data: Data to transfer (write bytes)

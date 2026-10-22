@@ -220,6 +220,42 @@ class TestIdlePacer:
         await asyncio.sleep(0.01)
         assert task is not None and task.done()
 
+    @pytest.mark.asyncio
+    async def test_idle_task_survives_put_failure(self) -> None:
+        class _FailingQueue:
+            def __init__(self) -> None:
+                self._items: list[object] = []
+                self._raised_once = False
+
+            async def put(self, item: object) -> None:
+                if not self._raised_once:
+                    self._raised_once = True
+                    raise RuntimeError("event_queue corrupted")
+                self._items.append(item)
+
+            async def get(self) -> object:
+                return self._items.pop(0)
+
+        module = MagicMock()
+        module.event_queue = _FailingQueue()
+        pacer = IdlePacer(min_interval=0.01)
+        pacer.set_idle_enabled(module, True)
+        await pacer.start()
+        with patch("logging.getLogger") as mock_get_logger, pytest.raises(
+            asyncio.TimeoutError
+        ) as timeout_info:
+            await asyncio.wait_for(pacer._idle_task(), timeout=0.2)
+        assert isinstance(timeout_info.value, asyncio.TimeoutError)
+        mock_logger = mock_get_logger.return_value
+        assert mock_logger.error.called
+        events: list[object] = []
+        while module.event_queue._items:
+            events.append(await module.event_queue.get())
+        assert any(
+            getattr(event, "event_type", None) == EventType.IDLE for event in events
+        )
+        await pacer.stop()
+
     async def _collect_idle_timestamps(
         self, min_interval: float, duration: float
     ) -> list[float]:

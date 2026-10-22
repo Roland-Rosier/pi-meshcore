@@ -150,7 +150,14 @@ class IdlePacer:
         while self._running:
             await asyncio.sleep(self._min_interval)
             for module in list(self._idle_enabled_modules):
-                await module.event_queue.put(ModuleEvent(EventType.IDLE))
+                try:
+                    await module.event_queue.put(ModuleEvent(EventType.IDLE))
+                except Exception as exc:
+                    logging.getLogger(__name__).error(
+                        "IdlePacer: failed to put IDLE event for module %s: %s",
+                        module,
+                        exc,
+                    )
 
 
 class InterruptBridge:
