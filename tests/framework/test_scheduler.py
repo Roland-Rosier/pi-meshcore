@@ -17,7 +17,7 @@
 import asyncio
 import time
 import warnings
-from unittest.mock import MagicMock
+from unittest.mock import MagicMock, patch
 
 import pytest
 from src.pi_lora.framework.events import EventType
@@ -139,6 +139,42 @@ class TestTimerScheduler:
                     "RuntimeWarning: Task was destroyed but pending future"
                 )
 
+    @pytest.mark.asyncio
+    async def test_timer_task_survives_put_failure(self) -> None:
+        class _FailingQueue:
+            def __init__(self) -> None:
+                self._items: list[object] = []
+                self._raised_once = False
+
+            async def put(self, item: object) -> None:
+                if not self._raised_once:
+                    self._raised_once = True
+                    raise RuntimeError("event_queue corrupted")
+                self._items.append(item)
+
+            async def get(self) -> object:
+                return self._items.pop(0)
+
+        module = MagicMock()
+        module.event_queue = _FailingQueue()
+        ts = TimerScheduler(default_interval=0.01)
+        ts.register_module(module, 0.01)
+        await ts.start()
+        with patch("logging.getLogger") as mock_get_logger, pytest.raises(
+            asyncio.TimeoutError
+        ) as timeout_info:
+            await asyncio.wait_for(ts._timer_task(module), timeout=0.2)
+        assert isinstance(timeout_info.value, asyncio.TimeoutError)
+        mock_logger = mock_get_logger.return_value
+        assert mock_logger.error.called
+        events: list[object] = []
+        while module.event_queue._items:
+            events.append(await module.event_queue.get())
+        assert any(
+            getattr(event, "event_type", None) == EventType.TIMER for event in events
+        )
+        await ts.stop()
+
 
 class TestIdlePacer:
     """Verify IdlePacer manages idle-enabled modules."""
@@ -254,9 +290,9 @@ class TestInterruptBridge:
         assert bridge._task is not None
         await bridge.stop()
 
-    def test_trigger_interrupt_queue_unlimited_accumulates(self) -> None:
+    def test_interrupt_bridge_bounded_queue(self) -> None:
         bridge = InterruptBridge()
-        assert bridge._trigger_queue.maxsize == 0
+        assert bridge._trigger_queue.maxsize == 1000
         bridge.trigger_interrupt(25)
         bridge.trigger_interrupt(26)
         bridge.trigger_interrupt(27)
@@ -265,6 +301,32 @@ class TestInterruptBridge:
         assert bridge._trigger_queue.get_nowait() == 26
         assert bridge._trigger_queue.get_nowait() == 27
         assert bridge._trigger_queue.empty()
+
+    def test_interrupt_bridge_bounded_queue_reaches_maxsize(self) -> None:
+        bridge = InterruptBridge(max_queue_size=3)
+        assert bridge._trigger_queue.maxsize == 3
+        bridge.trigger_interrupt(25)
+        bridge.trigger_interrupt(26)
+        bridge.trigger_interrupt(27)
+        with pytest.raises(asyncio.QueueFull):
+            bridge._trigger_queue.put_nowait(28)
+
+    def test_interrupt_bridge_queue_full_handling(self) -> None:
+        bridge = InterruptBridge(max_queue_size=2)
+        assert bridge._trigger_queue.maxsize == 2
+        with patch("logging.getLogger") as mock_get_logger:
+            for gpio_pin in (25, 26, 27, 28, 29):
+                bridge.trigger_interrupt(gpio_pin)
+            mock_logger = mock_get_logger.return_value
+            assert mock_logger.warning.called
+            args = mock_logger.warning.call_args.args
+            assert args[0] == (
+                "Interrupt queue full (maxsize=%d); dropping interrupt for GPIO %d"
+            )
+            assert args[1] == 2
+            assert args[2] == 29
+        assert not bridge._trigger_queue.empty()
+        assert bridge._trigger_queue.maxsize == 2
 
     @pytest.mark.asyncio
     async def test_start_creates_event_and_task(self) -> None:
@@ -333,6 +395,50 @@ class TestInterruptBridge:
             for event in interrupt_events
         )
         assert module_a.event_queue.empty()
+
+    @pytest.mark.asyncio
+    async def test_interrupt_task_survives_put_failure(self) -> None:
+        class _FailingQueue:
+            def __init__(self) -> None:
+                self._items: list[object] = []
+                self._raised_once = False
+
+            async def put(self, item: object) -> None:
+                if not self._raised_once:
+                    self._raised_once = True
+                    raise RuntimeError("event_queue corrupted")
+                self._items.append(item)
+
+            async def get(self) -> object:
+                return self._items.pop(0)
+
+        module_a = MagicMock()
+        module_a.event_queue = _FailingQueue()
+        module_b = MagicMock()
+        module_b.event_queue = asyncio.Queue()
+        bridge = InterruptBridge()
+        bridge.register_interrupt(25, module_a)
+        bridge.register_interrupt(26, module_b)
+        await bridge.start()
+        with patch("logging.getLogger") as mock_get_logger:
+            bridge.trigger_interrupt(25)
+            bridge.trigger_interrupt(26)
+            bridge.trigger_interrupt(26)
+            await asyncio.sleep(0.1)
+            mock_logger = mock_get_logger.return_value
+            assert mock_logger.error.called
+            args = mock_logger.error.call_args.args
+            assert args[1] == 25
+            interrupt_events: list[object] = []
+            while not module_b.event_queue.empty():
+                event = await module_b.event_queue.get()
+                interrupt_events.append(event)
+            assert len(interrupt_events) == 2
+            assert all(
+                event.event_type == EventType.INTERRUPT
+                for event in interrupt_events
+            )
+        await bridge.stop()
 
 
 class TestScheduler:

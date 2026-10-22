@@ -228,7 +228,7 @@ class TestRealSpiBusXfer2:
         assert len(xfer2_calls) == 1
         called_callable, called_args = xfer2_calls[0]
         assert called_callable is bus._spidev.xfer2
-        assert called_args[0] == bytearray([1, 2, 3])
+        assert called_args[0] == [1, 2, 3]
 
     @pytest.mark.asyncio
     async def test_mutual_exclusion_holds_same_bus(self) -> None:

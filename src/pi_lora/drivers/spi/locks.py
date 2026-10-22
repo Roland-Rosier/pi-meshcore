@@ -14,7 +14,6 @@
 
 from __future__ import annotations
 
-import asyncio
 from typing import Any, Protocol, Self
 
 import aiologic
@@ -27,9 +26,13 @@ class SpiLock(Protocol):
     :class:`aiologic.Lock`, a native dual-mode lock usable in both synchronous
     and asynchronous contexts. In an async context the lock is acquired with
     ``async with lock:`` or ``await lock.async_acquire()`` and released with
-    ``lock.async_release()``; in a pure sync context ``with lock:`` is used.
-    The registry hands back a single shared instance per bus number so that
-    transfers on the same bus never interleave.
+    ``lock.async_release()``. The registry hands back a single shared instance
+    per bus number so that transfers on the same bus never interleave.
+
+    NOTE: :func:`get_bus_lock` is an async function and requires a running
+    event loop. There is no synchronous-only acquisition path — callers in
+    synchronous code must use ``asyncio.run(get_bus_lock(...))`` or similar
+    to obtain the lock instance before using ``with lock:``.
     """
 
     def __enter__(self) -> Self: ...
@@ -46,10 +49,10 @@ class SpiLock(Protocol):
 
 
 _bus_locks: dict[int, aiologic.Lock] = {}
-_registry_lock: asyncio.Lock = asyncio.Lock()
+_registry_lock: aiologic.Lock = aiologic.Lock()
 
 
-async def get_bus_lock(bus_number: int) -> aiologic.Lock:
+async def get_bus_lock(bus_number: int) -> SpiLock:
     """Get or create the shared lock for the given bus number.
 
     The returned lock is the same instance for a given bus number across every
@@ -61,7 +64,7 @@ async def get_bus_lock(bus_number: int) -> aiologic.Lock:
         bus_number: The bus identifier to lock.
 
     Returns:
-        An :class:`aiologic.Lock` for the given bus number.
+        A :class:`SpiLock` (concretely an :class:`aiologic.Lock`) for the given bus number.
     """
     async with _registry_lock:
         if bus_number not in _bus_locks:

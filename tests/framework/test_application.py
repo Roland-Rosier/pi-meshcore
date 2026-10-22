@@ -308,7 +308,7 @@ class TestApplicationLifecycle:
 
     @pytest.mark.asyncio
     async def test_scheduler_started_flag_true_before_scheduler_start(self) -> None:
-        """Fix #2.6: _scheduler_started must be True when scheduler.start() is entered."""
+        """_scheduler_started must be False when scheduler.start() is entered; the flag is set only after start succeeds."""
         app = Application(config=None, spi_factory=MockSpiBusFactory())
         entries: list[bool] = []
 
@@ -321,14 +321,24 @@ class TestApplicationLifecycle:
         with pytest.raises(RuntimeError):
             await app.start()
 
-        assert entries == [True]
+        assert entries == [False]
         assert app._scheduler_started is False
         assert app._started_modules == []
         assert app._started is False
 
     @pytest.mark.asyncio
-    async def test_partial_scheduler_failure_triggers_cleanup(self) -> None:
-        """Fix #2.6: a partial scheduler failure must call scheduler.stop() via cleanup."""
+    async def test_start_scheduler_started_flag_after_start(self) -> None:
+        """_scheduler_started becomes True only after scheduler.start() succeeds, and resets on stop()."""
+        app = Application(config=None, spi_factory=MockSpiBusFactory())
+        await app.start()
+        assert app._scheduler_started is True
+        await app.stop()
+        assert app._scheduler_started is False
+
+    @pytest.mark.asyncio
+    async def test_partial_scheduler_failure_no_cleanup_stop(self) -> None:
+        """A scheduler that never started must not have stop() called during cleanup;
+        _scheduler_started is False when scheduler.start() fails, so no spurious stop()."""
         app = Application(config=None, spi_factory=MockSpiBusFactory())
         stop_calls: list[int] = []
 
@@ -344,7 +354,7 @@ class TestApplicationLifecycle:
         with pytest.raises(RuntimeError):
             await app.start()
 
-        assert stop_calls == [1]
+        assert stop_calls == []
         assert app._scheduler_started is False
         assert app._started_modules == []
         assert app._started is False
@@ -359,9 +369,10 @@ class TestApplicationLifecycle:
         assert app._scheduler_started is False
 
     @pytest.mark.asyncio
-    async def test_module_init_failure_triggers_close_spi(self) -> None:
-        """Fix #2.7: a module whose init_spi_bus() fails is tracked BEFORE init
-        (not after), so _cleanup_partial_start() still calls close_spi() on it."""
+    async def test_module_init_failure_not_tracked_for_cleanup(self) -> None:
+        """A module whose init_spi_bus() fails is NOT tracked (append happens after
+        init succeeds), so _cleanup_partial_start() does not call close_spi() on an
+        uninitialized module."""
         app = Application(config=None, spi_factory=MockSpiBusFactory())
 
         failing = _FailingInitModule()
@@ -374,11 +385,24 @@ class TestApplicationLifecycle:
         with pytest.raises(RuntimeError):
             await app.start()
 
-        # The failing module was tracked before init_spi_bus() and cleaned up.
-        assert failing.close_spi_calls == 1
+        # The failing module was not tracked before init_spi_bus() failed.
+        assert failing.close_spi_calls == 0
         assert app._started is False
         assert app._started_modules == []
         assert app._scheduler_started is False
+
+    @pytest.mark.asyncio
+    async def test_start_modules_appended_after_init_success(self) -> None:
+        """Every module is added to _started_modules only after init_spi_bus() and start_event_loop() succeed; on stop() the list clears."""
+        app = Application(config=None, spi_factory=MockSpiBusFactory())
+        await app.start()
+        started = app._started_modules
+        all_mods = app.module_manager.get_all_modules()
+        assert len(started) >= 1
+        assert started == all_mods
+        assert all(mod.spi_bus is not None for mod in started)
+        await app.stop()
+        assert app._started_modules == []
 
 
 class TestEmptyConfig:

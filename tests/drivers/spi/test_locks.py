@@ -15,6 +15,7 @@
 """Tests for lock registry correctness in ``spi/locks.py``."""
 
 import asyncio
+import concurrent.futures
 import inspect
 import types
 
@@ -57,6 +58,54 @@ class TestLockRegistry:
         lock_neg = await get_bus_lock(-1)
         lock_neg_again = await get_bus_lock(-1)
         assert lock_neg is lock_neg_again
+
+    def test_registry_thread_safety(self) -> None:
+        """The registry hands back one instance across threads/event-loops.
+
+        ``get_bus_lock`` is invoked from ``asyncio.to_thread`` in ``bus.py``,
+        which runs each call in a separate worker thread with its own event
+        loop. A per-thread ``asyncio.Lock`` registry guard would let two threads
+        both pass the ``bus_number not in _bus_locks`` check and mint distinct
+        per-bus locks, breaking per-bus mutual exclusion. With a single shared
+        registry instance (``aiologic.Lock``) only one thread can create the
+        lock, so every thread observes the same instance.
+        """
+        num_threads = 8
+        iterations = 25
+
+        def _worker(_bus_id: int) -> object:
+            return asyncio.run(get_bus_lock(0))
+
+        with concurrent.futures.ThreadPoolExecutor(max_workers=num_threads) as pool:
+            collected: list[object] = list(pool.map(_worker, range(iterations)))
+
+        assert collected, "no locks were produced"
+        first = collected[0]
+        assert all(lock is first for lock in collected)
+
+    @pytest.mark.asyncio
+    async def test_get_bus_lock_returns_protocol_type(self) -> None:
+        """The returned lock structurally satisfies the ``SpiLock`` protocol.
+
+        Section 2.2 return type abstraction: ``get_bus_lock`` is annotated to
+        return :class:`SpiLock`, so the concrete ``aiologic.Lock`` must expose
+        every protocol member. This test asserts each method/dunder exists on
+        the instance returned for a given bus number.
+        """
+        lock = await get_bus_lock(0)
+        protocol_methods = (
+            "__enter__",
+            "__exit__",
+            "__aenter__",
+            "__aexit__",
+            "async_acquire",
+            "async_release",
+            "locked",
+        )
+        for method_name in protocol_methods:
+            assert hasattr(lock, method_name), (
+                f"returned lock is missing protocol member {method_name!r}"
+            )
 
 
 class TestCancellationLeak:

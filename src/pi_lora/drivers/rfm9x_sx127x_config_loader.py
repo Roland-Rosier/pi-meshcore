@@ -144,17 +144,13 @@ async def get_preloaded_config(
     if config_path is not None:
         return load_config(config_path=config_path)
 
-    # Force reload re-reads and refreshes the singleton cache.
-    if force_reload:
-        _config_cache = load_config()
-        return _config_cache
-
-    # Lazy singleton: load on first call, cache thereafter.
-    if _config_cache is not None:
+    # Fast path: cache hit and no forced reload.
+    if _config_cache is not None and not force_reload:
         return _config_cache
 
     async with _config_lock:
-        if _config_cache is not None:
-            return _config_cache  # type: ignore[unreachable]  # pragma: no cover
+        # Double-checked locking: re-verify inside the lock to protect ALL cache mutations.
+        if _config_cache is not None and not force_reload:
+            return _config_cache
         _config_cache = load_config()
-    return _config_cache
+        return _config_cache

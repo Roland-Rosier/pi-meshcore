@@ -14,6 +14,7 @@
 
 """Unit tests for RFM9x/SX127x configuration loader."""
 
+import asyncio
 from pathlib import Path
 
 import pytest
@@ -23,6 +24,7 @@ from pi_lora.drivers.rfm9x_sx127x_config_loader import (
     load_config,
     load_family_config,
 )
+from pi_lora.drivers.rfm9x_sx127x_config_model import Rfm9xSx127xConfig
 
 
 class TestLoadConfig:
@@ -129,3 +131,32 @@ class TestGetPreloadedConfig:
         assert not hasattr(loader, '_preloaded_default_config'), (
             "Module should not have _preloaded_default_config to avoid import-time I/O"
         )
+
+    @pytest.mark.asyncio
+    async def test_force_reload_concurrent_safety(self) -> None:
+        """Test that concurrent force_reload calls do not corrupt the singleton cache."""
+        results = await asyncio.gather(
+            *[get_preloaded_config(force_reload=True) for _ in range(25)]
+        )
+        assert all(isinstance(c, Rfm9xSx127xConfig) for c in results)
+        assert all(len(c.devices) > 0 for c in results)
+        assert all(len(c.families) > 0 for c in results)
+        assert all(len(c.modules) > 0 for c in results)
+        consistent = await asyncio.gather(*[get_preloaded_config() for _ in range(10)])
+        assert all(c is consistent[0] for c in consistent)
+
+    @pytest.mark.asyncio
+    async def test_force_reload_under_lock(self) -> None:
+        """Test that cache integrity holds under contention through the _config_lock."""
+        results = await asyncio.gather(
+            *[get_preloaded_config(force_reload=True) for _ in range(20)]
+        )
+        assert all(isinstance(c, Rfm9xSx127xConfig) for c in results)
+        assert all(len(c.devices) > 0 for c in results)
+        assert all(len(c.families) > 0 for c in results)
+        assert all(len(c.modules) > 0 for c in results)
+        final = await get_preloaded_config()
+        assert isinstance(final, Rfm9xSx127xConfig)
+        assert len(final.devices) > 0
+        assert len(final.families) > 0
+        assert len(final.modules) > 0

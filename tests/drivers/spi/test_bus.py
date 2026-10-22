@@ -17,7 +17,7 @@
 import pytest
 from src.pi_lora.drivers.spi.bus import SpiBus
 
-from tests.spi.mock import MockSpiBus
+from tests.spi.mock import FakeSpiBusKernelFactory, MockSpiBus
 
 
 class TestSpiBusProtocol:
@@ -73,3 +73,28 @@ class TestMockSpiBusOpenClose:
         bus = MockSpiBus()
         with pytest.raises(RuntimeError, match="SPI bus not opened"):
             await bus.xfer2([0x81, 0xFF])
+
+
+class TestXfer2Bytearray:
+    """Verify ``xfer2`` accepts and transparently converts ``bytearray``."""
+
+    @pytest.mark.asyncio
+    async def test_xfer2_accepts_bytearray(self) -> None:
+        bus = MockSpiBus()
+        bus.open(bus=0, device=0)
+        result = await bus.xfer2(bytearray([0x81, 0x42]))
+        assert isinstance(result, list)
+        assert all(isinstance(v, int) for v in result)
+        assert result == [0x81, 0x42]
+
+    @pytest.mark.asyncio
+    async def test_xfer2_converts_bytearray_to_list(self) -> None:
+        data = bytearray([0x81, 0x42, 0x7F, 0x00])
+        list_result = await self._xfer2(data, list(data))
+        bytearray_result = await self._xfer2(data, bytearray(data))
+        assert list_result == bytearray_result
+
+    @staticmethod
+    async def _xfer2(data: list[int] | bytearray, payload: list[int] | bytearray) -> list[int]:
+        with FakeSpiBusKernelFactory().create_bus(bus=0, device=0) as bus:
+            return await bus.xfer2(payload)

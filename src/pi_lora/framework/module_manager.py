@@ -16,6 +16,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import logging
 from typing import Any
 
@@ -52,7 +53,7 @@ class ModuleManager:
         self.modules_by_id: dict[DeviceIdentity, Rfm9xSx127xModule] = {}
         self.modules: list[Rfm9xSx127xModule] = []
 
-    def load_from_config(
+    async def load_from_config(
         self,
         radio_configs: list[RadioInstanceConfig],
         scheduler: Scheduler,
@@ -125,9 +126,19 @@ class ModuleManager:
 
                 self.modules_by_id[device_key] = module
                 self.modules.append(module)
-            except BaseException:
+            except Exception:
+                # Roll back partial state. Unregister every loaded module and
+                # await any pending scheduler task cancellations before clearing
+                # state (KNOWN_DEFECTS #2.3) so an immediate retry sees a clean
+                # scheduler with no dangling cancelled-task references.
+                pending_tasks: list[asyncio.Task[None]] = []
                 for module in list(self.modules):
+                    task = scheduler.timer_scheduler._tasks.get(module)
+                    if task is not None and not task.done():
+                        pending_tasks.append(task)
                     scheduler.unregister_module(module)
+                if pending_tasks:
+                    await asyncio.gather(*pending_tasks, return_exceptions=True)
                 self.modules.clear()
                 self.modules_by_id.clear()
                 logger.warning(

@@ -101,9 +101,16 @@ class TimerScheduler:
         while self._running:
             interval = self._intervals.get(module) or self._default_interval
             if interval is not None:
-                await module.event_queue.put(
-                    ModuleEvent(EventType.TIMER, TimerEvent(interval))
-                )
+                try:
+                    await module.event_queue.put(
+                        ModuleEvent(EventType.TIMER, TimerEvent(interval))
+                    )
+                except Exception as exc:
+                    logging.getLogger(__name__).error(
+                        "TimerScheduler: failed to put TIMER event for module %s: %s",
+                        module,
+                        exc,
+                    )
             await asyncio.sleep(interval or self._default_interval or 1.0)
 
 
@@ -149,9 +156,12 @@ class IdlePacer:
 class InterruptBridge:
     """Routes GPIO interrupts to modules via an asyncio.Queue (no scalar overwrite)."""
 
-    def __init__(self) -> None:
+    def __init__(self, max_queue_size: int = 1000) -> None:
         self._interrupt_map: dict[int, Rfm9xSx127xModule] = {}
-        self._trigger_queue: asyncio.Queue[int] = asyncio.Queue()
+        self._max_queue_size = max_queue_size
+        self._trigger_queue: asyncio.Queue[int] = asyncio.Queue(
+            maxsize=max_queue_size
+        )
         self._running = False
         self._task: asyncio.Task[None] | None = None
 
@@ -166,9 +176,20 @@ class InterruptBridge:
         # Task is created in start() only.
 
     def trigger_interrupt(self, gpio_pin: int) -> None:
-        """Called by GPIO driver when interrupt fires (sync context)."""
-        # Queue is unlimited (maxsize=0) — put_nowait never raises QueueFull
-        self._trigger_queue.put_nowait(gpio_pin)
+        """Called by GPIO driver when interrupt fires (sync context).
+
+        The trigger queue is bounded (maxsize=max_queue_size). When the queue is
+        full, put_nowait raises asyncio.QueueFull; the interrupt is dropped and a
+        warning is logged instead of raising to the caller.
+        """
+        try:
+            self._trigger_queue.put_nowait(gpio_pin)
+        except asyncio.QueueFull:
+            logging.getLogger(__name__).warning(
+                "Interrupt queue full (maxsize=%d); dropping interrupt for GPIO %d",
+                self._trigger_queue.maxsize,
+                gpio_pin,
+            )
 
     async def start(self) -> None:
         self._running = True
@@ -191,9 +212,16 @@ class InterruptBridge:
                     gpio_pin,
                 )
             else:
-                await module.event_queue.put(
-                    ModuleEvent(EventType.INTERRUPT, InterruptEvent(gpio_pin))
-                )
+                try:
+                    await module.event_queue.put(
+                        ModuleEvent(EventType.INTERRUPT, InterruptEvent(gpio_pin))
+                    )
+                except Exception as exc:
+                    logging.getLogger(__name__).error(
+                        "InterruptBridge: failed to put INTERRUPT event for GPIO %d: %s",
+                        gpio_pin,
+                        exc,
+                    )
 
     def unregister_module(self, module: Rfm9xSx127xModule) -> None:
         """Remove every GPIO pin entry that references *module*."""

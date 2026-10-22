@@ -87,7 +87,7 @@ class TestLoadFromConfig:
         mm = ModuleManager()
         radio_configs = _make_test_radio_configs()
         scheduler = Scheduler()
-        mm.load_from_config(radio_configs, scheduler)
+        await mm.load_from_config(radio_configs, scheduler)
         assert len(mm.modules) == 2
 
     @pytest.mark.asyncio
@@ -95,7 +95,7 @@ class TestLoadFromConfig:
         mm = ModuleManager()
         radio_configs = _make_test_radio_configs()
         scheduler = Scheduler()
-        mm.load_from_config(radio_configs, scheduler)
+        await mm.load_from_config(radio_configs, scheduler)
         assert (0, 0) in mm.modules_by_id
         assert (5, 1) in mm.modules_by_id
 
@@ -104,7 +104,7 @@ class TestLoadFromConfig:
         mm = ModuleManager()
         radio_configs = _make_test_radio_configs()
         scheduler = Scheduler()
-        mm.load_from_config(radio_configs, scheduler)
+        await mm.load_from_config(radio_configs, scheduler)
         mod0 = mm.get_module(0, 0)
         assert mod0 is not None
         assert mod0.get_spi_device_id() == 0
@@ -119,7 +119,7 @@ class TestLoadFromConfig:
         mm = ModuleManager()
         radio_configs = _make_test_radio_configs()
         scheduler = Scheduler()
-        mm.load_from_config(radio_configs, scheduler)
+        await mm.load_from_config(radio_configs, scheduler)
         mod0 = mm.get_module(0, 0)
         assert mod0 is not None
         assert 6 in scheduler.interrupt_bridge._interrupt_map
@@ -130,7 +130,7 @@ class TestLoadFromConfig:
         mm = ModuleManager()
         radio_configs = _make_test_radio_configs()
         scheduler = Scheduler()
-        mm.load_from_config(radio_configs, scheduler)
+        await mm.load_from_config(radio_configs, scheduler)
         result = mm.get_module(99, 99)
         assert result is None
 
@@ -139,7 +139,7 @@ class TestLoadFromConfig:
         mm = ModuleManager()
         radio_configs = _make_test_radio_configs()
         scheduler = Scheduler()
-        mm.load_from_config(radio_configs, scheduler)
+        await mm.load_from_config(radio_configs, scheduler)
         mods = mm.get_all_modules()
         assert len(mods) == 2
         assert mods is not mm.modules
@@ -152,7 +152,7 @@ class TestLoadFromConfig:
         radio_configs = _make_duplicate_radio_configs()
         scheduler = Scheduler()
         with pytest.raises(DuplicateDeviceIdentityError) as exc_info:
-            mm.load_from_config(radio_configs, scheduler)
+            await mm.load_from_config(radio_configs, scheduler)
         assert exc_info.value.context["device_key"] == "0:0"
         assert any("rolled back" in msg.lower() for msg in caplog.messages)
 
@@ -178,7 +178,7 @@ class TestLoadFromConfig:
             ),
         ]
         scheduler = Scheduler()
-        mm.load_from_config(radio_configs, scheduler)
+        await mm.load_from_config(radio_configs, scheduler)
         assert len(mm.modules) == 1
         assert 6 in scheduler.interrupt_bridge._interrupt_map
         assert any(
@@ -211,7 +211,7 @@ class TestLoadFromConfig:
             "src.pi_lora.framework.module_manager.Rfm9xSx127xModule",
             side_effect=_force_failure,
         ) as _, pytest.raises(RuntimeError) as exc_info:
-            mm.load_from_config(radio_configs, scheduler)
+            await mm.load_from_config(radio_configs, scheduler)
         assert isinstance(exc_info.value, RuntimeError)
         assert len(mm.modules) == 0
         assert len(mm.modules_by_id) == 0
@@ -240,7 +240,7 @@ class TestLoadFromConfig:
             "src.pi_lora.framework.module_manager.Rfm9xSx127xModule",
             side_effect=_construct,
         ), pytest.raises(RuntimeError):
-            mm.load_from_config(radio_configs, scheduler)
+            await mm.load_from_config(radio_configs, scheduler)
 
         assert len(mm.modules) == 0
         assert len(mm.modules_by_id) == 0
@@ -253,35 +253,99 @@ class TestLoadFromConfig:
         assert 6 not in scheduler.interrupt_bridge._interrupt_map
 
     @pytest.mark.asyncio
-    async def test_cancelled_error_rolls_back(
+    async def test_load_catches_exception_not_baseexception(
         self, caplog: pytest.LogCaptureFixture,
     ) -> None:
+        """A plain Exception (RuntimeError) IS caught and rolled back; BaseException subclasses are not."""
         mm = ModuleManager()
         radio_configs = _make_test_radio_configs()
         scheduler = Scheduler()
 
-        def _force_cancelled(*_args: object, **_kwargs: object) -> None:
-            raise asyncio.CancelledError("Module cancelled during load")
+        def _force_runtime(*_args: object, **_kwargs: object) -> None:
+            raise RuntimeError("Module construction failed during load")
 
         with mock.patch(
             "src.pi_lora.framework.module_manager.Rfm9xSx127xModule",
-            side_effect=_force_cancelled,
-        ), pytest.raises(asyncio.CancelledError) as exc_info:
-            mm.load_from_config(radio_configs, scheduler)
-        assert isinstance(exc_info.value, asyncio.CancelledError)
+            side_effect=_force_runtime,
+        ), pytest.raises(RuntimeError):
+            await mm.load_from_config(radio_configs, scheduler)
+
         assert len(mm.modules) == 0
         assert len(mm.modules_by_id) == 0
         assert scheduler.timer_scheduler._registered == set()
         assert any("rolled back" in msg.lower() for msg in caplog.messages)
 
+    @pytest.mark.asyncio
+    async def test_load_failure_awaits_rollback(
+        self, caplog: pytest.LogCaptureFixture,
+    ) -> None:
+        """A RuntimeError on the 2nd module rolls back the 1st: scheduler fully drained, state cleared."""
+        mm = ModuleManager()
+        radio_configs = _make_test_radio_configs()
+        scheduler = Scheduler()
+
+        module0: object = object()
+        _call_count: int = 0
+
+        def _construct(*_args: object, **_kwargs: object) -> object:
+            nonlocal _call_count
+            _call_count += 1
+            if _call_count >= 2:
+                raise RuntimeError("Second module construction failed during load")
+            return module0
+
+        with mock.patch(
+            "src.pi_lora.framework.module_manager.Rfm9xSx127xModule",
+            side_effect=_construct,
+        ), pytest.raises(RuntimeError):
+            await mm.load_from_config(radio_configs, scheduler)
+
+        assert len(mm.modules) == 0
+        assert len(mm.modules_by_id) == 0
+        assert scheduler.timer_scheduler._registered == set()
+        assert module0 not in scheduler.idle_pacer._idle_enabled_modules
+        assert all(m is not module0 for m in scheduler.interrupt_bridge._interrupt_map.values())
+        assert any("rolled back" in msg.lower() for msg in caplog.messages)
+
+    @pytest.mark.asyncio
+    async def test_cancelled_error_propagates(
+        self, caplog: pytest.LogCaptureFixture,
+    ) -> None:
+        """CancelledError is a BaseException (not Exception); it propagates and is NOT rolled back."""
+        mm = ModuleManager()
+        radio_configs = _make_test_radio_configs()
+        scheduler = Scheduler()
+
+        module0: object = object()
+        _call_count: int = 0
+
+        def _construct(*_args: object, **_kwargs: object) -> object:
+            nonlocal _call_count
+            _call_count += 1
+            if _call_count >= 2:
+                raise asyncio.CancelledError("Module cancelled during load")
+            return module0
+
+        with mock.patch(
+            "src.pi_lora.framework.module_manager.Rfm9xSx127xModule",
+            side_effect=_construct,
+        ), pytest.raises(asyncio.CancelledError):
+            await mm.load_from_config(radio_configs, scheduler)
+
+        # Not rolled back: the first module remains registered.
+        assert len(mm.modules) == 1
+        assert module0 in scheduler.timer_scheduler._registered
+        assert not any("rolled back" in msg.lower() for msg in caplog.messages)
+
 
 class TestEmptyConfig:
     """Verify ModuleManager handles empty config gracefully."""
 
-    def test_no_modules_from_empty_config(self) -> None:
+    @pytest.mark.asyncio
+    async def test_no_modules_from_empty_config(self) -> None:
         mm = ModuleManager()
         radio_configs: list[RadioInstanceConfig] = []
         scheduler = Scheduler()
-        mm.load_from_config(radio_configs, scheduler)
+        await mm.load_from_config(radio_configs, scheduler)
         assert len(mm.modules) == 0
         assert len(mm.modules_by_id) == 0

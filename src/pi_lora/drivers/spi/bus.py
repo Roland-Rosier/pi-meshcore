@@ -135,6 +135,14 @@ class RealSpiBus:
         if self._spidev is None:
             raise RuntimeError("SPI bus not opened")
 
+        # NOTE: spidev.SpiDev.xfer2() requires list[int] per the Cython extension API.
+        # The public protocol accepts list[int] | bytearray for caller convenience,
+        # but we MUST convert to list[int] before calling the underlying spidev.
+        # Do NOT change the parameter type to only list[int] — the protocol allows
+        # bytearray for callers using bytearray (e.g., Rfm9xSx127xHandler).
+        if isinstance(data, bytearray):
+            data = list(data)
+
         lock = await get_bus_lock(self.bus_number)
         async with lock:
             return await asyncio.to_thread(self._spidev.xfer2, data)
