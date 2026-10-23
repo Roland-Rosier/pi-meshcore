@@ -160,21 +160,64 @@ class TestTimerScheduler:
         module.event_queue = _FailingQueue()
         ts = TimerScheduler(default_interval=0.01)
         ts.register_module(module, 0.01)
-        await ts.start()
-        with patch("logging.getLogger") as mock_get_logger, pytest.raises(
-            asyncio.TimeoutError
-        ) as timeout_info:
-            await asyncio.wait_for(ts._timer_task(module), timeout=0.2)
-        assert isinstance(timeout_info.value, asyncio.TimeoutError)
+        ts._running = True
+
+        recorded: list[float] = []
+
+        async def fake_sleep(seconds: float) -> None:
+            recorded.append(seconds)
+            if len(recorded) >= 3:
+                ts._running = False
+
+        with patch("logging.getLogger") as mock_get_logger, patch(
+            "asyncio.sleep", side_effect=fake_sleep
+        ):
+            await ts._timer_task(module)
+
         mock_logger = mock_get_logger.return_value
         assert mock_logger.error.called
+        # First put failed -> backoff min(2 ** 1, 60) == 2.0s, then recovered.
+        assert recorded[0] == 2.0
+        # Recovery resets the consecutive-failure streak to 0.
+        assert ts._failure_counts.get(module) == 0
         events: list[object] = []
         while module.event_queue._items:
             events.append(await module.event_queue.get())
         assert any(
             getattr(event, "event_type", None) == EventType.TIMER for event in events
         )
-        await ts.stop()
+
+    @pytest.mark.asyncio
+    async def test_timer_task_backoff_matches_formula(self) -> None:
+        class _AlwaysFailingQueue:
+            async def put(self, item: object) -> None:
+                raise RuntimeError("event_queue full")
+
+            async def get(self) -> object:
+                return None
+
+        module = MagicMock()
+        module.event_queue = _AlwaysFailingQueue()
+        ts = TimerScheduler(default_interval=0.01)
+        ts.register_module(module, 0.01)
+        ts._running = True
+
+        recorded: list[float] = []
+
+        async def fake_sleep(seconds: float) -> None:
+            recorded.append(seconds)
+            if len(recorded) >= 6:
+                ts._running = False
+
+        with patch("asyncio.sleep", side_effect=fake_sleep):
+            await ts._timer_task(module)
+
+        # BUG-7 (Option A): backoff is min(2 ** failure_count, 60), capped at 60.
+        expected = [min(2 ** i, 60) for i in range(1, 7)]
+        assert recorded == expected
+        # Six consecutive failures -> count is six; spam stays logarithmic.
+        assert ts._failure_counts.get(module) == 6
+        assert ts._last_failure_log.get(module) is not None
 
 
 class TestIdlePacer:
@@ -327,9 +370,9 @@ class TestInterruptBridge:
         assert bridge._task is not None
         await bridge.stop()
 
-    def test_interrupt_bridge_bounded_queue(self) -> None:
+    def test_interrupt_bridge_unbounded_queue(self) -> None:
         bridge = InterruptBridge()
-        assert bridge._trigger_queue.maxsize == 1000
+        assert bridge._trigger_queue.maxsize == 0
         bridge.trigger_interrupt(25)
         bridge.trigger_interrupt(26)
         bridge.trigger_interrupt(27)
@@ -339,31 +382,59 @@ class TestInterruptBridge:
         assert bridge._trigger_queue.get_nowait() == 27
         assert bridge._trigger_queue.empty()
 
-    def test_interrupt_bridge_bounded_queue_reaches_maxsize(self) -> None:
-        bridge = InterruptBridge(max_queue_size=3)
-        assert bridge._trigger_queue.maxsize == 3
-        bridge.trigger_interrupt(25)
-        bridge.trigger_interrupt(26)
-        bridge.trigger_interrupt(27)
-        with pytest.raises(asyncio.QueueFull):
-            bridge._trigger_queue.put_nowait(28)
-
-    def test_interrupt_bridge_queue_full_handling(self) -> None:
-        bridge = InterruptBridge(max_queue_size=2)
-        assert bridge._trigger_queue.maxsize == 2
+    def test_interrupt_bridge_monitoring_threshold_logs(self) -> None:
+        bridge = InterruptBridge(monitor_queue_depth_threshold=2)
+        assert bridge._trigger_queue.maxsize == 0
         with patch("logging.getLogger") as mock_get_logger:
-            for gpio_pin in (25, 26, 27, 28, 29):
-                bridge.trigger_interrupt(gpio_pin)
+            bridge.trigger_interrupt(25)
+            bridge.trigger_interrupt(26)
+            bridge.trigger_interrupt(27)
             mock_logger = mock_get_logger.return_value
             assert mock_logger.warning.called
             args = mock_logger.warning.call_args.args
             assert args[0] == (
-                "Interrupt queue full (maxsize=%d); dropping interrupt for GPIO %d"
+                "Interrupt queue depth %d reached monitoring threshold %d; "
+                "abnormal interrupt rate detected (GPIO %d)."
             )
-            assert args[1] == 2
-            assert args[2] == 29
-        assert not bridge._trigger_queue.empty()
-        assert bridge._trigger_queue.maxsize == 2
+            assert args[1] == 3
+            assert args[2] == 2
+            assert args[3] == 27
+
+    @pytest.mark.asyncio
+    async def test_interrupt_bridge_monitoring_threshold_rejects_non_positive(
+        self,
+    ) -> None:
+        with pytest.raises(
+            ValueError, match="monitor_queue_depth_threshold must be positive"
+        ) as exc_info:
+            InterruptBridge(monitor_queue_depth_threshold=0)
+        assert "monitor_queue_depth_threshold must be positive" in str(exc_info.value)
+        with pytest.raises(ValueError, match="monitor_queue_depth_threshold must be positive"):
+            InterruptBridge(monitor_queue_depth_threshold=-5)
+
+    @pytest.mark.asyncio
+    async def test_interrupt_bridge_rapid_no_drops(self) -> None:
+        bridge = InterruptBridge()
+        module = MagicMock()
+        module.event_queue = asyncio.Queue()
+        for gpio_pin in range(25, 50):
+            bridge.register_interrupt(gpio_pin, module)
+        await bridge.start()
+        total = 4975
+        for offset in range(total):
+            bridge.trigger_interrupt(25 + offset % 25)
+        while not bridge._trigger_queue.empty():
+            await asyncio.sleep(0.01)
+        await asyncio.sleep(0.05)
+        await bridge.stop()
+        interrupt_events: list[object] = []
+        while not module.event_queue.empty():
+            event = await module.event_queue.get()
+            interrupt_events.append(event)
+        assert len(interrupt_events) == total
+        assert all(
+            event.event_type == EventType.INTERRUPT for event in interrupt_events
+        )
 
     @pytest.mark.asyncio
     async def test_start_creates_event_and_task(self) -> None:

@@ -143,9 +143,17 @@ class MockSpiBusFactory:
         bus: int = 0,
         device: int = 0,
     ) -> SpiBus:
-        """Return a new mock SPI bus configured for *bus* and *device*."""
+        """Return a new *unopened* mock SPI bus for *bus* and *device*.
+
+        FIX (BUG-5, Plan-11 Phase 5): this factory aligns with
+        :class:`RealSpiBusFactory`, which returns an unopened bus. ``create()``
+        must NOT open the bus so both implementations honor the same
+        ``SpiBusFactory`` Liskov contract — callers own the open/close lifecycle
+        and must call :meth:`MockSpiBus.open` explicitly after :meth:`create`.
+        Do not call ``open()`` here; reverting this reintroduces the LSP
+        violation that Plan-11 Phase 5 resolves.
+        """
         mock_bus = MockSpiBus(max_speed_hz=1000000, mode=0, lsbfirst=False, no_cs=False)
-        mock_bus.open(bus=bus, device=device)
         return mock_bus
 
 

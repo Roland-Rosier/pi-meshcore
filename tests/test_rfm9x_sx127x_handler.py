@@ -99,7 +99,10 @@ class TestRfm9xSx127xHandler:
     @pytest.mark.asyncio
     async def test_write_and_verify_frequency_with_mock_spi_bus(self) -> None:
         factory = MockSpiBusFactory()
-        module = MockModule(factory.create(bus=0, device=0))
+        bus = factory.create(bus=0, device=0)
+        # BUG-5 LSP contract: create() returns an unopened bus; caller owns open().
+        bus.open(bus=0, device=0)
+        module = MockModule(bus)
         config = FrequencyCalculationConfig(osc_freq_hz=32_000_000)
         result = await Rfm9xSx127xHandler.write_and_verify_frequency_for_khz(module, config, 415000)
         success = result[0]

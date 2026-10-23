@@ -476,6 +476,46 @@ class TestApplicationLifecycle:
         assert app._started_modules == []
         assert app._scheduler_started is False
 
+    @pytest.mark.asyncio
+    async def test_init_spi_bus_failure_unregisters_scheduler(self) -> None:
+        """BUG-2 (Plan-11 Phase 2): a module registered by load_from_config() whose
+        ``init_spi_bus()`` fails is unregistered from the scheduler by
+        ``_cleanup_partial_start()``, so no dangling scheduler tasks remain."""
+        app = Application(config=None, spi_factory=MockSpiBusFactory())
+
+        failing = _FailingInitModule()
+
+        async def _register_failing(
+            radio_configs: list[Any],
+            scheduler: Any,
+            spi_factory: Any | None = None,
+        ) -> None:
+            scheduler.register_module(
+                failing, timer_interval=1.0, idle_enabled=True
+            )
+            app.module_manager.modules.append(failing)
+
+        def _get_all_modules() -> list[Any]:
+            return [failing]
+
+        app.module_manager.load_from_config = _register_failing  # type: ignore[assignment]
+        app.module_manager.get_all_modules = _get_all_modules  # type: ignore[assignment]
+
+        with pytest.raises(RuntimeError):
+            await app.start()
+
+        # No dangling scheduler references remain after cleanup.
+        assert failing not in app.scheduler.timer_scheduler._registered
+        assert failing not in app.scheduler.timer_scheduler._tasks
+        assert failing not in app.scheduler.timer_scheduler._intervals
+        assert failing not in app.scheduler.idle_pacer._idle_enabled_modules
+        assert failing not in app.scheduler.interrupt_bridge._interrupt_map
+        # The module was never tracked (init failed), so close_spi() is not called.
+        assert failing.close_spi_calls == 0
+        assert app._started is False
+        assert app._started_modules == []
+        assert app._scheduler_started is False
+
 
 class TestEmptyConfig:
     """Verify Application handles empty config gracefully."""

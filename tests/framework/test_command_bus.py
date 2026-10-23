@@ -399,3 +399,22 @@ class TestSyncVsAsyncHandler:
         bus.register_handler(TestCommand, async_handler)
         ret = await bus.execute(TestCommand(action="x"))
         assert ret == "handled:x"
+
+    @pytest.mark.asyncio
+    async def test_async_handler_logs_and_raises(self, caplog) -> None:
+        # BUG-3 regression guard: an async handler's exception must be logged
+        # and re-raised. The exception surfaces on `await`, so this asserts the
+        # await is wrapped in the same try/except as the sync call.
+        bus = CommandBus()
+
+        async def raising_handler(_cmd: TestCommand) -> None:
+            raise ValueError("async handler failed")
+
+        bus.register_handler(TestCommand, raising_handler)
+        cmd = TestCommand(action="x")
+        with pytest.raises(ValueError, match="async handler failed"):
+            await bus.execute(cmd)
+        assert any(
+            rec.levelno == logging.WARNING and "TestCommand" in rec.message
+            for rec in caplog.records
+        )

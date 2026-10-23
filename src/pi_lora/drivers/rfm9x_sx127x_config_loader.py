@@ -18,6 +18,7 @@ from __future__ import annotations
 
 import importlib.resources
 from pathlib import Path
+from typing import Any
 
 from ruamel.yaml import YAML
 
@@ -26,27 +27,24 @@ from pi_lora.drivers.rfm9x_sx127x_config_model import (
     Rfm9xSx127xFamilyConfig,
 )
 
-
-class _AiologicImportError(ImportError):
-    """Raised when aiologic is unavailable (hard runtime dependency for config locking)."""
-
-    def __init__(self, message: str) -> None:
-        super().__init__(message)
-
-
-try:
-    import aiologic
-except ImportError as _aiologic_import_error:
-    raise _AiologicImportError(
-        "aiologic is required for config locking. Install with: pip install aiologic"
-    ) from _aiologic_import_error
-
 # Default config resource path as configuration string (not magic).
 _DEFAULT_CONFIG_RESOURCE: str = "pi_lora.drivers.configs:rfm9x_sx127x_config.yaml"
 
 # Lazy singleton cache and lock.
+#
+# NOTE (BUG-4 / Plan-11 Option A): ``aiologic`` is imported lazily inside
+# ``get_preloaded_config`` only and NEVER at module scope. Plan-10 Phase-3
+# incorrectly promoted aiologic to a hard import-time dependency because the
+# ``_config_lock`` guarding the singleton cache was created at module scope.
+# That broke the sync public ``load_config`` / ``load_family_config`` APIs used
+# by the CLI config commands whenever aiologic was not installed. Option A of
+# Plan-11 fixes the regression by making the lock a lazy ``Any`` singleton
+# initialised inside the async singleton path only, leaving the sync public
+# functions completely aiologic-free. Option B (making the sync public functions
+# async or shipping a pure-python lock) was rejected because it would change the
+# public API contract of the CLI commands that call these functions synchronously.
 _config_cache: Rfm9xSx127xConfig | None = None
-_config_lock: aiologic.Lock = aiologic.Lock()
+_config_lock: Any = None
 
 
 def _resolve_default_path() -> Path:
@@ -153,6 +151,7 @@ async def get_preloaded_config(
         A validated Rfm9xSx127xConfig instance.
     """
     global _config_cache
+    global _config_lock
 
     # Override path bypasses cache entirely.
     if config_path is not None:
@@ -161,6 +160,16 @@ async def get_preloaded_config(
     # Fast path: cache hit and no forced reload.
     if _config_cache is not None and not force_reload:
         return _config_cache
+
+    # Lazy aiologic import and lock initialisation (BUG-4 / Plan-11 Option A):
+    # aiologic is only required for this async singleton path, so it is imported
+    # here rather than at module scope to keep the sync public functions
+    # (load_config / load_family_config) free of the dependency. ``_config_lock``
+    # starts as ``None`` and is materialised on the first coroutine run.
+    if _config_lock is None:
+        import aiologic
+
+        _config_lock = aiologic.Lock()
 
     async with _config_lock:
         # Double-checked locking: re-verify inside the lock to protect ALL cache mutations.

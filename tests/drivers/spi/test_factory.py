@@ -63,9 +63,24 @@ class TestMockSpiBusFactory:
     def test_create_opens_the_bus(self) -> None:
         factory = MockSpiBusFactory()
         bus = factory.create(bus=1, device=2)
+        # BUG-5 LSP contract: create() returns an unopened bus; caller owns open().
+        assert bus._opened is False
+        bus.open(bus=1, device=2)
         assert bus.bus_number == 1
         assert bus.device_number == 2
         assert bus._opened is True
+
+    def test_lsp_unopened_lifecycle_contract(self) -> None:
+        """LSP pin: MockSpiBusFactory.create() returns an unopened bus.
+
+        This matches :class:`RealSpiBusFactory` (Plan-11 Phase 5 / BUG-5): both
+        factories return an unopened bus so callers own the open/close lifecycle.
+        The real factory is covered under ``pytest.mark.skip`` because it needs the
+        ``spidev`` Cython extension; this test pins the contract for the mock.
+        """
+        factory = MockSpiBusFactory()
+        bus = factory.create(bus=1, device=2)
+        assert bus._opened is False
 
 
 class TestFactoryProtocol:

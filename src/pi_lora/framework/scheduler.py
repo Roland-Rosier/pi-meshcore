@@ -18,6 +18,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import time
 from typing import TYPE_CHECKING, Protocol
 
 if TYPE_CHECKING:
@@ -45,6 +46,8 @@ class TimerScheduler:
         self._validate_interval(default_interval)
         self._default_interval = default_interval
         self._intervals: dict[Rfm9xSx127xModule, float] = {}
+        self._failure_counts: dict[Rfm9xSx127xModule, int] = {}
+        self._last_failure_log: dict[Rfm9xSx127xModule, float] = {}
         self._tasks: dict[Rfm9xSx127xModule, asyncio.Task[None]] = {}
         self._registered: set[Rfm9xSx127xModule] = set()
         self._running = False
@@ -95,20 +98,63 @@ class TimerScheduler:
             self._tasks[module] = asyncio.create_task(self._timer_task(module))
 
     async def _timer_task(self, module: Rfm9xSx127xModule) -> None:
+        # BUG-7 (TimerScheduler error spam loop) fixed with Option A: exponential
+        # backoff. The rationale below is written inline on purpose so that any
+        # future change to this loop has to re-derive the trade-off instead of
+        # silently reverting the backoff and reintroducing unbounded error spam.
+        #
+        # * WHY unbounded error spam must be prevented. The regression that
+        #   BUG-7 exists to fix logged an error on *every* iteration when
+        #   ``module.event_queue.put()`` failed (queue full, module stopped, or
+        #   any other ``Exception``). With the default 1s interval that is one
+        #   ``logging.error`` call per second, forever, while the queue stayed
+        #   full. That is an unbounded stream of identical error lines that buries
+        #   the real signal and grows log volume without bound. Error spam must be
+        #   bounded by construction.
+        #
+        # * Option A (exponential backoff, chosen). On each failure we log once,
+        #   increment ``_failure_counts[module]``, and wait
+        #   ``min(2 ** failure_count, 60)`` seconds before the next attempt. The
+        #   interval grows 1s -> 2s -> 4s -> 8s -> ... -> 60s cap, so consecutive
+        #   failures are logged logarithmically rather than linearly. A successful
+        #   ``put`` resets ``_failure_counts[module]`` to 0, so the next failure
+        #   starts again at ``2 ** 1``. This bounds spam: even if the queue stays
+        #   full indefinitely a module logs at most ~log2(60) ~= 6 times.
+        #
+        # * Why not Option B (fail fast / unregister the module on repeated
+        #   failures)? Option B removes the module's timer task after N
+        #   consecutive failures, which hides the underlying issue: the module
+        #   keeps running but its TIMER events stop being delivered, and the
+        #   failure mode becomes opaque to callers. Backoff instead preserves the
+        #   module's lifecycle and keeps the task alive so it resumes delivering
+        #   events the moment the queue recovers. A timer scheduler must tolerate a
+        #   transient QueueFull by pausing, not by dropping the module.
         while self._running:
             interval = self._intervals.get(module) or self._default_interval
+            backoff_interval: float = interval or self._default_interval or 1.0
             if interval is not None:
                 try:
                     await module.event_queue.put(
                         ModuleEvent(EventType.TIMER, TimerEvent(interval))
                     )
                 except Exception as exc:
+                    self._failure_counts[module] = (
+                        self._failure_counts.get(module, 0) + 1
+                    )
                     logging.getLogger(__name__).error(
                         "TimerScheduler: failed to put TIMER event for module %s: %s",
                         module,
                         exc,
                     )
-            await asyncio.sleep(interval or self._default_interval or 1.0)
+                    self._last_failure_log[module] = time.monotonic()
+                    backoff_interval = min(
+                        2 ** self._failure_counts[module], 60
+                    )
+                else:
+                    # Recovery: the queue accepted the event again, so drop the
+                    # consecutive-failure streak and resume the normal interval.
+                    self._failure_counts[module] = 0
+            await asyncio.sleep(backoff_interval)
 
 
 class IdlePacer:
@@ -158,14 +204,28 @@ class IdlePacer:
 
 
 class InterruptBridge:
-    """Routes GPIO interrupts to modules via an asyncio.Queue (no scalar overwrite)."""
+    """Routes GPIO interrupts to modules via an unbounded asyncio.Queue.
 
-    def __init__(self, max_queue_size: int = 1000) -> None:
+    BUG-6 fix (Option A): the trigger queue is intentionally *unbounded* so no
+    interrupt can ever be silently dropped on QueueFull. LoRa interrupt rates are
+    low (<100 Hz per channel); each entry is a small int (a GPIO pin number,
+    ~28 bytes), so even a sustained 1000 Hz for one hour is ~100 MB worst case
+    (extremely unlikely). The ``monitor_queue_depth_threshold`` provides an
+    early-warning log when the queue depth becomes abnormal, surfacing the
+    anomaly upstream as a backpressure signal for the GPIO driver rather than
+    losing packet receptions.
+    """
+
+    def __init__(self, monitor_queue_depth_threshold: int = 1000) -> None:
+        if monitor_queue_depth_threshold <= 0:
+            raise ValueError(
+                "monitor_queue_depth_threshold must be positive, "
+                f"got {monitor_queue_depth_threshold}"
+            )
         self._interrupt_map: dict[int, Rfm9xSx127xModule] = {}
-        self._max_queue_size = max_queue_size
-        self._trigger_queue: asyncio.Queue[int] = asyncio.Queue(
-            maxsize=max_queue_size
-        )
+        self._monitor_queue_depth_threshold = monitor_queue_depth_threshold
+        # Unbounded queue: asyncio.Queue() with no maxsize (BUG-6, Option A).
+        self._trigger_queue: asyncio.Queue[int] = asyncio.Queue()
         self._running = False
         self._task: asyncio.Task[None] | None = None
 
@@ -182,16 +242,21 @@ class InterruptBridge:
     def trigger_interrupt(self, gpio_pin: int) -> None:
         """Called by GPIO driver when interrupt fires (sync context).
 
-        The trigger queue is bounded (maxsize=max_queue_size). When the queue is
-        full, put_nowait raises asyncio.QueueFull; the interrupt is dropped and a
-        warning is logged instead of raising to the caller.
+        BUG-6 fix (Option A): the trigger queue is unbounded, so put_nowait never
+        raises asyncio.QueueFull and no interrupt can be silently dropped. This is
+        safe because LoRa interrupt rates are low (<100 Hz per channel) and each
+        entry is a small int (a GPIO pin number, ~28 bytes). The
+        ``monitor_queue_depth_threshold`` fires an early-warning log when the queue
+        depth becomes abnormal, giving the GPIO driver a backpressure signal to
+        surface the anomaly upstream rather than losing packet receptions.
         """
-        try:
-            self._trigger_queue.put_nowait(gpio_pin)
-        except asyncio.QueueFull:
+        self._trigger_queue.put_nowait(gpio_pin)
+        if self._trigger_queue.qsize() >= self._monitor_queue_depth_threshold:
             logging.getLogger(__name__).warning(
-                "Interrupt queue full (maxsize=%d); dropping interrupt for GPIO %d",
-                self._trigger_queue.maxsize,
+                "Interrupt queue depth %d reached monitoring threshold %d; "
+                "abnormal interrupt rate detected (GPIO %d).",
+                self._trigger_queue.qsize(),
+                self._monitor_queue_depth_threshold,
                 gpio_pin,
             )
 

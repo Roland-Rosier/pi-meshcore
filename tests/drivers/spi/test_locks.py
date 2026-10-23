@@ -204,6 +204,26 @@ class TestLockProtocolSignatures:
         assert isinstance(result, bool)
         lock.async_release()
 
+    @pytest.mark.asyncio
+    async def test_async_release_matches_aiologic_api(self) -> None:
+        """Pin ``async_release`` to the concrete :class:`aiologic.Lock` API.
+
+        Regression for code_review-10.1:1. The concrete lock exposes
+        ``async_release`` and has NO ``release`` method; the ``SpiLock`` protocol
+        must track this. Asserting both directions prevents future implementers
+        from renaming the protocol member to ``release`` (which would reintroduce
+        an ``AttributeError`` at runtime).
+        """
+        lock = await get_bus_lock(5)
+        assert hasattr(lock, "async_release") is True
+        assert hasattr(lock, "release") is False
+
+        acquired = await lock.async_acquire()
+        assert acquired is True
+        assert lock.locked() is True
+        lock.async_release()
+        assert lock.locked() is False
+
     def test_enter_returns_self(self) -> None:
         """``with lock:`` returns the lock instance itself."""
         lock = asyncio.new_event_loop().run_until_complete(get_bus_lock(2))

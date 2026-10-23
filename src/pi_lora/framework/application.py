@@ -141,6 +141,41 @@ class Application:
         ``ExceptionGroup`` after the state flags are reset to a clean baseline.
         """
         errors: list[Exception] = []
+        # BUG-2 (Plan-11 Phase 2) — scheduler unregistration BEFORE module cleanup.
+        #
+        # `start()` registers every module with the scheduler via
+        # `module_manager.load_from_config()` BEFORE `init_spi_bus()` runs (line 73).
+        # When `init_spi_bus()` fails, the module is registered in the scheduler but
+        # is NOT appended to `self._started_modules` (the append happens only after
+        # `init_spi_bus()` succeeds, after line 83). `_cleanup_partial_start()`
+        # iterates only `self._started_modules`, so without this loop the scheduler
+        # retains a dangling module reference: its `_registered` set, `_intervals`
+        # map, and any pending timer task still point at a module whose SPI bus was
+        # never opened and whose event loop never ran. Those lingering timer tasks
+        # are a resource leak — the module object keeps a live reference in
+        # `_tasks` and the IdlePacer / InterruptBridge maps keep stale entries, so
+        # the module can never be garbage-collected and its timer task keeps the
+        # scheduler bound after cleanup.
+        #
+        # This loop mirrors `stop()`'s first pass (unregister every module before
+        # draining), which is the correct inverse of `load_from_config()`'s
+        # registration. Option A (unregister here) is chosen over Option B
+        # (defer scheduler registration until after `init_spi_bus()` succeeds — a
+        # larger refactor that reorders `start()`'s phases) because it is localized,
+        # idempotent (`unregister_module` uses `discard`/`pop`), and matches the
+        # established `stop()` contract; Option B risks regressing the SPI-init
+        # tracking invariant that `test_start_event_loop_failure_still_tracked_for_cleanup`
+        # depends on.
+        for module in self.module_manager.get_all_modules():
+            try:
+                await self.scheduler.unregister_module(module)
+            except Exception as exc:
+                logger.exception(
+                    "scheduler.unregister_module failed for SPI device=%s CE=%s",
+                    module.get_spi_device_id(),
+                    module.get_ce_number(),
+                )
+                errors.append(exc)
         for module in self._started_modules:
             try:
                 await module.stop_event_loop(StopMode.DRAIN)

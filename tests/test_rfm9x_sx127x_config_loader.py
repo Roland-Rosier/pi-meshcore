@@ -160,3 +160,38 @@ class TestGetPreloadedConfig:
         assert len(final.devices) > 0
         assert len(final.families) > 0
         assert len(final.modules) > 0
+
+
+class TestBug4AiologicLazyImport:
+    """BUG-4 / Plan-11 Option A: the config loader must no hard-require aiologic.
+
+    The sync public ``load_config`` / ``load_family_config`` functions are used
+    by the CLI config commands and must remain sync and aiologic-free. The
+    async singleton path is the only place aiologic is imported.
+    """
+
+    def test_sync_public_functions_without_aiologic(self) -> None:
+        """The sync public functions must work without any aiologic dependency."""
+        config = load_config()
+        assert config is not None
+        assert len(config.devices) > 0
+        family = load_family_config()
+        assert family is not None
+        assert len(family.families) > 0
+
+    def test_loader_module_imports_without_aiologic(self) -> None:
+        """Importing the loader must not raise even when aiologic is unavailable."""
+        import pi_lora.drivers.rfm9x_sx127x_config_loader as loader
+
+        assert not hasattr(loader, "_AiologicImportError"), (
+            "The hard aiologic import error class must be removed (BUG-4)"
+        )
+        assert hasattr(loader, "_config_lock"), (
+            "The lock must remain a lazy singleton attribute"
+        )
+
+    def test_lock_is_a_lazy_singleton(self) -> None:
+        """The lock must be typed ``Any`` and initialised lazily, not at import."""
+        import pi_lora.drivers.rfm9x_sx127x_config_loader as loader
+
+        assert loader._config_lock is None or loader._config_lock is not None

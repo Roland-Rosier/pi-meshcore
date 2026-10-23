@@ -88,16 +88,26 @@ class CommandBus:
         handler, _priority = best_tuple
         try:
             result = handler(command)
+            # BUG-3 fix: the await must live inside the same try/except as the
+            # sync call. For an async handler `handler(command)` returns a
+            # coroutine without raising, so the exception surfaces only when we
+            # `await` it. Leaving the await outside this block (the pre-fix
+            # layout) meant async handler exceptions were never logged.
+            if asyncio.iscoroutine(result):
+                return await result
+            return result
         except Exception as exc:
+            # Sync and async-await exceptions are caught here uniformly so both
+            # are logged and re-raised. Option A (wrap the await) was chosen
+            # over Option B (normalize every handler to async): Option B is a
+            # breaking change that would force callers to await sync handlers
+            # and touch every handler site, so it was rejected.
             logging.getLogger(__name__).warning(
                 "Command '%s' handler raised: %r",
                 type(command).__name__,
                 exc,
             )
             raise
-        if asyncio.iscoroutine(result):
-            return await result
-        return result
 
     async def dispatch(self, command: Any) -> None:
         """Asynchronously post *command* to its target module's event queue."""
