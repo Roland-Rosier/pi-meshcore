@@ -148,6 +148,25 @@ class _FailingStartEventLoopModule:
         return self.ce_number
 
 
+class _CancellationModule:
+    """Minimal controllable module for CR-3 cancellation tests.
+
+    ``Scheduler.unregister_module`` only uses ``discard``/``pop`` so any
+    hashable object is accepted; this class supplies the identity accessors
+    referenced by the ``logger.exception`` debug path during cleanup.
+    """
+
+    def __init__(self, ce_number: int = 0, spi_device_id: int = 0) -> None:
+        self.ce_number: int = ce_number
+        self.spi_device_id: int = spi_device_id
+
+    def get_spi_device_id(self) -> int:
+        return self.spi_device_id
+
+    def get_ce_number(self) -> int:
+        return self.ce_number
+
+
 class TestApplicationLifecycle:
     """Verify Application.start() / stop() lifecycle."""
 
@@ -307,6 +326,79 @@ class TestApplicationLifecycle:
         app = Application(config=None, spi_factory=MockSpiBusFactory())
         await app.start()
         await app.stop()
+        assert app._started is False
+        assert app._started_modules == []
+        assert app._scheduler_started is False
+
+    @pytest.mark.asyncio
+    async def test_concurrent_start_stop_no_race(self) -> None:
+        """CR-2 FIX: many concurrent start()/stop() cycles must not race against
+        _cleanup_partial_start(). The lifecycle lock serialises the unregister/cleanup
+        body, so under interleaved start()/stop() calls cleanup unregisters modules
+        correctly and every state flag resets cleanly to a clean baseline."""
+        app = Application(config=None, spi_factory=MockSpiBusFactory())
+        await app.start()
+
+        tasks = [app.start() for _ in range(10)] + [app.stop() for _ in range(10)]
+        results = await asyncio.gather(*tasks, return_exceptions=True)
+
+        # At least one start() and one stop() completed without raising.
+        assert any(not isinstance(r, Exception) for r in results)
+
+        # No dangling scheduler references remain after the interleaved cleanup.
+        assert app.scheduler.timer_scheduler._registered == set()
+        assert app.scheduler.idle_pacer._running is False
+        assert app.scheduler.interrupt_bridge._running is False
+
+        # State flags reset cleanly to a clean baseline under concurrency.
+        assert app._started is False
+        assert app._started_modules == []
+        assert app._scheduler_started is False
+
+    @pytest.mark.asyncio
+    async def test_concurrent_start_cancellation_no_race(self) -> None:
+        """CR-2 FIX: many concurrent start() calls that each get cancelled must not
+        race against _cleanup_partial_start(). Every cancellation path acquires the
+        lifecycle lock, so state flags reset cleanly and no module is left tracked."""
+        app = Application(config=None, spi_factory=MockSpiBusFactory())
+        ctrl = _CancellationModule()
+
+        async def _instant_assembly(
+            assembly_name: str,
+            spi_device_id: Any = None,
+            ce_number: Any = None,
+            config_path: Any = None,
+        ) -> list[Any]:
+            return []
+
+        async def _slow_load(
+            radio_configs: list[Any],
+            scheduler: Any,
+            spi_factory: Any = None,
+        ) -> None:
+            await asyncio.sleep(10)
+
+        def _get_ctrl() -> list[Any]:
+            return [ctrl]
+
+        app.get_assembly_config = _instant_assembly  # type: ignore[assignment]
+        app.module_manager.load_from_config = _slow_load  # type: ignore[assignment]
+        app.module_manager.get_all_modules = _get_ctrl  # type: ignore[assignment]
+
+        tasks = [asyncio.ensure_future(app.start()) for _ in range(10)]
+        await asyncio.sleep(0.05)
+        for task in tasks:
+            assert task.cancel() is True
+
+        cancelled_errors = 0
+        for task in tasks:
+            with pytest.raises(asyncio.CancelledError):
+                await task
+            cancelled_errors += 1
+
+        assert cancelled_errors == 10
+
+        # Every cancellation path reset state cleanly under concurrency.
         assert app._started is False
         assert app._started_modules == []
         assert app._scheduler_started is False
@@ -663,6 +755,87 @@ class TestConfigLoading:
         await application.list_assemblies()
         reloaded = await application.reload_config()
         assert reloaded is not None
+
+
+class TestCancellationSemantics:
+    """Verify CR-3: start() re-raises CancelledError to preserve asyncio semantics."""
+
+    @pytest.mark.asyncio
+    async def test_start_cancellation_re_raises_cancelled_error(self) -> None:
+        """When start()'s awaitable path is cancelled, the CancelledError must be
+        re-raised (not swallowed) after ``_cleanup_partial_start()`` drains the
+        tracked module, so asyncio cancellation semantics are preserved."""
+        app = Application(config=None, spi_factory=MockSpiBusFactory())
+        ctrl = _CancellationModule()
+
+        async def _instant_assembly(
+            assembly_name: str,
+            spi_device_id: Any = None,
+            ce_number: Any = None,
+            config_path: Any = None,
+        ) -> list[Any]:
+            return []
+
+        async def _slow_load(
+            radio_configs: list[Any],
+            scheduler: Any,
+            spi_factory: Any = None,
+        ) -> None:
+            await asyncio.sleep(10)
+
+        def _get_ctrl() -> list[Any]:
+            return [ctrl]
+
+        app.get_assembly_config = _instant_assembly  # type: ignore[assignment]
+        app.module_manager.load_from_config = _slow_load  # type: ignore[assignment]
+        app.module_manager.get_all_modules = _get_ctrl  # type: ignore[assignment]
+
+        task = asyncio.ensure_future(app.start())
+        await asyncio.sleep(0.05)
+        assert task.cancel() is True
+
+        with pytest.raises(asyncio.CancelledError):
+            await task
+
+        assert app._started is False
+        assert app._started_modules == []
+        assert app._scheduler_started is False
+
+    @pytest.mark.asyncio
+    async def test_cleanup_and_reraise_cancellation_re_raises_cancelled_error(
+        self,
+    ) -> None:
+        """The utility runs the cleanup coroutine then re-raises a CancelledError
+        so asyncio cancellation semantics are preserved for the caller."""
+        app = Application(config=None, spi_factory=MockSpiBusFactory())
+        ran = False
+
+        async def _coro_raises_cancelled() -> None:
+            nonlocal ran
+            ran = True
+            raise asyncio.CancelledError()
+
+        with pytest.raises(asyncio.CancelledError):
+            await app._cleanup_and_reraise_cancellation(_coro_raises_cancelled)
+
+        assert ran is True
+
+    @pytest.mark.asyncio
+    async def test_cleanup_and_reraise_cancellation_surfaces_generic_exception(
+        self,
+    ) -> None:
+        """The utility runs the cleanup coroutine then surfaces whatever it raised
+        (a generic Exception, already wrapped in an ExceptionGroup by the path)."""
+        app = Application(config=None, spi_factory=MockSpiBusFactory())
+        raised = RuntimeError("cleanup failed")
+
+        async def _coro_raises_exception() -> None:
+            raise raised
+
+        with pytest.raises(RuntimeError) as excinfo:
+            await app._cleanup_and_reraise_cancellation(_coro_raises_exception)
+
+        assert excinfo.value is raised
 
 
 if __name__ == "__main__":

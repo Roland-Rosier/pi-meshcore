@@ -215,6 +215,7 @@ class FakeSpiBusKernelFactory:
         from tests.fakes import create_fake_spi_dev, spidev_kernel_patch
 
         bus_instance: RealSpiBus = RealSpiBus()
+        bus_instance._factory_owned = True  # CR-8 FIX: mark the yielded bus as factory-owned
         fake_kernel = create_fake_spi_dev(module_type="rfm95w")
         with spidev_kernel_patch(fake_kernel):
             bus_instance.open(bus=bus, device=device)

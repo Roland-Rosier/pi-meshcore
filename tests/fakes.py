@@ -447,12 +447,18 @@ def spidev_kernel_patch(fake_spi: FakeSpiDev) -> Iterator[object]:
     :param fake_spi: The FakeSpiDev kernel to expose as ``spidev.SpiDev``.
     :yield: The injected fake spidev module.
     """
+    from pi_lora.drivers.spi.bus import RealSpiBus
+
     backup: object | None = sys.modules.get("spidev", None)
     fake_module: types.SimpleNamespace = types.SimpleNamespace(SpiDev=lambda: fake_spi)
     sys.modules["spidev"] = fake_module  # type: ignore[assignment]
+    # CR-8 FIX: mark the injected spidev kernel patch as active on the bus class so
+    # RealSpiBus._verify_patch_active() can detect misuse after the context exits.
+    RealSpiBus._spidev_patch_active = True
     try:
         yield fake_module
     finally:
+        RealSpiBus._spidev_patch_active = False
         if backup is None:
             sys.modules.pop("spidev", None)
         else:

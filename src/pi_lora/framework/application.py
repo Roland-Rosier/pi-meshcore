@@ -18,6 +18,7 @@ from __future__ import annotations
 
 import asyncio  # noqa: F401
 import logging
+from collections.abc import Awaitable, Callable
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
@@ -62,7 +63,14 @@ class Application:
         self._lifecycle_lock: asyncio.Lock = asyncio.Lock()
 
     async def start(self, assembly_name: str = "default") -> None:
-        """Initialize the application: load modules, register scheduler, start loops."""
+        """Initialize the application: load modules, register scheduler, start loops.
+
+        CR-2 FIX: the lifecycle lock is released before the partial-start cleanup
+        runs. start() holds the lock only across the start phase; the cleanup
+        coroutine then legitimately acquires the same lock, so it cannot deadlock
+        on a self-held lock and stays mutually exclusive with a concurrent stop().
+        """
+        exc_to_raise: BaseException | None = None
         async with self._lifecycle_lock:
             if self._started:
                 return
@@ -83,9 +91,15 @@ class Application:
                     self._started_modules.append(module)
                     await module.start_event_loop()
                 self._started = True
-            except (Exception, asyncio.CancelledError):
-                await self._cleanup_partial_start()
-                raise
+            except asyncio.CancelledError as exc:
+                exc_to_raise = exc
+            except Exception as exc:
+                exc_to_raise = exc
+        if exc_to_raise is not None:
+            await self._cleanup_and_reraise_cancellation(
+                self._cleanup_partial_start
+            )
+            raise exc_to_raise
 
     async def stop(self) -> None:
         """Gracefully stop all modules and the scheduler.
@@ -132,79 +146,130 @@ class Application:
         if errors:
             raise ExceptionGroup("Errors during Application.stop()", errors)
 
+    async def _cleanup_and_reraise_cancellation(
+        self, cleanup_coro: "Callable[[], Awaitable[None]]"
+    ) -> None:
+        """Run cleanup then re-raise CancelledError to preserve asyncio semantics.
+
+        CR-3 FIX: Centralizes the correct cancellation pattern used by start(),
+        stop(), and _cleanup_partial_start():
+          - Exception: run cleanup, raise (errors already wrapped in ExceptionGroup
+            by the cleanup path).
+          - CancelledError: run cleanup, then re-raise CancelledError so asyncio
+            cancellation semantics are preserved for the caller.
+
+        BUG (CR-3): the pre-fix code caught CancelledError together with generic
+        Exception via ``except (Exception, asyncio.CancelledError)`` and then did
+        ``await self._cleanup_partial_start(); raise``. That path swallowed the
+        CancelledError: the bare ``raise`` re-raised whatever exception was active
+        in the generator frame (the generic caught exception or a stale one), NOT
+        the CancelledError that actually triggered the cancellation. asyncio's
+        cancellation semantics require the CancelledError to be the exception that
+        propagates to the awaiting coroutine (e.g. the one driving
+        ``asyncio.sleep``/``create_task``), because only a CancelledError at an
+        await point actually propagates cancellation to the *caller*. Re-raising
+        it verbatim restores that contract.
+
+        The alternative (catching CancelledError with generic Exception and
+        dropping it) was rejected: dropping the CancelledError would let start()
+        return normally to a caller that expected the coroutine to be cancelled,
+        silently undoing the cancellation and leaving the caller's own await
+        loop in an inconsistent state.
+
+        Note: ``cleanup_coro`` already performs its own per-module cleanup and may
+        itself raise an ExceptionGroup; both branches simply let that raise
+        propagate after cleanup has completed.
+        """
+        try:
+            await cleanup_coro()
+        except asyncio.CancelledError:
+            # Cleanup already ran inside cleanup_coro; re-raise to propagate
+            # cancellation and preserve asyncio semantics.
+            raise
+        except Exception:
+            # Cleanup already ran; surface whatever it raised (already an
+            # ExceptionGroup from the cleanup path).
+            raise
+
     async def _cleanup_partial_start(self) -> None:
         """Mirror stop() for partially-started modules on failure.
 
-        Each module is drained and closed independently so that a failure on one
-        module does not prevent the remaining modules (and the scheduler) from
-        being cleaned up. Per-module failures are collected and surfaced as an
-        ``ExceptionGroup`` after the state flags are reset to a clean baseline.
+        This method acquires self._lifecycle_lock to prevent races with
+        concurrent start()/stop() calls. Deadlock is impossible because:
+
+        - start() only calls _cleanup_partial_start() when self._started == False
+        - stop() only runs when self._started == True
+        - The state machine guarantees these are mutually exclusive:
+          * _cleanup_partial_start() executes during failed start() BEFORE _started becomes True
+          * stop() executes AFTER _started is True
+          * Therefore they can never hold the lock simultaneously
         """
-        errors: list[Exception] = []
-        # BUG-2 (Plan-11 Phase 2) — scheduler unregistration BEFORE module cleanup.
-        #
-        # `start()` registers every module with the scheduler via
-        # `module_manager.load_from_config()` BEFORE `init_spi_bus()` runs (line 73).
-        # When `init_spi_bus()` fails, the module is registered in the scheduler but
-        # is NOT appended to `self._started_modules` (the append happens only after
-        # `init_spi_bus()` succeeds, after line 83). `_cleanup_partial_start()`
-        # iterates only `self._started_modules`, so without this loop the scheduler
-        # retains a dangling module reference: its `_registered` set, `_intervals`
-        # map, and any pending timer task still point at a module whose SPI bus was
-        # never opened and whose event loop never ran. Those lingering timer tasks
-        # are a resource leak — the module object keeps a live reference in
-        # `_tasks` and the IdlePacer / InterruptBridge maps keep stale entries, so
-        # the module can never be garbage-collected and its timer task keeps the
-        # scheduler bound after cleanup.
-        #
-        # This loop mirrors `stop()`'s first pass (unregister every module before
-        # draining), which is the correct inverse of `load_from_config()`'s
-        # registration. Option A (unregister here) is chosen over Option B
-        # (defer scheduler registration until after `init_spi_bus()` succeeds — a
-        # larger refactor that reorders `start()`'s phases) because it is localized,
-        # idempotent (`unregister_module` uses `discard`/`pop`), and matches the
-        # established `stop()` contract; Option B risks regressing the SPI-init
-        # tracking invariant that `test_start_event_loop_failure_still_tracked_for_cleanup`
-        # depends on.
-        for module in self.module_manager.get_all_modules():
-            try:
-                await self.scheduler.unregister_module(module)
-            except Exception as exc:
-                logger.exception(
-                    "scheduler.unregister_module failed for SPI device=%s CE=%s",
-                    module.get_spi_device_id(),
-                    module.get_ce_number(),
-                )
-                errors.append(exc)
-        for module in self._started_modules:
-            try:
-                await module.stop_event_loop(StopMode.DRAIN)
-            except Exception as exc:
-                logger.exception(
-                    "stop_event_loop failed for SPI device=%s CE=%s",
-                    module.get_spi_device_id(),
-                    module.get_ce_number(),
-                )
-                errors.append(exc)
-            try:
-                await module.close_spi()
-            except Exception as exc:
-                logger.exception(
-                    "close_spi failed for SPI device=%s CE=%s",
-                    module.get_spi_device_id(),
-                    module.get_ce_number(),
-                )
-                errors.append(exc)
-        if self._scheduler_started:
-            try:
-                await self.scheduler.stop()
-            except Exception as exc:
-                logger.exception("scheduler.stop() failed during cleanup")
-                errors.append(exc)
-        self._started_modules.clear()
-        self._scheduler_started = False
-        if errors:
-            raise ExceptionGroup("Errors during Application cleanup", errors)
+        async with self._lifecycle_lock:  # CR-2 FIX: Full mirror including lock
+            errors: list[Exception] = []
+            # BUG-2 (Plan-11 Phase 2) — scheduler unregistration BEFORE module cleanup.
+            #
+            # `start()` registers every module with the scheduler via
+            # `module_manager.load_from_config()` BEFORE `init_spi_bus()` runs (line 73).
+            # When `init_spi_bus()` fails, the module is registered in the scheduler but
+            # is NOT appended to `self._started_modules` (the append happens only after
+            # `init_spi_bus()` succeeds, after line 83). `_cleanup_partial_start()`
+            # iterates only `self._started_modules`, so without this loop the scheduler
+            # retains a dangling module reference: its `_registered` set, `_intervals`
+            # map, and any pending timer task still point at a module whose SPI bus was
+            # never opened and whose event loop never ran. Those lingering timer tasks
+            # are a resource leak — the module object keeps a live reference in
+            # `_tasks` and the IdlePacer / InterruptBridge maps keep stale entries, so
+            # the module can never be garbage-collected and its timer task keeps the
+            # scheduler bound after cleanup.
+            #
+            # This loop mirrors `stop()`'s first pass (unregister every module before
+            # draining), which is the correct inverse of `load_from_config()`'s
+            # registration. Option A (unregister here) is chosen over Option B
+            # (defer scheduler registration until after `init_spi_bus()` succeeds — a
+            # larger refactor that reorders `start()`'s phases) because it is localized,
+            # idempotent (`unregister_module` uses `discard`/`pop`), and matches the
+            # established `stop()` contract; Option B risks regressing the SPI-init
+            # tracking invariant that `test_start_event_loop_failure_still_tracked_for_cleanup`
+            # depends on.
+            for module in self.module_manager.get_all_modules():
+                try:
+                    await self.scheduler.unregister_module(module)
+                except Exception as exc:
+                    logger.exception(
+                        "scheduler.unregister_module failed for SPI device=%s CE=%s",
+                        module.get_spi_device_id(),
+                        module.get_ce_number(),
+                    )
+                    errors.append(exc)
+            for module in self._started_modules:
+                try:
+                    await module.stop_event_loop(StopMode.DRAIN)
+                except Exception as exc:
+                    logger.exception(
+                        "stop_event_loop failed for SPI device=%s CE=%s",
+                        module.get_spi_device_id(),
+                        module.get_ce_number(),
+                    )
+                    errors.append(exc)
+                try:
+                    await module.close_spi()
+                except Exception as exc:
+                    logger.exception(
+                        "close_spi failed for SPI device=%s CE=%s",
+                        module.get_spi_device_id(),
+                        module.get_ce_number(),
+                    )
+                    errors.append(exc)
+            if self._scheduler_started:
+                try:
+                    await self.scheduler.stop()
+                except Exception as exc:
+                    logger.exception("scheduler.stop() failed during cleanup")
+                    errors.append(exc)
+            self._started_modules.clear()
+            self._scheduler_started = False
+            if errors:
+                raise ExceptionGroup("Errors during Application cleanup", errors)
 
     async def run_blocking_command(self, cmd: Any) -> Any:
         """Execute *cmd* synchronously via CommandBus.execute()."""

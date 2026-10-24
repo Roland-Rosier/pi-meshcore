@@ -17,6 +17,7 @@ from __future__ import annotations
 from typing import Literal, cast
 
 import typer
+from async_typer import AsyncTyper
 
 import pi_lora.cli._logging
 from pi_lora.drivers.lora_detection import (
@@ -51,14 +52,26 @@ def _normalise_module_type(value: str | None) -> Literal["rfm95w", "rfm98w", "no
     return mapping[canonical]
 
 
-app = typer.Typer(
+# FIX CR-7: migrated from a sync ``typer.Typer`` to ``async_typer.AsyncTyper``.
+#
+# With the sync Typer, ``typer.BadParameter`` raised inside the ``--ce0``/``--ce1``
+# callback aborted option parsing, but ``_entry_points.check_hardware()`` performed
+# ``cast(int, app())`` -- a sync Typer returns ``None`` on error, so the wrapper
+# yielded exit code ``0`` and rejected input was silently accepted.
+#
+# ``async_typer.AsyncTyper`` subclasses ``typer.Typer`` and drives each async command
+# body through a synchronous runner, so ``app()`` returns a genuine Click exit code
+# (``1`` on rejected input). The rejected alternative -- forcing exit code ``1`` via a
+# ``cast`` hack in the wrapper -- would not change the underlying sync Typer behaviour
+# and would leave this CLI inconsistent with the other async entry points.
+app = AsyncTyper(
     name="check-hardware",
     help="Check LoRa hardware modules on the MeshCore Pi4 Hat.",
 )
 
 
 @app.command("detect-modules")
-def detect_modules(
+async def detect_modules(
     ce0: str | None = typer.Option(
         None,
         "--ce0",
@@ -111,7 +124,7 @@ def detect_modules(
 
 
 @app.callback(invoke_without_command=True)
-def main_callback(ctx: typer.Context) -> None:
+async def main_callback(ctx: typer.Context) -> None:
     """MeshCore hardware check utility — show help when invoked without subcommand."""
     pi_lora.cli._logging.setup_logging()
 

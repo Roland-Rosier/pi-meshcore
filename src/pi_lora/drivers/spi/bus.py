@@ -75,6 +75,8 @@ class SpiBus(Protocol):
 class RealSpiBus:
     """Real implementation of SpiBus wrapping spidev.SpiDev."""
 
+    _spidev_patch_active: bool = False  # CR-8 FIX: class-level flag set True while spidev is injected
+
     def __init__(self) -> None:
         """Initialize the real SPI bus.
 
@@ -85,6 +87,35 @@ class RealSpiBus:
         self._spidev: Any | None = None
         self.bus_number: int = 0
         self.device_number: int = 0
+        self._factory_owned: bool = False  # CR-8 FIX: set True when yielded by create_bus
+
+    def _verify_patch_active(self) -> None:
+        """CR-8 FIX: Verify the injected ``spidev`` kernel patch is still active.
+
+        :class:`FakeSpiBusKernelFactory.create_bus` yields a bus whose ``_spidev``
+        is a :class:`FakeSpiDev` installed through :func:`spidev_kernel_patch`.
+        The patch is deactivated (and the bus closed) on context-manager block
+        exit. If a caller retains the bus reference after that exit, every
+        ``import spidev`` performed by :meth:`open` / :meth:`xfer2` fails, but
+        there would be no clear error to surface the misuse. This check raises a
+        explicit :class:`RuntimeError` instead.
+
+        KNOWN LIMITATION: This is test infrastructure technical debt. The
+        context-manager-yielding-a-resource-that-gets-closed-in-finally pattern
+        is fundamentally unsafe. A proper fix would require restructuring to not
+        yield the bus directly (return a proxy) or making the patch persistent.
+        For now, misuse is detected at runtime.
+
+        :raises RuntimeError: If this is a :meth:`FakeSpiBusKernelFactory.create_bus` yielded bus whose ``spidev`` patch has been deactivated on context-manager exit.
+        """
+        if self._factory_owned and not self._spidev_patch_active:
+            raise RuntimeError(
+                "MockSpiBus operation failed: the spidev kernel patch is no longer "
+                "active. This happens when you retain a bus reference after the "
+                "FakeSpiBusKernelFactory.create_bus() context manager exits. "
+                "Fix: do not store the bus outside the 'with' block, or restructure "
+                "the test to keep the context manager open for the bus's lifetime."
+            )
 
     def open(self, bus: int, device: int) -> None:
         """Open the SPI bus for the given device.
@@ -93,6 +124,8 @@ class RealSpiBus:
             bus: The bus identifier.
             device: The device identifier.
         """
+        # CR-8 FIX: ensure the spidev kernel patch is active before importing it.
+        self._verify_patch_active()
         # Note: spidev is a real python library; do not assume otherwise
         import spidev
 

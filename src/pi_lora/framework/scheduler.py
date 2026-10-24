@@ -131,30 +131,43 @@ class TimerScheduler:
         #   transient QueueFull by pausing, not by dropping the module.
         while self._running:
             interval = self._intervals.get(module) or self._default_interval
-            backoff_interval: float = interval or self._default_interval or 1.0
-            if interval is not None:
-                try:
-                    await module.event_queue.put(
-                        ModuleEvent(EventType.TIMER, TimerEvent(interval))
-                    )
-                except Exception as exc:
-                    self._failure_counts[module] = (
-                        self._failure_counts.get(module, 0) + 1
-                    )
-                    logging.getLogger(__name__).error(
-                        "TimerScheduler: failed to put TIMER event for module %s: %s",
-                        module,
-                        exc,
-                    )
-                    self._last_failure_log[module] = time.monotonic()
-                    backoff_interval = min(
-                        2 ** self._failure_counts[module], 60
-                    )
-                else:
-                    # Recovery: the queue accepted the event again, so drop the
-                    # consecutive-failure streak and resume the normal interval.
-                    self._failure_counts[module] = 0
+            await self._do_tick(module, interval)
+
+    async def _do_tick(
+        self, module: Rfm9xSx127xModule, interval: float
+    ) -> None:
+        """Execute one timer tick with exponential backoff on failure.
+
+        CR-5 FIX: unified backoff for BOTH custom and default intervals.
+        Plan-11's original code nested the backoff branch inside
+        ``if interval is not None:``, so a module running on the default
+        interval (``interval is None`` resolved via
+        ``self._intervals.get(module) or self._default_interval``) never
+        reached the failure-handling path. That reintroduced unbounded error
+        spam: every default-interval iteration logged an error with no backoff.
+        This helper removes that conditional so every tick — whether the
+        interval came from ``_intervals`` or ``_default_interval`` — applies the
+        same ``min(2 ** failure_count, 60)`` exponential backoff on failure.
+        """
+        try:
+            await module.event_queue.put(
+                ModuleEvent(EventType.TIMER, TimerEvent(interval))
+            )
+        except Exception as exc:
+            self._failure_counts[module] = self._failure_counts.get(module, 0) + 1
+            logging.getLogger(__name__).error(
+                "TimerScheduler: failed to put TIMER event for module %s: %s",
+                module,
+                exc,
+            )
+            self._last_failure_log[module] = time.monotonic()
+            backoff_interval: float = min(2 ** self._failure_counts[module], 60)
             await asyncio.sleep(backoff_interval)
+        else:
+            # Recovery: the queue accepted the event again, so drop the
+            # consecutive-failure streak and resume the normal interval.
+            self._failure_counts[module] = 0
+            await asyncio.sleep(interval)
 
 
 class IdlePacer:
@@ -204,16 +217,24 @@ class IdlePacer:
 
 
 class InterruptBridge:
-    """Routes GPIO interrupts to modules via an unbounded asyncio.Queue.
+    """Routes GPIO interrupts to modules via a BOUNDED asyncio.Queue.
 
-    BUG-6 fix (Option A): the trigger queue is intentionally *unbounded* so no
-    interrupt can ever be silently dropped on QueueFull. LoRa interrupt rates are
-    low (<100 Hz per channel); each entry is a small int (a GPIO pin number,
-    ~28 bytes), so even a sustained 1000 Hz for one hour is ~100 MB worst case
-    (extremely unlikely). The ``monitor_queue_depth_threshold`` provides an
-    early-warning log when the queue depth becomes abnormal, surfacing the
-    anomaly upstream as a backpressure signal for the GPIO driver rather than
-    losing packet receptions.
+    CR-6 FIX: The queue is bounded (maxsize=10000) with drop-oldest policy
+    to provide HARD OOM protection against malicious/buggy GPIO drivers.
+
+    RATIONale FOR DROP-OLDEST (not drop-newest, not blocking):
+    - LoRa interrupt rates are low (<100 Hz per channel in normal operation)
+    - A sustained 1000 Hz for 1 hour = ~100 MB worst case (each entry ~28 bytes)
+    - maxsize=10000 bounds memory to ~280 KB — negligible
+    - Under attack (malicious GPIO driver), dropping OLDEST interrupts preserves
+      REcent interrupts which are more relevant for packet reception
+    - Drop-newest would lose the current packet — worse for LoRa
+    - Blocking/async put would require GPIO driver to be async (breaking change)
+    - Monitoring threshold remains as early-warning log for operators
+
+    The drop-oldest implementation uses get_nowait() + put_nowait() on QueueFull,
+    which is atomic-enough for this use case (single producer sync context,
+    single consumer async task).
     """
 
     def __init__(self, monitor_queue_depth_threshold: int = 1000) -> None:
@@ -224,8 +245,13 @@ class InterruptBridge:
             )
         self._interrupt_map: dict[int, Rfm9xSx127xModule] = {}
         self._monitor_queue_depth_threshold = monitor_queue_depth_threshold
-        # Unbounded queue: asyncio.Queue() with no maxsize (BUG-6, Option A).
-        self._trigger_queue: asyncio.Queue[int] = asyncio.Queue()
+        self._max_queue_size = 10000
+        # Bounded queue with drop-oldest policy (CR-6 FIX): maxsize bounds memory
+        # to ~280 KB worst case, providing hard OOM protection against malicious
+        # GPIO drivers. See class docstring for the drop-oldest rationale.
+        self._trigger_queue: asyncio.Queue[int] = asyncio.Queue(
+            maxsize=self._max_queue_size
+        )
         self._running = False
         self._task: asyncio.Task[None] | None = None
 
@@ -242,15 +268,29 @@ class InterruptBridge:
     def trigger_interrupt(self, gpio_pin: int) -> None:
         """Called by GPIO driver when interrupt fires (sync context).
 
-        BUG-6 fix (Option A): the trigger queue is unbounded, so put_nowait never
-        raises asyncio.QueueFull and no interrupt can be silently dropped. This is
-        safe because LoRa interrupt rates are low (<100 Hz per channel) and each
-        entry is a small int (a GPIO pin number, ~28 bytes). The
-        ``monitor_queue_depth_threshold`` fires an early-warning log when the queue
-        depth becomes abnormal, giving the GPIO driver a backpressure signal to
-        surface the anomaly upstream rather than losing packet receptions.
+        CR-6 FIX: the trigger queue is bounded (maxsize=10000) with a drop-oldest
+        policy, so a malicious/buggy GPIO driver emitting high interrupt rates
+        cannot grow the queue without bound (hard OOM protection). On QueueFull,
+        the oldest interrupt is discarded to make room for the newest (see class
+        docstring for the rationale). The ``monitor_queue_depth_threshold`` still
+        fires an early-warning log when the queue depth becomes abnormal.
         """
-        self._trigger_queue.put_nowait(gpio_pin)
+        try:
+            self._trigger_queue.put_nowait(gpio_pin)
+        except asyncio.QueueFull:
+            # Drop oldest to make room for newest (see class docstring rationale).
+            try:
+                self._trigger_queue.get_nowait()  # Discard oldest
+                self._trigger_queue.put_nowait(gpio_pin)  # Insert newest
+            except asyncio.QueueEmpty:
+                pass  # Race: queue emptied between full and get; just drop new
+            logging.getLogger(__name__).warning(
+                "Interrupt queue full (maxsize=%d); dropped oldest interrupt "
+                "for GPIO %d to make room for newest. Malicious/buggy GPIO driver?",
+                self._max_queue_size,
+                gpio_pin,
+            )
+        # Monitoring threshold unchanged — early warning for operators.
         if self._trigger_queue.qsize() >= self._monitor_queue_depth_threshold:
             logging.getLogger(__name__).warning(
                 "Interrupt queue depth %d reached monitoring threshold %d; "

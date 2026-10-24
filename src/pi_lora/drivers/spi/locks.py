@@ -33,7 +33,7 @@ except ImportError as _aiologic_import_error:
 
 
 class SpiLock(Protocol):
-    """    Protocol describing the per-bus SPI critical-section lock.
+    """Protocol describing the per-bus SPI critical-section lock.
 
     Acquisition is async-only: callers must obtain the lock instance by awaiting
     :func:`get_bus_lock`, which is an async function requiring a running event
@@ -44,11 +44,8 @@ class SpiLock(Protocol):
     The concrete implementation is an :class:`aiologic.Lock`, a native dual-mode
     lock that *does* support sync ``with lock:`` at runtime — but only *after*
     the instance has been obtained by awaiting :func:`get_bus_lock()`. The
-    protocol deliberately does **not** declare sync ``__enter__``/``__exit__``
-    because declaring them would imply the lock is directly usable in a sync
-    context without first awaiting :func:`get_bus_lock()`, which is false. The
-    acquisition contract is async-only; the runtime dual-mode capability is an
-    implementation detail of :class:`aiologic.Lock`, not part of this protocol.
+    sync context manager methods are declared here to satisfy type checkers,
+    but callers MUST NOT use them before awaiting get_bus_lock().
 
     The registry hands back a single shared instance per bus number so that
     transfers on the same bus never interleave.
@@ -56,6 +53,20 @@ class SpiLock(Protocol):
 
     async def __aenter__(self) -> Self: ...
     async def __aexit__(self, exc_type: Any, exc_val: Any, exc_tb: Any) -> None: ...
+
+    # CR-4 FIX: The original SpiLock protocol omitted sync __enter__/__exit__, yet
+    # the concrete aiologic.Lock supports them at runtime. Type checkers (mypy
+    # --strict) could not therefore verify ``with lock:`` in synchronous code,
+    # leaving a static-vs-runtime mismatch. Declaring __enter__/__exit__ here
+    # closes that gap. The acquisition contract stays async-only on purpose: the
+    # sync context managers are only valid AFTER the instance is obtained by
+    # awaiting get_bus_lock(), because the registry hands back a coroutine-bound
+    # instance. Declaring them as directly usable in sync without awaiting
+    # get_bus_lock() first would be a lie (a caller holding a lock never obtained
+    # through the event loop would have no owner), so the docstring explicitly
+    # rejects that alternative and pins validity to post-acquisition.
+    def __enter__(self) -> Self: ...
+    def __exit__(self, exc_type: Any, exc_val: Any, exc_tb: Any) -> None: ...
 
     async def async_acquire(
         self, *, blocking: bool = True, timeout: float | None = None

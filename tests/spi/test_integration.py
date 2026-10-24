@@ -135,3 +135,28 @@ class TestFakeSpiBusKernelFactoryContext:
 
         assert bus._spidev is None
         assert sys.modules.get("spidev", None) == preexisting
+
+    @pytest.mark.asyncio
+    async def test_bus_operation_after_context_raises(self) -> None:
+        """CR-8 FIX: operating on a create_bus bus after the context exits raises RuntimeError.
+
+        After the ``with`` block exits the bus is closed (``_spidev`` is ``None``)
+        and the ``spidev`` patch is deactivated (``RealSpiBus._spidev_patch_active``
+        is ``False``). A retained bus reference whose :meth:`RealSpiBus.open` or
+        :meth:`RealSpiBus.xfer2` is then called surfaces a clear :class:`RuntimeError`
+        instead of a mysterious ``import spidev`` failure.
+        """
+        from tests.fakes import FakeSpiDev
+        from tests.spi.mock import FakeSpiBusKernelFactory
+
+        with FakeSpiBusKernelFactory().create_bus(bus=0, device=0) as bus:
+            assert isinstance(bus._spidev, FakeSpiDev)
+
+        assert bus._spidev is None
+
+        with pytest.raises(RuntimeError) as open_exc:
+            bus.open(0, 0)
+        assert "patch" in str(open_exc.value).lower()
+
+        with pytest.raises(RuntimeError):
+            await bus.xfer2(bytearray([0x01 | 0x80, 0x42]))

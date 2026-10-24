@@ -195,3 +195,29 @@ class TestBug4AiologicLazyImport:
         import pi_lora.drivers.rfm9x_sx127x_config_loader as loader
 
         assert loader._config_lock is None or loader._config_lock is not None
+
+    @pytest.mark.asyncio
+    async def test_concurrent_single_lock_and_shared_cache(self) -> None:
+        """FIX CR-1: concurrent coroutines must share ONE lock and one cached instance.
+
+        Launches many concurrent ``get_preloaded_config`` calls and asserts every
+        caller receives the same cached instance. This proves only a single
+        ``aiologic.Lock`` was created (double-checked locking) and that the cache
+        is mutually exclusive across all concurrent callers.
+        """
+        import pi_lora.drivers.rfm9x_sx127x_config_loader as loader
+
+        results = await asyncio.gather(
+            *[get_preloaded_config() for _ in range(50)]
+        )
+        assert all(isinstance(c, Rfm9xSx127xConfig) for c in results)
+        assert all(c is results[0] for c in results), (
+            "All concurrent callers must receive the same cached instance; "
+            "only one aiologic.Lock must have been created."
+        )
+        assert loader._config_lock is not None, (
+            "The _config_lock must be materialised after a concurrent run."
+        )
+        # A subsequent single call must still be the same shared instance.
+        single = await get_preloaded_config()
+        assert single is results[0]

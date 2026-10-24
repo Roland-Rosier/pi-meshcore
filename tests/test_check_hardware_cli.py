@@ -449,6 +449,25 @@ class TestCliEdgeCases:
         # Typer prints usage + an error message for invalid option values.
         assert ("Invalid value" in result.output or "error" in result.output.lower())
 
+    def test_detect_modules_invalid_module_type_rejected(self) -> None:
+        """``--ce0 invalid`` is rejected by the AsyncTyper CLI (FIX CR-7).
+
+        Before the AsyncTyper migration the sync Typer returned ``None`` on error,
+        so ``_entry_points.check_hardware()`` yielded exit code ``0`` and rejected
+        input was silently accepted. ``async_typer.AsyncTyper`` drives the async
+        body through a synchronous runner and returns a genuine Click exit code, so
+        a rejected module type now yields a non-zero exit code (Click reports ``2``
+        for ``typer.BadParameter``) instead of the pre-fix ``0``.
+        """
+        runner = CliRunner()
+        result = runner.invoke(cli_app, ["detect-modules", "--ce0", "invalid"])
+
+        assert result.exit_code != 0, (
+            f"Expected a non-zero exit code on invalid module type but got "
+            f"{result.exit_code}. Output: {result.output}"
+        )
+        assert "Invalid value" in result.output or "error" in result.output.lower()
+
     def test_output_format_single_pin_mismatch(self) -> None:
         """Verify full output format for single-pin mismatch scenario.
 
@@ -653,7 +672,8 @@ class TestLoggingAndSysPath:
     """Phase 3 & 4: the sys.path side-effect block is gone and
     ``detect_modules`` configures logging when invoked directly."""
 
-    def test_detect_modules_configures_logging_when_called_directly(self) -> None:
+    @pytest.mark.asyncio
+    async def test_detect_modules_configures_logging_when_called_directly(self) -> None:
         """Calling ``detect_modules`` directly must configure logging first."""
         import pi_lora.cli.check_hardware as _ch
 
@@ -669,7 +689,7 @@ class TestLoggingAndSysPath:
         with patch(_DETECTOR_PATCH_PATH, return_value=mock_detector), patch(
             "pi_lora.cli._logging.setup_logging"
         ) as _spy:
-            _ch.detect_modules(ce0=None, ce1=None, extended=False)
+            await _ch.detect_modules(ce0=None, ce1=None, extended=False)
 
         _spy.assert_called_once()
 

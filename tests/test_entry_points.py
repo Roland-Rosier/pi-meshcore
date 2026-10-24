@@ -77,6 +77,37 @@ def test_entry_point_runs_cli_and_exits_cleanly(name: str) -> None:
         assert "coroutine" not in _lowered, _note
 
 
+def test_check_hardware_entry_point_invalid_input_rejected() -> None:
+    """``check_hardware()`` entry point rejects invalid input (FIX CR-7).
+
+    The wrapper performs ``cast(int, check_hardware_app())``. With AsyncTyper the
+    app drives the async body through a synchronous runner and returns a genuine
+    Click exit code, so ``--ce0 invalid`` yields a non-zero exit code (Click reports
+    ``2`` for ``typer.BadParameter``) instead of the pre-fix ``0`` that silently
+    accepted rejected input. The rejected alternative (a ``cast`` hack over a sync
+    Typer returning ``None``) would have yielded exit code 0.
+    """
+    _old_argv: list[str] = sys.argv
+    sys.argv = ["check-hardware", "detect-modules", "--ce0", "invalid"]
+    try:
+        with warnings.catch_warnings(record=True) as _log:
+            warnings.simplefilter("always")
+            try:
+                _code: Any = check_hardware()
+            except SystemExit as _exc:
+                _code = _exc.code
+            _warnings: list[str] = [str(_w) for _w in _log]
+    finally:
+        sys.argv = _old_argv
+
+    assert isinstance(_code, int), "check_hardware did not return an int exit code"
+    assert _code != 0, f"check-hardware --ce0 invalid should reject input, got {_code}"
+    for _note in _warnings:
+        _lowered = _note.lower()
+        assert "never awaited" not in _lowered, _note
+        assert "coroutine" not in _lowered, _note
+
+
 def test_entry_points_expose_all_four_wrappers() -> None:
     """The module exposes exactly the four console entry-point wrappers."""
     import pi_lora.cli._entry_points as _ep

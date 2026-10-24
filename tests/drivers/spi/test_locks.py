@@ -244,3 +244,34 @@ class TestLockProtocolSignatures:
         """The concrete lock's ``async_acquire`` is a coroutine function."""
         lock = await get_bus_lock(4)
         assert inspect.iscoroutinefunction(lock.async_acquire) is True
+
+    def test_concrete_lock_supports_sync_context_manager_after_async_acquisition(self) -> None:
+        """The concrete ``aiologic.Lock`` exposes sync ``__enter__``/``__exit__``.
+
+        CR-4. Before the fix the ``SpiLock`` protocol omitted ``__enter__``/
+        ``__exit__`` even though ``aiologic.Lock`` supports them at runtime, so
+        type checkers could not verify ``with lock:`` synchronously. The protocol
+        now declares them so the static-vs-runtime gap is closed. ``__members__``
+        is a static-only attribute (absent at runtime), so the ground truth is the
+        concrete instance: it must expose every protocol member -- including the
+        newly declared sync context managers -- and ``with lock:`` must work after
+        the instance is obtained by awaiting ``get_bus_lock()``.
+        """
+        lock = asyncio.new_event_loop().run_until_complete(get_bus_lock(6))
+        protocol_members = (
+            "__enter__",
+            "__exit__",
+            "__aenter__",
+            "__aexit__",
+            "async_acquire",
+            "async_release",
+            "locked",
+        )
+        for member_name in protocol_members:
+            assert hasattr(lock, member_name), (
+                f"concrete lock is missing protocol member {member_name!r}"
+            )
+        assert lock.locked() is False
+        with lock:
+            assert lock.locked() is True
+        assert lock.locked() is False

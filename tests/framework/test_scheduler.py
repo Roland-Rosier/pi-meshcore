@@ -219,6 +219,75 @@ class TestTimerScheduler:
         assert ts._failure_counts.get(module) == 6
         assert ts._last_failure_log.get(module) is not None
 
+    @pytest.mark.asyncio
+    async def test_timer_task_default_interval_applies_backoff(self) -> None:
+        # CR-5 FIX: the default interval path (module not registered with a
+        # custom interval, so ``interval is None`` resolved to
+        # ``_default_interval``) must ALSO apply exponential backoff. Plan-11
+        # skipped backoff here, reintroducing unbounded error spam.
+        class _AlwaysFailingQueue:
+            async def put(self, item: object) -> None:
+                raise RuntimeError("event_queue full")
+
+            async def get(self) -> object:
+                return None
+
+        module = MagicMock()
+        module.event_queue = _AlwaysFailingQueue()
+        ts = TimerScheduler(default_interval=0.01)
+        ts.register_module(module, None)
+        assert ts.get_interval(module) is None
+        ts._running = True
+
+        recorded: list[float] = []
+
+        async def fake_sleep(seconds: float) -> None:
+            recorded.append(seconds)
+            if len(recorded) >= 6:
+                ts._running = False
+
+        with patch("asyncio.sleep", side_effect=fake_sleep):
+            await ts._timer_task(module)
+
+        # Same exponential backoff as the custom interval path: min(2 ** k, 60).
+        expected = [min(2 ** i, 60) for i in range(1, 7)]
+        assert recorded == expected
+        assert ts._failure_counts.get(module) == 6
+        assert ts._last_failure_log.get(module) is not None
+
+    @pytest.mark.asyncio
+    async def test_timer_task_custom_interval_backoff_matches_formula(
+        self,
+    ) -> None:
+        # Custom interval with N consecutive failures must produce sleeps of
+        # min(2 ** k, 60), identical to the default interval path (CR-5).
+        class _AlwaysFailingQueue:
+            async def put(self, item: object) -> None:
+                raise RuntimeError("event_queue full")
+
+            async def get(self) -> object:
+                return None
+
+        module = MagicMock()
+        module.event_queue = _AlwaysFailingQueue()
+        ts = TimerScheduler(default_interval=0.01)
+        ts.register_module(module, 0.5)
+        ts._running = True
+
+        recorded: list[float] = []
+
+        async def fake_sleep(seconds: float) -> None:
+            recorded.append(seconds)
+            if len(recorded) >= 5:
+                ts._running = False
+
+        with patch("asyncio.sleep", side_effect=fake_sleep):
+            await ts._timer_task(module)
+
+        expected = [min(2 ** i, 60) for i in range(1, 6)]
+        assert recorded == expected
+        assert ts._failure_counts.get(module) == 5
+
 
 class TestIdlePacer:
     """Verify IdlePacer manages idle-enabled modules."""
@@ -370,9 +439,9 @@ class TestInterruptBridge:
         assert bridge._task is not None
         await bridge.stop()
 
-    def test_interrupt_bridge_unbounded_queue(self) -> None:
+    def test_interrupt_bridge_bounded_queue(self) -> None:
         bridge = InterruptBridge()
-        assert bridge._trigger_queue.maxsize == 0
+        assert bridge._trigger_queue.maxsize == bridge._max_queue_size == 10000
         bridge.trigger_interrupt(25)
         bridge.trigger_interrupt(26)
         bridge.trigger_interrupt(27)
@@ -384,7 +453,7 @@ class TestInterruptBridge:
 
     def test_interrupt_bridge_monitoring_threshold_logs(self) -> None:
         bridge = InterruptBridge(monitor_queue_depth_threshold=2)
-        assert bridge._trigger_queue.maxsize == 0
+        assert bridge._trigger_queue.maxsize == 10000
         with patch("logging.getLogger") as mock_get_logger:
             bridge.trigger_interrupt(25)
             bridge.trigger_interrupt(26)
@@ -399,6 +468,32 @@ class TestInterruptBridge:
             assert args[1] == 3
             assert args[2] == 2
             assert args[3] == 27
+
+    def test_interrupt_bridge_bounded_queue_drop_oldest(self) -> None:
+        # CR-6 FIX: the trigger queue is bounded (maxsize=10000) with a
+        # drop-oldest policy. A burst of >10000 interrupts must never grow the
+        # queue past maxsize (hard OOM protection), and after overflow the queue
+        # must retain the most recent pins (drop-oldest, not drop-newest).
+        bridge = InterruptBridge()
+        assert bridge._max_queue_size == 10000
+        assert bridge._trigger_queue.maxsize == 10000
+        # Fill to capacity with pins 0..9999.
+        for gpio_pin in range(10000):
+            bridge.trigger_interrupt(gpio_pin)
+        assert bridge._trigger_queue.qsize() == 10000
+        # Overflow with pins 10000..19999: each new insert drops the oldest.
+        for gpio_pin in range(10000, 20000):
+            bridge.trigger_interrupt(gpio_pin)
+        # Memory bound: depth never exceeded maxsize; still exactly maxsize.
+        assert bridge._trigger_queue.qsize() == 10000
+        # Drop-oldest: oldest surviving pin is 10000, newest is 19999.
+        pins: list[int] = []
+        while not bridge._trigger_queue.empty():
+            pins.append(bridge._trigger_queue.get_nowait())
+        assert len(pins) == 10000
+        assert pins[0] == 10000
+        assert pins[-1] == 19999
+        assert bridge._trigger_queue.empty()
 
     @pytest.mark.asyncio
     async def test_interrupt_bridge_monitoring_threshold_rejects_non_positive(

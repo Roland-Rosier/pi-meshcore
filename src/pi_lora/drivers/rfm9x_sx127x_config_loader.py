@@ -30,7 +30,7 @@ from pi_lora.drivers.rfm9x_sx127x_config_model import (
 # Default config resource path as configuration string (not magic).
 _DEFAULT_CONFIG_RESOURCE: str = "pi_lora.drivers.configs:rfm9x_sx127x_config.yaml"
 
-# Lazy singleton cache and lock.
+# Lazy singleton cache and locks.
 #
 # NOTE (BUG-4 / Plan-11 Option A): ``aiologic`` is imported lazily inside
 # ``get_preloaded_config`` only and NEVER at module scope. Plan-10 Phase-3
@@ -43,8 +43,25 @@ _DEFAULT_CONFIG_RESOURCE: str = "pi_lora.drivers.configs:rfm9x_sx127x_config.yam
 # functions completely aiologic-free. Option B (making the sync public functions
 # async or shipping a pure-python lock) was rejected because it would change the
 # public API contract of the CLI commands that call these functions synchronously.
+#
+# NOTE (FIX CR-1 / Plan-12 Option A1): The original lazy lock used a single
+# ``if _config_lock is None:`` guard with no synchronisation, so two coroutines
+# racing on the first load could both pass the ``None`` check and each create a
+# distinct ``aiologic.Lock``. That broke cache mutual-exclusion: the second lock
+# would not observe the instance created by the first, producing two different
+# cached instances across concurrent callers. Double-checked locking fixes this
+# with a module-level ``_init_lock`` that serialises ONLY the lock materialisation
+# (never the cache mutation), so exactly one ``_config_lock`` is created and all
+# callers share a single lock and a single cached instance. The ``_init_lock``
+# stays lazy (also ``Any = None``) so the sync public functions remain aiologic-
+# free. Alternatives rejected: promoting ``aiologic`` to a module-scope import
+# was rejected because it reintroduces the BUG-4 regression (breaks sync public
+# APIs when aiologic is absent); a module-level eager ``_init_lock`` was rejected
+# for the same reason; a plain ``asyncio.Lock`` created at module scope was
+# rejected because it would also make the module aiologic-dependent at import.
 _config_cache: Rfm9xSx127xConfig | None = None
 _config_lock: Any = None
+_init_lock: Any = None
 
 
 def _resolve_default_path() -> Path:
@@ -152,6 +169,7 @@ async def get_preloaded_config(
     """
     global _config_cache
     global _config_lock
+    global _init_lock
 
     # Override path bypasses cache entirely.
     if config_path is not None:
@@ -166,10 +184,21 @@ async def get_preloaded_config(
     # here rather than at module scope to keep the sync public functions
     # (load_config / load_family_config) free of the dependency. ``_config_lock``
     # starts as ``None`` and is materialised on the first coroutine run.
+    #
+    # Double-checked locking (FIX CR-1 / Plan-12 Option A1): the initial ``None``
+    # guard is race-free because it is executed under the module-level
+    # ``_init_lock`` before re-checking ``_config_lock`` inside the lock, so only
+    # one coroutine ever creates the ``aiologic.Lock`` and all callers share it.
     if _config_lock is None:
-        import aiologic
+        if _init_lock is None:
+            import aiologic
 
-        _config_lock = aiologic.Lock()
+            _init_lock = aiologic.Lock()
+        async with _init_lock:
+            if _config_lock is None:  # Re-check inside lock
+                import aiologic
+
+                _config_lock = aiologic.Lock()
 
     async with _config_lock:
         # Double-checked locking: re-verify inside the lock to protect ALL cache mutations.
