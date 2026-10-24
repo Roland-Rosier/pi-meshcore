@@ -89,7 +89,7 @@ class TestRealSpiBusFactory:
         bus = RealSpiBusFactory().create(bus=0, device=1)
 
         assert bus.bus_number == 0
-        assert bus.device_number == 0
+        assert bus.device_number == 1
 
         with spidev_kernel_patch(fake_kernel):
             bus.open(bus=0, device=1)

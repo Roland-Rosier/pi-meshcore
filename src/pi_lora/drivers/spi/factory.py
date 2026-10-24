@@ -49,4 +49,7 @@ class RealSpiBusFactory:
         """
         from .bus import RealSpiBus
 
-        return RealSpiBus()
+        bus_instance = RealSpiBus()
+        bus_instance.bus_number = bus
+        bus_instance.device_number = device
+        return bus_instance

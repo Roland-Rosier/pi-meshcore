@@ -154,6 +154,8 @@ class MockSpiBusFactory:
         violation that Plan-11 Phase 5 resolves.
         """
         mock_bus = MockSpiBus(max_speed_hz=1000000, mode=0, lsbfirst=False, no_cs=False)
+        mock_bus.bus_number = bus
+        mock_bus.device_number = device
         return mock_bus
 
 

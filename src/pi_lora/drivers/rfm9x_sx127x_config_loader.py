@@ -16,6 +16,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import importlib.resources
 from pathlib import Path
 from typing import Any
@@ -30,38 +31,19 @@ from pi_lora.drivers.rfm9x_sx127x_config_model import (
 # Default config resource path as configuration string (not magic).
 _DEFAULT_CONFIG_RESOURCE: str = "pi_lora.drivers.configs:rfm9x_sx127x_config.yaml"
 
-# Lazy singleton cache and locks.
-#
-# NOTE (BUG-4 / Plan-11 Option A): ``aiologic`` is imported lazily inside
-# ``get_preloaded_config`` only and NEVER at module scope. Plan-10 Phase-3
-# incorrectly promoted aiologic to a hard import-time dependency because the
-# ``_config_lock`` guarding the singleton cache was created at module scope.
-# That broke the sync public ``load_config`` / ``load_family_config`` APIs used
-# by the CLI config commands whenever aiologic was not installed. Option A of
-# Plan-11 fixes the regression by making the lock a lazy ``Any`` singleton
-# initialised inside the async singleton path only, leaving the sync public
-# functions completely aiologic-free. Option B (making the sync public functions
-# async or shipping a pure-python lock) was rejected because it would change the
-# public API contract of the CLI commands that call these functions synchronously.
-#
-# NOTE (FIX CR-1 / Plan-12 Option A1): The original lazy lock used a single
-# ``if _config_lock is None:`` guard with no synchronisation, so two coroutines
-# racing on the first load could both pass the ``None`` check and each create a
-# distinct ``aiologic.Lock``. That broke cache mutual-exclusion: the second lock
-# would not observe the instance created by the first, producing two different
-# cached instances across concurrent callers. Double-checked locking fixes this
-# with a module-level ``_init_lock`` that serialises ONLY the lock materialisation
-# (never the cache mutation), so exactly one ``_config_lock`` is created and all
-# callers share a single lock and a single cached instance. The ``_init_lock``
-# stays lazy (also ``Any = None``) so the sync public functions remain aiologic-
-# free. Alternatives rejected: promoting ``aiologic`` to a module-scope import
-# was rejected because it reintroduces the BUG-4 regression (breaks sync public
-# APIs when aiologic is absent); a module-level eager ``_init_lock`` was rejected
-# for the same reason; a plain ``asyncio.Lock`` created at module scope was
-# rejected because it would also make the module aiologic-dependent at import.
+# GUARD LOCK: Use stdlib asyncio.Lock for ONE-TIME initialization guard ONLY.
+# Rationale:
+# - This project uses aiologic for ALL runtime synchronization (see locks.py, scheduler.py, application.py)
+# - The guard lock _init_lock is used ONLY during first call to get_preloaded_config()
+#   to serialize creation of the real aiologic.Lock (_config_lock)
+# - After initialization, _init_lock is NEVER used again
+# - Creating aiologic.Lock at module level would import aiologic at import time,
+#   breaking BUG-4 fix (sync CLI load_config/load_family_config must work without aiologic)
+# - asyncio.Lock is safe to create at module level (no running loop required in Python 3.11+)
+# - This is a deliberate, well-contained exception to the "aiologic-only" rule
+_init_lock: asyncio.Lock = asyncio.Lock()
 _config_cache: Rfm9xSx127xConfig | None = None
 _config_lock: Any = None
-_init_lock: Any = None
 
 
 def _resolve_default_path() -> Path:
@@ -169,7 +151,6 @@ async def get_preloaded_config(
     """
     global _config_cache
     global _config_lock
-    global _init_lock
 
     # Override path bypasses cache entirely.
     if config_path is not None:
@@ -190,11 +171,7 @@ async def get_preloaded_config(
     # ``_init_lock`` before re-checking ``_config_lock`` inside the lock, so only
     # one coroutine ever creates the ``aiologic.Lock`` and all callers share it.
     if _config_lock is None:
-        if _init_lock is None:
-            import aiologic
-
-            _init_lock = aiologic.Lock()
-        async with _init_lock:
+        async with _init_lock:  # Race-free guard
             if _config_lock is None:  # Re-check inside lock
                 import aiologic
 

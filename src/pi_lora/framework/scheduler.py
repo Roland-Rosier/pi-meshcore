@@ -18,6 +18,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import queue
 import time
 from typing import TYPE_CHECKING, Protocol
 
@@ -217,24 +218,30 @@ class IdlePacer:
 
 
 class InterruptBridge:
-    """Routes GPIO interrupts to modules via a BOUNDED asyncio.Queue.
+    """Routes GPIO interrupts to modules via a thread-safe producer queue.
 
-    CR-6 FIX: The queue is bounded (maxsize=10000) with drop-oldest policy
+    CR-6 FIX: Both queues are bounded (maxsize=10000) with a drop-oldest policy
     to provide HARD OOM protection against malicious/buggy GPIO drivers.
+
+    NR-5 FIX (THREAD SAFETY): trigger_interrupt() is called from GPIO interrupt
+    callbacks running in arbitrary threads (lgpio/RPi.GPIO/gpiod are NOT the
+    event loop thread). A single asyncio.Queue is NOT thread-safe, so the
+    producer side uses queue.Queue (thread-safe) via put_nowait(). An async task
+    (_drain_sync_queue) drains queue.Queue into the asyncio.Queue consumer in the
+    event loop thread only, where asyncio.Queue.put_nowait() is safe. The
+    consumer task (_interrupt_task) reads the asyncio.Queue.
 
     RATIONale FOR DROP-OLDEST (not drop-newest, not blocking):
     - LoRa interrupt rates are low (<100 Hz per channel in normal operation)
     - A sustained 1000 Hz for 1 hour = ~100 MB worst case (each entry ~28 bytes)
     - maxsize=10000 bounds memory to ~280 KB — negligible
     - Under attack (malicious GPIO driver), dropping OLDEST interrupts preserves
-      REcent interrupts which are more relevant for packet reception
+      recent interrupts which are more relevant for packet reception
     - Drop-newest would lose the current packet — worse for LoRa
-    - Blocking/async put would require GPIO driver to be async (breaking change)
     - Monitoring threshold remains as early-warning log for operators
 
-    The drop-oldest implementation uses get_nowait() + put_nowait() on QueueFull,
-    which is atomic-enough for this use case (single producer sync context,
-    single consumer async task).
+    The producer drop-oldest implementation uses get_nowait() + put_nowait() on
+    queue.Full, which is atomic-enough for this use case.
     """
 
     def __init__(self, monitor_queue_depth_threshold: int = 1000) -> None:
@@ -246,14 +253,20 @@ class InterruptBridge:
         self._interrupt_map: dict[int, Rfm9xSx127xModule] = {}
         self._monitor_queue_depth_threshold = monitor_queue_depth_threshold
         self._max_queue_size = 10000
-        # Bounded queue with drop-oldest policy (CR-6 FIX): maxsize bounds memory
-        # to ~280 KB worst case, providing hard OOM protection against malicious
-        # GPIO drivers. See class docstring for the drop-oldest rationale.
-        self._trigger_queue: asyncio.Queue[int] = asyncio.Queue(
+        # Thread-safe producer queue for the GPIO interrupt thread. queue.Queue
+        # is safe to put_nowait() and get_nowait() from any thread. Bounded to
+        # ~280 KB worst case (CR-6 FIX) with a drop-oldest policy.
+        self._trigger_queue: queue.Queue[int] = queue.Queue(
+            maxsize=self._max_queue_size
+        )
+        # Async consumer queue for the event loop thread. Drained from
+        # _trigger_queue by _drain_sync_queue; read by _interrupt_task.
+        self._async_trigger_queue: asyncio.Queue[int] = asyncio.Queue(
             maxsize=self._max_queue_size
         )
         self._running = False
         self._task: asyncio.Task[None] | None = None
+        self._drain_task: asyncio.Task[None] | None = None
 
     def register_interrupt(self, gpio_pin: int, module: Rfm9xSx127xModule) -> None:
         if gpio_pin in self._interrupt_map:
@@ -263,26 +276,26 @@ class InterruptBridge:
                 gpio_pin,
             )
         self._interrupt_map[gpio_pin] = module
-        # Task is created in start() only.
+        # Tasks are created in start() only.
 
     def trigger_interrupt(self, gpio_pin: int) -> None:
-        """Called by GPIO driver when interrupt fires (sync context).
+        """Called by GPIO driver when interrupt fires (sync context, ANY thread).
 
-        CR-6 FIX: the trigger queue is bounded (maxsize=10000) with a drop-oldest
-        policy, so a malicious/buggy GPIO driver emitting high interrupt rates
-        cannot grow the queue without bound (hard OOM protection). On QueueFull,
+        NR-5 FIX: thread-safe via queue.Queue.put_nowait(), safe from any thread.
+        Bounded (CR-6 FIX) with a drop-oldest policy on queue.Full to prevent
+        unbounded memory growth from a malicious/buggy GPIO driver. On queue.Full
         the oldest interrupt is discarded to make room for the newest (see class
-        docstring for the rationale). The ``monitor_queue_depth_threshold`` still
-        fires an early-warning log when the queue depth becomes abnormal.
+        docstring for the rationale). The monitoring threshold still fires an
+        early-warning log when the queue depth becomes abnormal.
         """
         try:
             self._trigger_queue.put_nowait(gpio_pin)
-        except asyncio.QueueFull:
+        except queue.Full:
             # Drop oldest to make room for newest (see class docstring rationale).
             try:
                 self._trigger_queue.get_nowait()  # Discard oldest
                 self._trigger_queue.put_nowait(gpio_pin)  # Insert newest
-            except asyncio.QueueEmpty:
+            except queue.Empty:
                 pass  # Race: queue emptied between full and get; just drop new
             logging.getLogger(__name__).warning(
                 "Interrupt queue full (maxsize=%d); dropped oldest interrupt "
@@ -304,16 +317,45 @@ class InterruptBridge:
         self._running = True
         if self._task is None or self._task.done():
             self._task = asyncio.create_task(self._interrupt_task())
+        if self._drain_task is None or self._drain_task.done():
+            self._drain_task = asyncio.create_task(self._drain_sync_queue())
 
     async def stop(self) -> None:
         self._running = False
         if self._task and not self._task.done():
             self._task.cancel()
             await asyncio.gather(self._task, return_exceptions=True)
+        if self._drain_task and not self._drain_task.done():
+            self._drain_task.cancel()
+            await asyncio.gather(self._drain_task, return_exceptions=True)
+
+    async def _drain_sync_queue(self) -> None:
+        """Drain thread-safe producer queue into async consumer queue.
+
+        Runs only in the event loop thread (safe for asyncio.Queue). Yields to
+        the loop with a tiny sleep when the producer queue is empty to avoid a
+        busy-wait that would otherwise starve the consumer task.
+        """
+        while self._running:
+            try:
+                gpio_pin = self._trigger_queue.get_nowait()
+            except queue.Empty:
+                await asyncio.sleep(0.001)  # Yield to event loop; nothing to drain
+                continue
+            try:
+                self._async_trigger_queue.put_nowait(gpio_pin)
+            except asyncio.QueueFull:
+                # Should not happen if both queues share maxsize and the consumer
+                # keeps up, but handle gracefully with a drop-oldest policy.
+                try:
+                    self._async_trigger_queue.get_nowait()
+                    self._async_trigger_queue.put_nowait(gpio_pin)
+                except asyncio.QueueEmpty:
+                    pass
 
     async def _interrupt_task(self) -> None:
         while self._running:
-            gpio_pin = await self._trigger_queue.get()
+            gpio_pin = await self._async_trigger_queue.get()
             module = self._interrupt_map.get(gpio_pin)
             if module is None:
                 logging.getLogger(__name__).warning(

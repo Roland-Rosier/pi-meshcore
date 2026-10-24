@@ -24,14 +24,6 @@ class _AiologicImportError(ImportError):
         super().__init__(message)
 
 
-try:
-    import aiologic
-except ImportError as _aiologic_import_error:
-    raise _AiologicImportError(
-        "aiologic is required for SPI locking. Install with: pip install aiologic"
-    ) from _aiologic_import_error
-
-
 class SpiLock(Protocol):
     """Protocol describing the per-bus SPI critical-section lock.
 
@@ -83,8 +75,10 @@ class SpiLock(Protocol):
     def locked(self) -> bool: ...
 
 
-_bus_locks: dict[int, aiologic.Lock] = {}
-_registry_lock: aiologic.Lock = aiologic.Lock()
+# LAZY INITIALIZATION - no aiologic import at module level
+_bus_locks: dict[int, Any] = {}
+_registry_lock: Any = None
+_aiologic_module: Any = None
 
 
 async def get_bus_lock(bus_number: int) -> SpiLock:
@@ -101,7 +95,18 @@ async def get_bus_lock(bus_number: int) -> SpiLock:
     Returns:
         A :class:`SpiLock` (concretely an :class:`aiologic.Lock`) for the given bus number.
     """
+    global _registry_lock, _aiologic_module
+    if _aiologic_module is None:
+        try:
+            import aiologic
+            _aiologic_module = aiologic
+        except ImportError as e:
+            raise _AiologicImportError(
+                "aiologic is required for SPI locking. Install with: pip install aiologic"
+            ) from e
+    if _registry_lock is None:
+        _registry_lock = _aiologic_module.Lock()
     async with _registry_lock:
         if bus_number not in _bus_locks:
-            _bus_locks[bus_number] = aiologic.Lock()
+            _bus_locks[bus_number] = _aiologic_module.Lock()
         return _bus_locks[bus_number]

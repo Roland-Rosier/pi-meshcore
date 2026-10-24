@@ -51,6 +51,18 @@ class TestRealSpiBusFactory:
         bus = factory.create(bus=0, device=0)
         assert _is_spi_bus(bus)
 
+    def test_real_spi_bus_factory_create_stores_params(self) -> None:
+        from unittest.mock import patch
+
+        factory = RealSpiBusFactory()
+        bus = factory.create(bus=2, device=3)
+        assert bus.bus_number == 2
+        assert bus.device_number == 3
+        # open() should use stored values with no args
+        with patch('spidev.SpiDev') as mock_spidev:
+            bus.open()
+            mock_spidev.return_value.open.assert_called_with(2, 3)
+
 
 class TestMockSpiBusFactory:
     """Verify ``MockSpiBusFactory`` produces ``MockSpiBus`` instances."""
@@ -82,6 +94,12 @@ class TestMockSpiBusFactory:
         bus = factory.create(bus=1, device=2)
         assert bus._opened is False
 
+    def test_mock_spi_bus_factory_create_stores_params(self) -> None:
+        factory = MockSpiBusFactory()
+        bus = factory.create(bus=1, device=4)
+        assert bus.bus_number == 1
+        assert bus.device_number == 4
+
 
 class TestFactoryProtocol:
     """Verify factories satisfy the ``SpiBusFactory`` protocol."""
@@ -96,3 +114,21 @@ class TestFactoryProtocol:
         factory: SpiBusFactory = MockSpiBusFactory()
         bus = factory.create(bus=0, device=0)
         assert _is_spi_bus(bus)
+
+
+class TestFactorySharedContract:
+    """Cross-module audit: both factories store params identically.
+
+    Verifies :class:`RealSpiBusFactory` and :class:`MockSpiBusFactory` record
+    ``bus``/``device`` on the returned bus the same way, closing the BUG-5
+    regression gap between the two modules.
+    """
+
+    def test_both_factories_store_params(self) -> None:
+        from src.pi_lora.drivers.spi.factory import RealSpiBusFactory
+        real_bus = RealSpiBusFactory().create(bus=5, device=6)
+        assert real_bus.bus_number == 5
+        assert real_bus.device_number == 6
+        mock_bus = MockSpiBusFactory().create(bus=5, device=6)
+        assert mock_bus.bus_number == 5
+        assert mock_bus.device_number == 6

@@ -117,22 +117,26 @@ class RealSpiBus:
                 "the test to keep the context manager open for the bus's lifetime."
             )
 
-    def open(self, bus: int, device: int) -> None:
-        """Open the SPI bus for the given device.
+    def open(self, bus: int | None = None, device: int | None = None) -> None:
+        """Open the SPI bus. Uses stored bus/device from create() if not provided.
 
         Args:
-            bus: The bus identifier.
-            device: The device identifier.
+            bus: The bus identifier. If None, the value stored by create() is used.
+            device: The device identifier. If None, the value stored by create() is used.
         """
         # CR-8 FIX: ensure the spidev kernel patch is active before importing it.
         self._verify_patch_active()
         # Note: spidev is a real python library; do not assume otherwise
         import spidev
 
-        self.bus_number = bus
-        self.device_number = device
+        # Use stored values if not overridden
+        if bus is not None:
+            self.bus_number = bus
+        if device is not None:
+            self.device_number = device
+
         self._spidev = spidev.SpiDev()
-        self._spidev.open(bus, device)
+        self._spidev.open(self.bus_number, self.device_number)
 
     def close(self) -> None:
         """Close the SPI bus."""

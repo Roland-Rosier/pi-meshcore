@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import traceback
 from pathlib import Path
 from typing import Any
 
@@ -45,43 +44,31 @@ async def test_hardware_impl(
     application = Application(config=None)
 
     try:
-        radio_configs = await application.get_assembly_config(
-            assembly_name=assembly_name,
-            spi_device_id=spi,
-            ce_number=ce,
-            config_path=custom_path,
-        )
-    except AssemblyNotFoundError as e:
-        console.print(f"[red]Error:[/red] {e}")
-        raise typer.Exit(code=1) from None
-    except DeviceAttachmentNotFoundError as e:
-        console.print(f"[red]Error:[/red] {e}")
-        raise typer.Exit(code=1) from None
-
-    if isinstance(radio_configs, RadioInstanceConfig):
-        radio_configs = [radio_configs]
-
-    if not radio_configs:
-        console.print("[red]Error:[/red] No modules match the given filters")
-        raise typer.Exit(code=1)
-
-    # Start application (creates modules, starts event loops, registers scheduler).
-    # start() lives inside an outer try whose finally always calls application.stop(),
-    # guaranteeing clean shutdown even when start() fails.
-    try:
         try:
-            await application.start(assembly_name=assembly_name)
+            radio_configs = await application.get_assembly_config(
+                assembly_name=assembly_name,
+                spi_device_id=spi,
+                ce_number=ce,
+                config_path=custom_path,
+            )
         except AssemblyNotFoundError as e:
             console.print(f"[red]Error:[/red] {e}")
             raise typer.Exit(code=1) from None
         except DeviceAttachmentNotFoundError as e:
             console.print(f"[red]Error:[/red] {e}")
             raise typer.Exit(code=1) from None
-        except Exception as e:
-            console.print(f"[red]Error:[/red] Failed to start application: {e!r}")
-            console.print("[red]Traceback:[/red]")
-            traceback.print_exc()
-            raise typer.Exit(code=1) from None
+
+        if isinstance(radio_configs, RadioInstanceConfig):
+            radio_configs = [radio_configs]
+
+        if not radio_configs:
+            console.print("[red]Error:[/red] No modules match the given filters")
+            raise typer.Exit(code=1)
+
+        # Start application (creates modules, starts event loops, registers scheduler).
+        # start() lives inside an outer try whose finally always calls application.stop(),
+        # guaranteeing clean shutdown even when start() fails.
+        await application.start(assembly_name=assembly_name)
 
         module_manager: Any = application.module_manager
         if module_manager is None:
@@ -89,8 +76,6 @@ async def test_hardware_impl(
             raise typer.Exit(code=1)
 
         all_modules = module_manager.get_all_modules()
-        if all_modules is None:
-            all_modules = []
 
         # Filter to target modules
         target_set = {(cfg.spi_device_id, cfg.ce_number) for cfg in radio_configs}
@@ -121,6 +106,8 @@ async def test_hardware_impl(
                 raise typer.Exit(code=1)
 
         console.print("[green]✓[/green] All modules transitioned to RESET_STATE successfully")
+    except BaseException:
+        raise
     finally:
         # Clean shutdown via Application — always runs, even when start() failed.
         await application.stop()

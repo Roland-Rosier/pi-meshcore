@@ -194,8 +194,10 @@ class TestHardwareAssemblyNotFoundError:
     async def test_assembly_not_found_propagates(self) -> None:
         """Run ``hardware nonexistent`` when the assembly is missing.
 
-        Verify exit code 1, the error message, and ``stop()`` NOT awaited
-        (the error is raised before ``start()``).
+        Verify exit code 1, the error message, and ``stop()`` awaited once.
+        NR-4 wraps the whole body in a ``try`` whose ``finally`` always calls
+        ``application.stop()``, so cleanup runs even when the error fires before
+        ``start()``.
         """
         capture = StringIO()
         mock_application = _build_mock_application()
@@ -209,7 +211,7 @@ class TestHardwareAssemblyNotFoundError:
 
         assert exit_code == 1, f"Expected exit 1, got {exit_code}: {capture.getvalue()}"
         assert "Error:" in capture.getvalue()
-        mock_application.stop.assert_not_awaited()
+        mock_application.stop.assert_awaited_once()
 
 
 # ---------------------------------------------------------------------------
@@ -223,7 +225,8 @@ class TestHardwareDeviceAttachmentNotFoundError:
     async def test_device_attachment_not_found_propagates(self) -> None:
         """Run ``hardware default --spi 99 --ce 99`` when no device matches.
 
-        Verify exit code 1, the error message, and ``stop()`` NOT awaited.
+        Verify exit code 1, the error message, and ``stop()`` awaited once.
+        NR-4's ``finally`` always calls ``application.stop()``.
         """
         capture = StringIO()
         mock_application = _build_mock_application()
@@ -237,7 +240,7 @@ class TestHardwareDeviceAttachmentNotFoundError:
 
         assert exit_code == 1, f"Expected exit 1, got {exit_code}: {capture.getvalue()}"
         assert "No device attachment found" in capture.getvalue()
-        mock_application.stop.assert_not_awaited()
+        mock_application.stop.assert_awaited_once()
 
 
 # ---------------------------------------------------------------------------
@@ -286,11 +289,13 @@ class TestHardwareFilterOptions:
 # ---------------------------------------------------------------------------
 
 class TestHardwareRuntimeError:
-    """Phase 6: the narrowed ``except (RuntimeError, ValueError, KeyError)`` path."""
+    """NR-4: a non-``typer.Exit`` exception from ``Application.start`` is caught by
+    the ``except BaseException`` guard, cleanup runs, and the exception propagates."""
 
     @pytest.mark.asyncio
-    async def test_runtime_error_traceback(self) -> None:
-        """When ``Application.start`` raises RuntimeError, the traceback path runs."""
+    async def test_runtime_error_propagates(self) -> None:
+        """When ``Application.start`` raises RuntimeError, NR-4 lets it propagate
+        after the ``finally`` cleanup runs."""
         capture = StringIO()
         mock_application = _build_mock_application()
         mock_application.get_assembly_config.return_value = [_build_radio_config(0, 0)]
@@ -300,20 +305,19 @@ class TestHardwareRuntimeError:
         mock_application.module_manager.get_all_modules.return_value = [module]
         mock_application.start.side_effect = RuntimeError("startup failed")
 
-        exit_code = await _run_hardware(
-            capture, mock_application, assembly_name="default"
-        )
-
-        assert exit_code == 1, f"Expected exit 1, got {exit_code}: {capture.getvalue()}"
-        assert "Traceback" in capture.getvalue()
-        assert "Failed to start application" in capture.getvalue()
+        with (
+            patch("pi_lora.cli.test.Application", return_value=mock_application),
+            patch("pi_lora.cli.test.console", Console(file=capture)),
+            pytest.raises(RuntimeError),
+        ):
+            await _test_cmd.test_hardware_impl(assembly_name="default")
         mock_application.stop.assert_awaited_once()
 
 
 class TestHardwareHardwareException:
-    """Phase 6 (fixed): ``OSError``, ``TimeoutError`` and ``ConnectionError``
-    raised by ``Application.start`` are now caught by the expanded ``except``
-    tuple and exit with code 1.
+    """NR-4: ``OSError``, ``TimeoutError`` and ``ConnectionError`` raised by
+    ``Application.start`` are caught by the ``except BaseException`` guard, cleanup
+    runs, and the exception propagates out of ``test_hardware_impl``.
 
     ``_SUCCESSFUL_EVENT`` is set so the code path reaches ``start()`` before the
     exception fires; the exception short-circuits the transition block.
@@ -328,8 +332,8 @@ class TestHardwareHardwareException:
         ],
     )
     @pytest.mark.asyncio
-    async def test_hardware_exceptions_crafted(self, exc: OSError) -> None:
-        """Each hardware startup exception prints an error and exits with code 1."""
+    async def test_hardware_exceptions_propagate(self, exc: OSError) -> None:
+        """Each hardware startup exception propagates after the cleanup runs."""
         capture = StringIO()
         mock_application = _build_mock_application()
         mock_application.get_assembly_config.return_value = [_build_radio_config(0, 0)]
@@ -339,29 +343,23 @@ class TestHardwareHardwareException:
         mock_application.module_manager.get_all_modules.return_value = [module]
         mock_application.start.side_effect = exc
 
-        exit_code = await _run_hardware(
-            capture, mock_application, assembly_name="default"
-        )
-
-        assert exit_code == 1, f"Expected exit 1, got {exit_code}: {capture.getvalue()}"
-        assert "Traceback" in capture.getvalue()
-        assert "Failed to start application" in capture.getvalue()
+        with (
+            patch("pi_lora.cli.test.Application", return_value=mock_application),
+            patch("pi_lora.cli.test.console", Console(file=capture)),
+            pytest.raises((OSError, TimeoutError, ConnectionError)),
+        ):
+            await _test_cmd.test_hardware_impl(assembly_name="default")
         mock_application.stop.assert_awaited_once()
 
 
 class TestHardwareGenericException:
-    """Phase 6 (general fallback): any ``Exception`` raised by ``Application.start``
-    that is not one of the previously named types is now caught by the general
-    ``except Exception`` fallback and exits with code 1.
-
-    ``IndexError`` is deliberately chosen because it was absent from the old
-    ``except (RuntimeError, ValueError, KeyError, OSError, TimeoutError,
-    ConnectionError)`` tuple, proving the general fallback now catches it.
-    """
+    """NR-4: any ``Exception`` raised by ``Application.start`` (here ``IndexError``)
+    is caught by the ``except BaseException`` guard, cleanup runs, and the exception
+    propagates out of ``test_hardware_impl``."""
 
     @pytest.mark.asyncio
-    async def test_generic_exception_crafted(self) -> None:
-        """A generic startup exception (``IndexError``) exits with code 1."""
+    async def test_generic_exception_propagates(self) -> None:
+        """A generic startup exception (``IndexError``) propagates after cleanup."""
         capture = StringIO()
         mock_application = _build_mock_application()
         mock_application.get_assembly_config.return_value = [_build_radio_config(0, 0)]
@@ -371,25 +369,26 @@ class TestHardwareGenericException:
         mock_application.module_manager.get_all_modules.return_value = [module]
         mock_application.start.side_effect = IndexError("unexpected startup failure")
 
-        exit_code = await _run_hardware(
-            capture, mock_application, assembly_name="default"
-        )
-
-        assert exit_code == 1, f"Expected exit 1, got {exit_code}: {capture.getvalue()}"
-        assert "Traceback" in capture.getvalue()
-        assert "Failed to start application" in capture.getvalue()
+        with (
+            patch("pi_lora.cli.test.Application", return_value=mock_application),
+            patch("pi_lora.cli.test.console", Console(file=capture)),
+            pytest.raises(IndexError),
+        ):
+            await _test_cmd.test_hardware_impl(assembly_name="default")
         mock_application.stop.assert_awaited_once()
 
 
 class TestTracebackModuleLevel:
-    """Phase 7: ``traceback`` is imported at module level in ``pi_lora.cli.test``."""
+    """NR-4: ``traceback`` is NOT imported at module level in ``pi_lora.cli.test``.
+    The ``finally`` cleanup path does not surface a traceback message, so no
+    module-level ``traceback`` import is required."""
 
-    def test_traceback_available_in_module_namespace(self) -> None:
-        """``pi_lora.cli.test`` must expose ``traceback`` in its module namespace."""
+    def test_traceback_absent_from_module_namespace(self) -> None:
+        """``pi_lora.cli.test`` does not expose ``traceback`` in its namespace."""
         import pi_lora.cli.test as _test_cmd
 
-        assert hasattr(_test_cmd, "traceback")
-        assert "traceback" in _test_cmd.__dict__
+        assert not hasattr(_test_cmd, "traceback")
+        assert "traceback" not in _test_cmd.__dict__
 
 
 # ---------------------------------------------------------------------------
