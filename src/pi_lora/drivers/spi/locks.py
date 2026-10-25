@@ -14,6 +14,7 @@
 
 from __future__ import annotations
 
+import asyncio
 from typing import Any, Protocol, Self
 
 
@@ -80,6 +81,15 @@ _bus_locks: dict[int, Any] = {}
 _registry_lock: Any = None
 _aiologic_module: Any = None
 
+# GUARD LOCK: module-level asyncio.Lock for ONE-TIME initialization guard ONLY.
+# Rationale: aiologic must stay lazily imported (sync CLI constraint), so the
+# aiologic.Lock registry guard cannot be materialised at module scope. Instead
+# a stdlib asyncio.Lock serialises ONLY the first-time creation of the
+# aiologic.Lock registry lock; once _registry_lock is populated this guard is
+# never awaited again. asyncio.Lock is safe to instantiate at module level in
+# Python 3.11+ (no running loop required), mirroring config_loader.py's NR-1.
+_registry_init_lock: asyncio.Lock = asyncio.Lock()
+
 
 async def get_bus_lock(bus_number: int) -> SpiLock:
     """Get or create the shared lock for the given bus number.
@@ -105,7 +115,9 @@ async def get_bus_lock(bus_number: int) -> SpiLock:
                 "aiologic is required for SPI locking. Install with: pip install aiologic"
             ) from e
     if _registry_lock is None:
-        _registry_lock = _aiologic_module.Lock()
+        async with _registry_init_lock:  # Race-free guard
+            if _registry_lock is None:  # Re-check inside lock
+                _registry_lock = _aiologic_module.Lock()
     async with _registry_lock:
         if bus_number not in _bus_locks:
             _bus_locks[bus_number] = _aiologic_module.Lock()

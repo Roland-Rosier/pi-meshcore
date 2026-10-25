@@ -15,6 +15,7 @@
 from __future__ import annotations
 
 import asyncio
+import contextvars
 from typing import Any, Protocol
 
 from .locks import get_bus_lock
@@ -23,8 +24,20 @@ from .locks import get_bus_lock
 class SpiBus(Protocol):
     """Protocol defining the SPI bus interface."""
 
-    def open(self, bus: int, device: int) -> None:
-        """Open the SPI bus for the given device."""
+    def open(self, bus: int | None = None, device: int | None = None) -> None:
+        """Open the SPI bus.
+
+        Args:
+            bus: The bus identifier. When omitted (``None``), the value stored by
+                the factory's ``create()`` is used instead.
+            device: The device identifier. When omitted (``None``), the value
+                stored by the factory's ``create()`` is used instead.
+
+        The factory-stored bus/device values set by ``create()`` are applied when
+        the corresponding argument is not supplied, so ``open()`` may be called
+        with no arguments. This matches :meth:`RealSpiBus.open` and upholds the
+        ``SpiBus`` Liskov Substitution principle.
+        """
 
     def close(self) -> None:
         """Close the SPI bus."""
@@ -75,7 +88,14 @@ class SpiBus(Protocol):
 class RealSpiBus:
     """Real implementation of SpiBus wrapping spidev.SpiDev."""
 
-    _spidev_patch_active: bool = False  # CR-8 FIX: class-level flag set True while spidev is injected
+    # CONTEXT-LOCAL FLAG: use contextvars.ContextVar for async-context isolation.
+    # Class-level flag shared across all instances causes cross-test interference
+    # in parallel test execution (pytest-xdist or concurrent async tasks).
+    # contextvars.ContextVar isolates per async context (task); default is False.
+    # This replaces the class attribute _spidev_patch_active (CR-8/Plan-11 debt).
+    _spidev_patch_active: contextvars.ContextVar[bool] = contextvars.ContextVar(
+        "_spidev_patch_active", default=False
+    )
 
     def __init__(self) -> None:
         """Initialize the real SPI bus.
@@ -108,7 +128,7 @@ class RealSpiBus:
 
         :raises RuntimeError: If this is a :meth:`FakeSpiBusKernelFactory.create_bus` yielded bus whose ``spidev`` patch has been deactivated on context-manager exit.
         """
-        if self._factory_owned and not self._spidev_patch_active:
+        if self._factory_owned and not self._spidev_patch_active.get():
             raise RuntimeError(
                 "MockSpiBus operation failed: the spidev kernel patch is no longer "
                 "active. This happens when you retain a bus reference after the "

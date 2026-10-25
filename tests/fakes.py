@@ -452,13 +452,15 @@ def spidev_kernel_patch(fake_spi: FakeSpiDev) -> Iterator[object]:
     backup: object | None = sys.modules.get("spidev", None)
     fake_module: types.SimpleNamespace = types.SimpleNamespace(SpiDev=lambda: fake_spi)
     sys.modules["spidev"] = fake_module  # type: ignore[assignment]
-    # CR-8 FIX: mark the injected spidev kernel patch as active on the bus class so
-    # RealSpiBus._verify_patch_active() can detect misuse after the context exits.
-    RealSpiBus._spidev_patch_active = True
+    # CR-8 FIX (R-4): mark the injected spidev kernel patch as active via a
+    # context-local ContextVar so _verify_patch_active() can detect misuse after
+    # the context exits. .set()/.reset() isolate the flag per async context and
+    # are transparent to the synchronous callers of this context manager.
+    token: bool | None = RealSpiBus._spidev_patch_active.set(True)
     try:
         yield fake_module
     finally:
-        RealSpiBus._spidev_patch_active = False
+        RealSpiBus._spidev_patch_active.reset(token)
         if backup is None:
             sys.modules.pop("spidev", None)
         else:

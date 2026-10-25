@@ -106,10 +106,14 @@ async def test_hardware_impl(
                 raise typer.Exit(code=1)
 
         console.print("[green]✓[/green] All modules transitioned to RESET_STATE successfully")
-    except BaseException:
+    except Exception:
         raise
     finally:
-        # Clean shutdown via Application — always runs, even when start() failed.
+        # Clean shutdown via Application — the finally always runs, regardless of
+        # the exception type. ``except Exception`` deliberately does NOT catch
+        # ``KeyboardInterrupt``/``SystemExit``/``GeneratorExit`` (PEP 3134
+        # control-flow signals), so those propagate to the interpreter instead of
+        # being suppressed; ``application.stop()`` still executes here.
         await application.stop()
 
     raise typer.Exit(code=0)
