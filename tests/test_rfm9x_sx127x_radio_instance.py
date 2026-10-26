@@ -992,6 +992,82 @@ class TestExceptions:
 
 
 # ──────────────────────────────────────────────────────────────────────
+# 3b. Fix H-3: explicit attribute accessors on every exception subclass
+# ──────────────────────────────────────────────────────────────────────
+
+class TestExceptionAttributes:
+    """Verify each exception subclass exposes its data as explicit attributes.
+
+    Regression for H-3: attributes must be accessible directly (``exc.module_name``)
+    rather than only through ``exc.context['module_name']``.
+    """
+
+    def test_driver_module_not_found_exposes_module_name(self) -> None:
+        """DriverModuleNotFoundError exposes self.module_name."""
+        exc: DriverModuleNotFoundError = DriverModuleNotFoundError("RFM95")
+        assert exc.module_name == "RFM95"
+        assert exc.context["module_name"] == "RFM95"
+
+    def test_device_attachment_not_found_exposes_attributes(self) -> None:
+        """DeviceAttachmentNotFoundError exposes module_name, spi_device_id, ce_number."""
+        exc: DeviceAttachmentNotFoundError = DeviceAttachmentNotFoundError(
+            "RFM95", 1, 0
+        )
+        assert exc.module_name == "RFM95"
+        assert exc.spi_device_id == 1
+        assert exc.ce_number == 0
+        assert exc.context["module_name"] == "RFM95"
+        assert exc.context["spi_device_id"] == 1
+        assert exc.context["ce_number"] == 0
+
+    def test_assembly_not_found_exposes_attributes(self) -> None:
+        """AssemblyNotFoundError exposes module_name and device_key."""
+        device_key: DeviceIdentity = DeviceIdentity(0, 1)
+        exc: AssemblyNotFoundError = AssemblyNotFoundError("RFM95", device_key)
+        assert exc.module_name == "RFM95"
+        assert exc.device_key == device_key
+        assert str(exc.device_key) == "0:1"
+        assert exc.context["device_key"] == "0:1"
+
+    def test_device_spec_not_found_exposes_device_name(self) -> None:
+        """DeviceSpecNotFoundError exposes self.device_name."""
+        exc: DeviceSpecNotFoundError = DeviceSpecNotFoundError("RFM98")
+        assert exc.device_name == "RFM98"
+        assert exc.context["device_name"] == "RFM98"
+
+    def test_family_not_found_exposes_device_name(self) -> None:
+        """FamilyNotFoundError exposes self.device_name."""
+        exc: FamilyNotFoundError = FamilyNotFoundError("RFM98")
+        assert exc.device_name == "RFM98"
+        assert exc.context["device_name"] == "RFM98"
+
+    def test_config_consistency_error_context_varies(self) -> None:
+        """ConfigConsistencyError keeps context dict; no single-key attribute."""
+        exc: ConfigConsistencyError = ConfigConsistencyError(
+            "cross-check failed", {"device_name": "RFM95", "osc_freq_hz": 32000000}
+        )
+        assert exc.context["device_name"] == "RFM95"
+        assert exc.context["osc_freq_hz"] == 32000000
+        assert isinstance(exc, RadioInstanceError)
+
+    @pytest.mark.asyncio
+    async def test_exception_attributes_match_context(self, default_config: Rfm9xSx127xConfig) -> None:
+        """Attributes raised during factory calls match context dict values."""
+        with pytest.raises(DeviceAttachmentNotFoundError) as exc_info:
+            await create_radio_instance(
+                assembly_name="default",
+                spi_device_id=1,
+                ce_number=0,
+                config=default_config,
+            )
+
+        exc: DeviceAttachmentNotFoundError = exc_info.value
+        assert exc.module_name == "lora_pi_434_868"
+        assert exc.spi_device_id == 1
+        assert exc.ce_number == 0
+
+
+# ──────────────────────────────────────────────────────────────────────
 # 4. Test create_radio_instance_from_default() works
 # ──────────────────────────────────────────────────────────────────────
 
@@ -1058,12 +1134,12 @@ class TestFrequencyEdgeCases:
 
     @pytest.mark.asyncio
     async def test_min_max_equal_device(self) -> None:
-        """Test supported_frequencies_hz when min=max (single value tuple)."""
+        """Test supported_frequencies_hz returns (min, max) bounds tuple."""
         devices: dict[str, DeviceConfig] = {
             "TEST": DeviceConfig(
                 name="TEST",
                 min_radio_freq_hz=500000000,
-                max_radio_freq_hz=500000000,
+                max_radio_freq_hz=600000000,
             ),
         }
 
@@ -1112,8 +1188,8 @@ class TestFrequencyEdgeCases:
         )
 
         freqs: tuple[int, int] = result.supported_frequencies_hz
-        # Returns (min, max) — both 500000000
-        assert freqs == (500000000, 500000000)
+        # Returns (min, max) bounds tuple
+        assert freqs == (500000000, 600000000)
 
     @pytest.mark.asyncio
     async def test_excluded_at_min_boundary(self) -> None:

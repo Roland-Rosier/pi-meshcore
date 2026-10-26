@@ -44,6 +44,7 @@ _DEFAULT_CONFIG_RESOURCE: str = "pi_lora.drivers.configs:rfm9x_sx127x_config.yam
 _init_lock: asyncio.Lock = asyncio.Lock()
 _config_cache: Rfm9xSx127xConfig | None = None
 _config_lock: Any = None
+_aiologic_module: Any = None
 
 
 def _resolve_default_path() -> Path:
@@ -151,6 +152,7 @@ async def get_preloaded_config(
     """
     global _config_cache
     global _config_lock
+    global _aiologic_module
 
     # Override path bypasses cache entirely.
     if config_path is not None:
@@ -163,19 +165,28 @@ async def get_preloaded_config(
     # Lazy aiologic import and lock initialisation (BUG-4 / Plan-11 Option A):
     # aiologic is only required for this async singleton path, so it is imported
     # here rather than at module scope to keep the sync public functions
-    # (load_config / load_family_config) free of the dependency. ``_config_lock``
-    # starts as ``None`` and is materialised on the first coroutine run.
+    # (load_config / load_family_config) free of the dependency.
     #
     # Double-checked locking (FIX CR-1 / Plan-12 Option A1): the initial ``None``
     # guard is race-free because it is executed under the module-level
     # ``_init_lock`` before re-checking ``_config_lock`` inside the lock, so only
     # one coroutine ever creates the ``aiologic.Lock`` and all callers share it.
+    # PATTERN (per Plan-14 R-3 / locks.py): import aiologic FIRST outside guard,
+    # then initialize lock INSIDE guard. This separates import failures from
+    # lock initialization and caches the module for subsequent calls.
+    if _aiologic_module is None:
+        try:
+            import aiologic
+            _aiologic_module = aiologic
+        except ImportError as e:
+            raise ImportError(
+                "aiologic is required for config loading. Install with: pip install aiologic"
+            ) from e
+
     if _config_lock is None:
         async with _init_lock:  # Race-free guard
             if _config_lock is None:  # Re-check inside lock
-                import aiologic
-
-                _config_lock = aiologic.Lock()
+                _config_lock = _aiologic_module.Lock()
 
     async with _config_lock:
         # Double-checked locking: re-verify inside the lock to protect ALL cache mutations.

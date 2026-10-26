@@ -21,7 +21,6 @@ from pi_lora.drivers.rfm9x_sx127x_config_model import (
     AntennaConfig,
     AssemblyConfig,
     DeviceConfig,
-    DeviceConfigRoot,
     DeviceModuleAttachment,
     FamilyConfig,
     FamilyDeviceExclusion,
@@ -76,37 +75,42 @@ class TestDeviceConfig:
 
 
 class TestDeviceConfigRoot:
-    """Tests for DeviceConfigRoot model."""
+    """Regression tests for H-2: cross-field validation moved to DeviceConfig."""
 
-    def test_valid_device_config_root(self) -> None:
-        """Test valid DeviceConfigRoot with range validation."""
+    def test_valid_device_config(self) -> None:
+        """Valid DeviceConfig instantiates without error."""
         device: DeviceConfig = DeviceConfig(
             name="RFM95",
             min_radio_freq_hz=868000000,
             max_radio_freq_hz=915000000,
         )
-        root: DeviceConfigRoot = DeviceConfigRoot(device=device)
-        assert root.device.name == "RFM95"
+        assert device.name == "RFM95"
+        assert device.min_radio_freq_hz == 868000000
+        assert device.max_radio_freq_hz == 915000000
 
-    def test_invalid_max_less_than_min_root(self) -> None:
-        """Test DeviceConfigRoot rejects max < min."""
-        device: DeviceConfig = DeviceConfig(
-            name="RFM95",
-            min_radio_freq_hz=915000000,
-            max_radio_freq_hz=868000000,
-        )
-        with pytest.raises(ValidationError):
-            DeviceConfigRoot(device=device)
+    def test_invalid_max_less_than_min(self) -> None:
+        """DeviceConfig rejects max < min (raises ValueError)."""
+        with pytest.raises(ValueError):
+            DeviceConfig(
+                name="X",
+                min_radio_freq_hz=900,
+                max_radio_freq_hz=800,
+            )
 
-    def test_invalid_max_equal_min_root(self) -> None:
-        """Test DeviceConfigRoot rejects max == min (strict greater required)."""
-        device: DeviceConfig = DeviceConfig(
-            name="RFM95",
-            min_radio_freq_hz=500000000,
-            max_radio_freq_hz=500000000,
-        )
-        with pytest.raises(ValidationError):
-            DeviceConfigRoot(device=device)
+    def test_invalid_max_equal_min(self) -> None:
+        """DeviceConfig rejects max == min (strict greater required)."""
+        with pytest.raises(ValueError):
+            DeviceConfig(
+                name="X",
+                min_radio_freq_hz=500,
+                max_radio_freq_hz=500,
+            )
+
+    def test_device_config_root_absent(self) -> None:
+        """DeviceConfigRoot is no longer exported after H-2."""
+        import pi_lora.drivers.rfm9x_sx127x_config_model as config_model
+
+        assert not hasattr(config_model, "DeviceConfigRoot")
 
 
 class TestFamilyDeviceExclusion:

@@ -102,9 +102,13 @@ class Application:
             # with a concurrent stop(). _cleanup_partial_start() must NOT re-acquire
             # the lock (NR-6 FIX) or asyncio's non-recursive Lock would deadlock.
             if exc_to_raise is not None:
-                await self._cleanup_and_reraise_cancellation(
-                    self._cleanup_partial_start
-                )
+                try:
+                    await self._cleanup_and_reraise_cancellation(
+                        self._cleanup_partial_start
+                    )
+                except Exception as cleanup_exc:
+                    # Preserve original exception as __cause__; cleanup error available via __context__
+                    raise exc_to_raise from cleanup_exc
                 raise exc_to_raise
 
     async def stop(self) -> None:

@@ -148,6 +148,47 @@ class _FailingStartEventLoopModule:
         return self.ce_number
 
 
+class _FailingStartAndCloseModule:
+    """Controllable module whose ``start_event_loop()`` raises AND ``close_spi()``
+    raises — used for the C-1 exception-chaining regression test.
+
+    ``init_spi_bus()`` succeeds so the module IS tracked (appended to
+    ``_started_modules``), ``start_event_loop()`` raises to set ``exc_to_raise``,
+    and ``close_spi()`` raises during ``_cleanup_partial_start()`` so the
+    cleanup path surfaces an ``ExceptionGroup``. The two failure sources must
+    both be reachable so start() exercises the ``raise exc_to_raise from
+    cleanup_exc`` chaining branch.
+    """
+
+    def __init__(self, ce_number: int = 0, spi_device_id: int = 0) -> None:
+        self.ce_number: int = ce_number
+        self.spi_device_id: int = spi_device_id
+        self.stop_event_loop_calls: int = 0
+        self.close_spi_calls: int = 0
+        self._start_error: RuntimeError = RuntimeError("start_event_loop() failed")
+        self._close_error: RuntimeError = RuntimeError("close_spi() failed")
+
+    async def init_spi_bus(self) -> None:
+        return None
+
+    async def start_event_loop(self) -> None:
+        raise self._start_error
+
+    async def stop_event_loop(self, mode: Any) -> None:
+        self.stop_event_loop_calls += 1
+        return None
+
+    async def close_spi(self) -> None:
+        self.close_spi_calls += 1
+        raise self._close_error
+
+    def get_spi_device_id(self) -> int:
+        return self.spi_device_id
+
+    def get_ce_number(self) -> int:
+        return self.ce_number
+
+
 class _CancellationModule:
     """Minimal controllable module for CR-3 cancellation tests.
 
@@ -836,6 +877,49 @@ class TestCancellationSemantics:
             await app._cleanup_and_reraise_cancellation(_coro_raises_exception)
 
         assert excinfo.value is raised
+
+    @pytest.mark.asyncio
+    async def test_start_exception_chaining_preserves_cause(self) -> None:
+        """C-1 FIX: when start()'s main path raises a RuntimeError AND the cleanup
+        path surfaces an ``ExceptionGroup`` (via a failing ``close_spi()``), the
+        finally-raised RuntimeError must chain the cleanup exception via
+        ``__cause__`` so neither the original nor the cleanup error is dropped."""
+        app = Application(config=None, spi_factory=MockSpiBusFactory())
+        failing = _FailingStartAndCloseModule()
+
+        async def _register_module(
+            radio_configs: list[Any],
+            scheduler: Any,
+            spi_factory: Any | None = None,
+        ) -> None:
+            scheduler.register_module(
+                failing, timer_interval=1.0, idle_enabled=True
+            )
+            app.module_manager.modules.append(failing)
+
+        def _get_all_modules() -> list[Any]:
+            return [failing]
+
+        app.module_manager.load_from_config = _register_module  # type: ignore[assignment]
+        app.module_manager.get_all_modules = _get_all_modules  # type: ignore[assignment]
+
+        with pytest.raises(Exception) as excinfo:
+            await app.start()
+
+        # The main failure (start_event_loop RuntimeError) is the raised exception.
+        assert isinstance(excinfo.value, RuntimeError)
+        # The cleanup ExceptionGroup is preserved as __cause__ (C-1).
+        assert excinfo.value.__cause__ is not None
+        assert isinstance(excinfo.value.__cause__, ExceptionGroup)
+        # The cleanup error itself is reachable inside the ExceptionGroup.
+        surfaced = list(excinfo.value.__cause__.exceptions)
+        assert failing._close_error in surfaced
+
+        # Cleanup still drained the tracked module and reset state cleanly.
+        assert failing.close_spi_calls == 1
+        assert app._started is False
+        assert app._started_modules == []
+        assert app._scheduler_started is False
 
 
 if __name__ == "__main__":

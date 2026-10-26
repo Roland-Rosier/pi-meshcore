@@ -38,24 +38,14 @@ class DeviceConfig(BaseModel):
     max_radio_freq_hz: int = Field(..., gt=0)
     osc_freq_hz: int | None = Field(None, gt=0)
 
-
-class DeviceConfigRoot(BaseModel):
-    """Wrapper to capture a single device configuration.
-
-    Performs range validation that ``max_radio_freq_hz`` must be strictly
-    greater than ``min_radio_freq_hz``; equal or inverted values are rejected.
-    """
-
-    device: DeviceConfig
-
     @model_validator(mode="after")
-    def validate_range(self) -> DeviceConfigRoot:
+    def validate_range(self) -> DeviceConfig:
         """Enforce a strictly-greater-than frequency range on the device."""
-        if self.device.max_radio_freq_hz <= self.device.min_radio_freq_hz:
+        if self.max_radio_freq_hz <= self.min_radio_freq_hz:
             raise ValueError(
-                f"Device '{self.device.name}' has invalid frequency range: "
-                f"max_radio_freq_hz={self.device.max_radio_freq_hz} must be strictly "
-                f"greater than min_radio_freq_hz={self.device.min_radio_freq_hz}."
+                f"Device '{self.name}' has invalid frequency range: "
+                f"max_radio_freq_hz={self.max_radio_freq_hz} must be strictly "
+                f"greater than min_radio_freq_hz={self.min_radio_freq_hz}."
             )
         return self
 

@@ -23,8 +23,10 @@ parameters.
 import inspect
 from unittest.mock import MagicMock
 
+import aiologic
 from src.pi_lora.drivers.spi.bus import RealSpiBus, SpiBus
 from src.pi_lora.drivers.spi.factory import RealSpiBusFactory
+from src.pi_lora.drivers.spi.locks import SpiLock
 
 from tests.fakes import spidev_kernel_patch
 from tests.spi.mock import MockSpiBus, MockSpiBusFactory
@@ -107,3 +109,55 @@ class TestSpiBusContract:
         assert [param.name for param in impl_params] == ["bus", "device"]
         for param in (*proto_params, *impl_params):
             assert param.default is not inspect.Parameter.empty
+
+    def test_mock_open_params_are_optional(self) -> None:
+        mock_params = [
+            param
+            for param in inspect.signature(MockSpiBus.open).parameters.values()
+            if param.name != "self"
+        ]
+        assert [param.name for param in mock_params] == ["bus", "device"]
+        for param in mock_params:
+            assert param.default is not inspect.Parameter.empty
+
+    def test_mock_property_setters(self) -> None:
+        mock_bus = MockSpiBus()
+        mock_bus.max_speed_hz = 5
+        assert mock_bus.max_speed_hz == 5
+        mock_bus.mode = 1
+        assert mock_bus.mode == 1
+        mock_bus.lsbfirst = True
+        assert mock_bus.lsbfirst is True
+        mock_bus.no_cs = True
+        assert mock_bus.no_cs is True
+
+    def test_mock_open_with_no_args_uses_stored_params(self) -> None:
+        mock_bus = MockSpiBusFactory().create(bus=5, device=6)
+        mock_bus.open()
+        assert mock_bus.bus_number == 5
+        assert mock_bus.device_number == 6
+        assert mock_bus._opened is True
+
+
+class TestSpiLockContract:
+    """Contract tests for the ``SpiLock`` protocol release API (H-4 regression).
+
+    Verifies that ``green_release`` is present both on the concrete
+    :class:`aiologic.Lock` runtime object and on the ``SpiLock`` protocol,
+    closing the static-vs-runtime mismatch that existed while the protocol
+    omitted the sync/greenlet release method.
+    """
+
+    def test_aiologic_lock_has_green_release_at_runtime(self) -> None:
+        assert hasattr(aiologic.Lock(), "green_release") is True
+        assert hasattr(aiologic.Lock(), "release") is False
+
+    def test_green_release_is_declared_on_protocol(self) -> None:
+        declared = getattr(SpiLock, "__annotations__", {})
+        method_names = set(declared) | {
+            member
+            for member in dir(SpiLock)
+            if callable(getattr(SpiLock, member, None))
+        }
+        assert "green_release" in method_names
+        assert "async_release" in method_names

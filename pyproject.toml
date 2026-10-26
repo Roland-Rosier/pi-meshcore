@@ -294,8 +294,8 @@ ignore = [
 "src/pi_lora/cli/main.py" = ["E402"]
 "src/pi_lora/drivers/lora_detection.py" = ["E402"]
 "tests/test_lora_module_detection.py" = ["E402", "B017"]
-"tests/framework/test_application.py" = ["B017", "F821"]
-"src/pi_lora/framework/application.py" = ["UP037", "F821"]
+"tests/framework/test_application.py" = ["B017"]
+"src/pi_lora/framework/application.py" = ["UP037"]
 
 # Tests that verify simulated SPI failures use bare Exception intentionally.
 "tests/test_fakes.py" = ["B017"]

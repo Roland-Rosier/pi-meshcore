@@ -1,0 +1,24 @@
+rules:
+  - id: lazy-lock-without-guard
+    languages:
+      - python
+    severity: ERROR
+    message: |
+      Lazy lock initialization without a guard lock is a race condition. Two
+      concurrent callers can each pass the `if $LOCK is None:` check and create
+      separate locks, breaking mutual exclusion. Create the lock under a
+      module-level guard lock using double-checked locking. See
+      pi_lora/drivers/rfm9x_sx127x_config_loader.py (_init_lock) and
+      pi_lora/drivers/spi/locks.py (_registry_init_lock) for the correct pattern.
+    patterns:
+      - pattern: |
+          if $LOCK is None:
+              ...
+              $LOCK = $Y.Lock()
+      - pattern-not-inside: |
+          async with $GUARD:
+              ...
+    metadata:
+      category: correctness
+      technology:
+        - python

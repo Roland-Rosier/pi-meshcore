@@ -19,6 +19,7 @@ from __future__ import annotations
 import asyncio
 import logging
 import queue
+import threading
 import time
 from typing import TYPE_CHECKING, Protocol
 
@@ -242,6 +243,24 @@ class InterruptBridge:
 
     The producer drop-oldest implementation uses get_nowait() + put_nowait() on
     queue.Full, which is atomic-enough for this use case.
+
+    H-7 FIX (NR-5 atomicity): the compound get_nowait() + put_nowait() drop-oldest
+    operation on queue.Full is wrapped in ``self._trigger_lock`` (a stdlib
+    ``threading.Lock``) so "drop oldest to make room for newest" is atomic across
+    the arbitrary threads that call trigger_interrupt(). This is the ONLY
+    legitimate ``threading.Lock`` use in the codebase and is documented here so
+    future readers understand why it is NOT ``aiologic.Lock``:
+    - trigger_interrupt() runs in a SYNC thread context (GPIO interrupt callbacks
+      from lgpio/RPi.GPIO/gpiod), NOT the event loop thread.
+    - No asyncio event loop is guaranteed at call time; interrupt handlers run
+      early, before any loop is established.
+    - aiologic.Lock (and asyncio.Lock) require a running event loop; using them
+      here would raise RuntimeError or break the sync context.
+    - queue.Queue is stdlib thread-safe; threading.Lock is its natural companion
+      and is safe to instantiate and use without an event loop.
+    - Precedent: locks.py uses asyncio.Lock only for module-level init guards,
+      which DO run in the event loop thread (same rationale as the
+      aiologic-only rule). This thread is the one documented exception.
     """
 
     def __init__(self, monitor_queue_depth_threshold: int = 1000) -> None:
@@ -264,6 +283,16 @@ class InterruptBridge:
         self._async_trigger_queue: asyncio.Queue[int] = asyncio.Queue(
             maxsize=self._max_queue_size
         )
+        # H-7 FIX (NR-5 atomicity): protects the compound get_nowait()+
+        # put_nowait() drop-oldest operation in trigger_interrupt() so the
+        # "drop oldest to make room for newest" sequence is atomic across the
+        # arbitrary threads that call trigger_interrupt() from GPIO drivers.
+        # threading.Lock (NOT aiologic.Lock) is correct because trigger_interrupt()
+        # runs in sync thread context with no event loop guaranteed at call time;
+        # queue.Queue is stdlib thread-safe and threading.Lock is its natural
+        # companion. Precedent: locks.py uses asyncio.Lock for module-level init
+        # guard (same rationale).
+        self._trigger_lock: threading.Lock = threading.Lock()
         self._running = False
         self._task: asyncio.Task[None] | None = None
         self._drain_task: asyncio.Task[None] | None = None
@@ -292,11 +321,23 @@ class InterruptBridge:
             self._trigger_queue.put_nowait(gpio_pin)
         except queue.Full:
             # Drop oldest to make room for newest (see class docstring rationale).
-            try:
-                self._trigger_queue.get_nowait()  # Discard oldest
-                self._trigger_queue.put_nowait(gpio_pin)  # Insert newest
-            except queue.Empty:
-                pass  # Race: queue emptied between full and get; just drop new
+            # CRITICAL: compound get+put must be atomic across threads.
+            # Use threading.Lock (NOT aiologic.Lock) because:
+            # - trigger_interrupt() is called from GPIO driver in SYNC thread context
+            # - No event loop guaranteed at call time (interrupt handlers run early)
+            # - Protects queue.Queue which is stdlib thread-safe; threading.Lock is its natural companion
+            # - Precedent: locks.py uses asyncio.Lock for module-level init guard (same rationale)
+            with self._trigger_lock:
+                try:
+                    self._trigger_queue.get_nowait()  # Discard oldest
+                    self._trigger_queue.put_nowait(gpio_pin)  # Insert newest
+                except queue.Empty:
+                    pass  # Race: queue emptied between full and get; just drop new
+                except queue.Full:
+                    # Race: another thread's unprotected top-level put_nowait
+                    # filled the slot our get_nowait opened; the queue is full
+                    # again, so the newest is dropped. Bounded, no corruption.
+                    pass  # Drop newest; producer stays at maxsize
             logging.getLogger(__name__).warning(
                 "Interrupt queue full (maxsize=%d); dropped oldest interrupt "
                 "for GPIO %d to make room for newest. Malicious/buggy GPIO driver?",

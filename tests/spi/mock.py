@@ -53,15 +53,19 @@ class MockSpiBus:
         self._registers: dict[int, int] = {}
         self._opened: bool = False
 
-    def open(self, bus: int, device: int) -> None:
+    def open(self, bus: int | None = None, device: int | None = None) -> None:
         """Open the SPI bus for the given device.
 
         Args:
-            bus: The bus identifier.
-            device: The device identifier.
+            bus: The bus identifier. When ``None`` the stored ``bus_number``
+                is used, mirroring :meth:`RealSpiBus.open`.
+            device: The device identifier. When ``None`` the stored
+                ``device_number`` is used, mirroring :meth:`RealSpiBus.open`.
         """
-        self.bus_number = bus
-        self.device_number = device
+        if bus is not None:
+            self.bus_number = bus
+        if device is not None:
+            self.device_number = device
         self._opened = True
         self._registers = {}
 
@@ -119,20 +123,36 @@ class MockSpiBus:
         """Maximum speed in Hertz."""
         return self._max_speed_hz
 
+    @max_speed_hz.setter
+    def max_speed_hz(self, value: int) -> None:
+        self._max_speed_hz = value
+
     @property
     def mode(self) -> int:
         """SPI mode setting."""
         return self._mode
+
+    @mode.setter
+    def mode(self, value: int) -> None:
+        self._mode = value
 
     @property
     def lsbfirst(self) -> bool:
         """Whether least significant bit comes first."""
         return self._lsbfirst
 
+    @lsbfirst.setter
+    def lsbfirst(self, value: bool) -> None:
+        self._lsbfirst = value
+
     @property
     def no_cs(self) -> bool:
         """Whether chip select is disabled."""
         return self._no_cs
+
+    @no_cs.setter
+    def no_cs(self, value: bool) -> None:
+        self._no_cs = value
 
 
 class MockSpiBusFactory:

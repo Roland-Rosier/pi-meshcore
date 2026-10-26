@@ -6,10 +6,11 @@
 
 mkdir -p /tmp/sandbox/semgrep_tmp
 TMPDIR=/tmp/sandbox/semgrep_tmp/ uv run semgrep scan --verbose \
-  --config=".semgrep/rules/security/" \
-       ".semgrep/rules/best-practice/" \
-       ".semgrep/rules/correctness/" \
-       ".semgrep/rules/maintainability/" \
+   --config=".semgrep/rules/security/" \
+        ".semgrep/rules/best-practice/" \
+        ".semgrep/rules/correctness/" \
+        ".semgrep/rules/maintainability/" \
+        ".semgrep/rules/custom/" \
   src/pi_lora/drivers/rfm9x_sx127x*.py \
   tests/test_rfm9x_sx127x*.py \
   src/pi_lora/framework/*.py \

@@ -61,14 +61,13 @@ class TestValidateDeviceConfig:
             )
 
     def test_invalid_max_less_than_min(self) -> None:
-        """Test device with max < min fails validation."""
-        device: DeviceConfig = DeviceConfig(
-            name="INVALID",
-            min_radio_freq_hz=915000000,
-            max_radio_freq_hz=868000000,
-        )
+        """Test device with max < min fails validation (enforced by DeviceConfig)."""
         with pytest.raises(_VALIDATION_ERRORS):
-            validate_device_config(device)
+            DeviceConfig(
+                name="INVALID",
+                min_radio_freq_hz=915000000,
+                max_radio_freq_hz=868000000,
+            )
 
     def test_invalid_negative_osc_freq(self) -> None:
         """Test device with negative osc_freq_hz fails validation."""
@@ -435,15 +434,20 @@ class TestValidateFullConfig:
         """Test invalid full config raises ValidationError."""
         config: Rfm9xSx127xConfig = Rfm9xSx127xConfig(
             devices={
-                "invalid": DeviceConfig(
-                    name="INVALID",
-                    min_radio_freq_hz=915000000,
-                    max_radio_freq_hz=868000000,
+                "valid": DeviceConfig(
+                    name="RFM95",
+                    min_radio_freq_hz=868000000,
+                    max_radio_freq_hz=915000000,
                 ),
             },
             families={},
             modules={},
-            assemblies={},
+            assemblies={
+                "bad": AssemblyConfig(
+                    assembly_name="bad",
+                    module_name="not_present",
+                ),
+            },
         )
         with pytest.raises(_VALIDATION_ERRORS):
             validate_full_config(config)

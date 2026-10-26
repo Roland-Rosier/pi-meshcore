@@ -66,13 +66,16 @@ class SpiLock(Protocol):
     ) -> bool: ...
     # Keep this member named ``async_release`` (NOT ``release``). The concrete
     # implementation returned by :func:`get_bus_lock` is :class:`aiologic.Lock`,
-    # whose public release method is ``async_release`` and which has NO ``release``
-    # method (verified at runtime: ``hasattr(aiologic.Lock(), "release") is False``).
+    # whose public release methods are ``async_release`` (async context) and
+    # ``green_release`` (sync/greenlet context). It has NO ``release`` method
+    # (verified at runtime: ``hasattr(aiologic.Lock(), "release") is False``;
+    # ``hasattr(aiologic.Lock(), "green_release") is True``).
     # code_review-10.1:1 flagged this as a "``async_release`` vs ``release`` mismatch"
     # bug, but that was a false positive: it wrongly assumed ``aiologic.Lock`` mirrors
     # ``asyncio.Lock``'s ``release()``. Renaming to ``release`` reintroduces an
     # ``AttributeError`` at runtime; the protocol must track the real ``aiologic.Lock`` API.
     def async_release(self) -> None: ...
+    def green_release(self) -> None: ...
     def locked(self) -> bool: ...
 
 

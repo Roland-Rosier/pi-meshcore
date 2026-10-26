@@ -95,6 +95,7 @@ class DriverModuleNotFoundError(RadioInstanceError):
 
     def __init__(self, module_name: str) -> None:
         super().__init__(f"Module '{module_name}' not found", {"module_name": module_name})
+        self.module_name = module_name
 
 
 class DeviceAttachmentNotFoundError(RadioInstanceError):
@@ -105,6 +106,9 @@ class DeviceAttachmentNotFoundError(RadioInstanceError):
             f"No attachment for module '{module_name}' at SPI:{spi_device_id} CE:{ce_number}",
             {"module_name": module_name, "spi_device_id": spi_device_id, "ce_number": ce_number}
         )
+        self.module_name = module_name
+        self.spi_device_id = spi_device_id
+        self.ce_number = ce_number
 
 
 class AssemblyNotFoundError(RadioInstanceError):
@@ -115,6 +119,8 @@ class AssemblyNotFoundError(RadioInstanceError):
             f"No assembly found for module '{module_name}' device {device_key}",
             {"module_name": module_name, "device_key": str(device_key)}
         )
+        self.module_name = module_name
+        self.device_key = device_key
 
 
 class DeviceSpecNotFoundError(RadioInstanceError):
@@ -122,6 +128,7 @@ class DeviceSpecNotFoundError(RadioInstanceError):
 
     def __init__(self, device_name: str) -> None:
         super().__init__(f"Device spec '{device_name}' not found", {"device_name": device_name})
+        self.device_name = device_name
 
 
 class FamilyNotFoundError(RadioInstanceError):
@@ -129,6 +136,7 @@ class FamilyNotFoundError(RadioInstanceError):
 
     def __init__(self, device_name: str) -> None:
         super().__init__(f"No family found containing device '{device_name}'", {"device_name": device_name})
+        self.device_name = device_name
 
 
 class ConfigConsistencyError(RadioInstanceError):
