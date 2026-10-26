@@ -23,14 +23,20 @@ class SpiBusFactory(Protocol):
     """Protocol defining SPI bus factory interface."""
 
     def create(self, bus: int, device: int) -> SpiBus:
-        """Create a SpiBus instance.
+        """Create an unopened SpiBus instance.
+
+        The returned bus is UNOPENED: it has not been opened and must not be
+        used directly. The caller MUST call ``open()`` on the returned bus
+        before using it. This is a Liskov Substitution (LSP) contract
+        requirement: the factory creates the bus, and the caller owns the
+        lifecycle including the open step.
 
         Args:
             bus: The bus identifier.
             device: The device identifier.
 
         Returns:
-            A SpiBus implementation.
+            An unopened SpiBus implementation.
         """
 
 
@@ -38,14 +44,20 @@ class RealSpiBusFactory:
     """Real implementation of SpiBusFactory."""
 
     def create(self, bus: int, device: int) -> SpiBus:
-        """Create a RealSpiBus instance.
+        """Create an unopened RealSpiBus instance.
+
+        The returned bus is UNOPENED: it has not been opened and must not be
+        used directly. The caller MUST call ``open()`` on the returned bus
+        before using it. This is a Liskov Substitution (LSP) contract
+        requirement: the factory creates the bus, and the caller owns the
+        lifecycle including the open step.
 
         Args:
             bus: The bus identifier.
             device: The device identifier.
 
         Returns:
-            A new RealSpiBus instance.
+            An unopened RealSpiBus instance.
         """
         from .bus import RealSpiBus
 

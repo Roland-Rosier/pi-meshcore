@@ -18,8 +18,9 @@ from __future__ import annotations
 
 import asyncio
 import importlib.resources
+import types
 from pathlib import Path
-from typing import Any
+from typing import Any, TYPE_CHECKING
 
 from ruamel.yaml import YAML
 
@@ -43,8 +44,18 @@ _DEFAULT_CONFIG_RESOURCE: str = "pi_lora.drivers.configs:rfm9x_sx127x_config.yam
 # - This is a deliberate, well-contained exception to the "aiologic-only" rule
 _init_lock: asyncio.Lock = asyncio.Lock()
 _config_cache: Rfm9xSx127xConfig | None = None
-_config_lock: Any = None
-_aiologic_module: Any = None
+
+if TYPE_CHECKING:
+    import aiologic
+
+    _ConfigLockType = aiologic.Lock
+    _AiologicModuleType = types.ModuleType
+else:
+    _ConfigLockType = Any
+    _AiologicModuleType = Any
+
+_config_lock: _ConfigLockType | None = None
+_aiologic_module: _AiologicModuleType | None = None
 
 
 def _resolve_default_path() -> Path:
@@ -100,6 +111,11 @@ def load_config(
                 f"config_name '{config_name}' not recognized. "
                 f"Valid keys: {list(key_map.keys())}"
             )
+        if config_name == "devices":
+            return Rfm9xSx127xConfig(devices=config.devices)
+        if config_name == "modules":
+            return Rfm9xSx127xConfig(modules=config.modules)
+        return Rfm9xSx127xConfig(families=config.families)
 
     return config
 
@@ -149,6 +165,11 @@ async def get_preloaded_config(
 
     Returns:
         A validated Rfm9xSx127xConfig instance.
+
+    .. note::
+        Unlike the sync ``load_config()``, this async coroutine updates the
+        internal cache when ``force_reload=True``, so subsequent calls without
+        ``force_reload`` return the freshly loaded config.
     """
     global _config_cache
     global _config_lock

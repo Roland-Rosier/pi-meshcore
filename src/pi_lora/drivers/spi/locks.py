@@ -18,13 +18,6 @@ import asyncio
 from typing import Any, Protocol, Self
 
 
-class _AiologicImportError(ImportError):
-    """Raised when aiologic is unavailable (hard runtime dependency for SPI locking)."""
-
-    def __init__(self, message: str) -> None:
-        super().__init__(message)
-
-
 class SpiLock(Protocol):
     """Protocol describing the per-bus SPI critical-section lock.
 
@@ -93,6 +86,40 @@ _aiologic_module: Any = None
 # Python 3.11+ (no running loop required), mirroring config_loader.py's NR-1.
 _registry_init_lock: asyncio.Lock = asyncio.Lock()
 
+# CR-16 (M-16) runtime guard: aiologic.Lock supports sync ``with lock:`` at
+# runtime, but the SPI contract forbids using it before the instance is obtained
+# by awaiting :func:`get_bus_lock`. aiologic.Lock is ``__slots__``-restricted (no
+# ``__dict__``), so the returned instance cannot carry an ``_acquired`` flag.
+# Acquisition is therefore tracked by id in ``_obtained_lock_ids`` and the base
+# class's sync ``__enter__`` is wrapped exactly once (see ``_ensure_enter_guard``)
+# to raise ``RuntimeError`` on pre-acquisition sync misuse. The async acquisition
+# path (``__aenter__``) is left untouched.
+_obtained_lock_ids: set[int] = set()
+_enter_guard_patched: bool = False
+
+
+def _ensure_enter_guard() -> None:
+    """Wrap aiologic.Lock's sync ``__enter__`` to reject pre-acquisition misuse.
+
+    Called once, lazily, the first time :func:`get_bus_lock` imports aiologic.
+    The wrapper raises ``RuntimeError`` when ``with lock:`` is used on an instance
+    that was never handed back by :func:`get_bus_lock`; the async acquisition
+    path is unaffected. Idempotent via ``_enter_guard_patched``.
+    """
+    global _enter_guard_patched
+    if _enter_guard_patched:
+        return
+    import aiologic
+    _original_enter = aiologic.Lock.__enter__
+
+    def _guarded_enter(self: Any) -> Any:
+        if id(self) not in _obtained_lock_ids:
+            raise RuntimeError("Lock not acquired via get_bus_lock()")
+        return _original_enter(self)
+
+    aiologic.Lock.__enter__ = _guarded_enter  # type: ignore[method-assign]
+    _enter_guard_patched = True
+
 
 async def get_bus_lock(bus_number: int) -> SpiLock:
     """Get or create the shared lock for the given bus number.
@@ -114,9 +141,10 @@ async def get_bus_lock(bus_number: int) -> SpiLock:
             import aiologic
             _aiologic_module = aiologic
         except ImportError as e:
-            raise _AiologicImportError(
+            raise ImportError(
                 "aiologic is required for SPI locking. Install with: pip install aiologic"
             ) from e
+        _ensure_enter_guard()
     if _registry_lock is None:
         async with _registry_init_lock:  # Race-free guard
             if _registry_lock is None:  # Re-check inside lock
@@ -124,4 +152,5 @@ async def get_bus_lock(bus_number: int) -> SpiLock:
     async with _registry_lock:
         if bus_number not in _bus_locks:
             _bus_locks[bus_number] = _aiologic_module.Lock()
+        _obtained_lock_ids.add(id(_bus_locks[bus_number]))
         return _bus_locks[bus_number]

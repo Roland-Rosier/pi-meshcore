@@ -97,12 +97,19 @@ class RealSpiBus:
         "_spidev_patch_active", default=False
     )
 
-    def __init__(self) -> None:
+    def __init__(self, xfer_timeout: float = 5.0) -> None:
         """Initialize the real SPI bus.
 
         Bus/device identity is set by ``open()`` — matching the underlying
         ``spidev.SpiDev`` lifecycle (init → open).
+
+        Args:
+            xfer_timeout: Upper bound in seconds for a single blocking
+                ``spidev.SpiDev.xfer2`` transfer. :func:`asyncio.wait_for`
+                raises :class:`asyncio.TimeoutError` if the transfer exceeds
+                this budget, preventing an unbounded hang on the event loop.
         """
+        self._xfer_timeout: float = xfer_timeout
         # spidev.SpiDev has no stubs; use Any to suppress attr-defined errors.
         self._spidev: Any | None = None
         self.bus_number: int = 0
@@ -130,7 +137,7 @@ class RealSpiBus:
         """
         if self._factory_owned and not self._spidev_patch_active.get():
             raise RuntimeError(
-                "MockSpiBus operation failed: the spidev kernel patch is no longer "
+                "RealSpiBus operation failed: the spidev kernel patch is no longer "
                 "active. This happens when you retain a bus reference after the "
                 "FakeSpiBusKernelFactory.create_bus() context manager exits. "
                 "Fix: do not store the bus outside the 'with' block, or restructure "
@@ -197,19 +204,24 @@ class RealSpiBus:
         # but we MUST convert to list[int] before calling the underlying spidev.
         # Do NOT change the parameter type to only list[int] — the protocol allows
         # bytearray for callers using bytearray (e.g., Rfm9xSx127xHandler).
+        # spidev.xfer2() does not accept the buffer protocol; only spidev.writebytes2()
+        # accepts a bytearray. This conversion to list[int] is therefore mandatory.
         if isinstance(data, bytearray):
             data = list(data)
 
         lock = await get_bus_lock(self.bus_number)
         async with lock:
-            return await asyncio.to_thread(self._spidev.xfer2, data)
+            return await asyncio.wait_for(
+                asyncio.to_thread(self._spidev.xfer2, data),
+                timeout=self._xfer_timeout,
+            )
 
     @property
     def max_speed_hz(self) -> int:
         """Maximum speed in Hertz."""
         if self._spidev is not None:
             return self._spidev.max_speed_hz  # type: ignore[no-any-return]
-        return 0
+        raise RuntimeError("SPI bus not opened")
 
     @max_speed_hz.setter
     def max_speed_hz(self, value: int) -> None:
@@ -222,7 +234,7 @@ class RealSpiBus:
         """SPI mode setting."""
         if self._spidev is not None:
             return self._spidev.mode  # type: ignore[no-any-return]
-        return 0
+        raise RuntimeError("SPI bus not opened")
 
     @mode.setter
     def mode(self, value: int) -> None:
@@ -235,7 +247,7 @@ class RealSpiBus:
         """Whether least significant bit comes first."""
         if self._spidev is not None:
             return self._spidev.lsbfirst  # type: ignore[no-any-return]
-        return False
+        raise RuntimeError("SPI bus not opened")
 
     @lsbfirst.setter
     def lsbfirst(self, value: bool) -> None:
@@ -248,7 +260,7 @@ class RealSpiBus:
         """Whether chip select is disabled."""
         if self._spidev is not None:
             return self._spidev.no_cs  # type: ignore[no-any-return]
-        return False
+        raise RuntimeError("SPI bus not opened")
 
     @no_cs.setter
     def no_cs(self, value: bool) -> None:
