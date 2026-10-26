@@ -38,7 +38,7 @@ def _normalise_module_type(value: str | None) -> Literal["rfm95w", "rfm98w", "no
     if value is None:
         return None
     canonical = value.strip().lower()
-    mapping: dict[Literal["rfm95w", "sx1276", "rfm98w", "sx1278", "none"], Literal["rfm95w", "rfm98w", "none"]] = {
+    mapping: dict[str, Literal["rfm95w", "rfm98w", "none"]] = {
         "rfm95w": "rfm95w",
         "sx1276": "rfm95w",
         "rfm98w": "rfm98w",
@@ -72,6 +72,8 @@ app = AsyncTyper(
 
 @app.command("detect-modules")
 async def detect_modules(
+    # ``async`` is retained for AsyncTyper API consistency (the ``app`` is an
+    # ``async_typer.AsyncTyper``); no ``await`` is required and behaviour is unchanged.
     ce0: str | None = typer.Option(
         None,
         "--ce0",
@@ -120,12 +122,15 @@ async def detect_modules(
         if all_passed:
             print("\n✅ Configuration is valid.")
         else:
+            print("❌ Configuration validation failed.")
             raise typer.Exit(code=1)
 
 
 @app.callback(invoke_without_command=True)
 async def main_callback(ctx: typer.Context) -> None:
     """MeshCore hardware check utility — show help when invoked without subcommand."""
+    # ``async`` is retained for AsyncTyper API consistency (the ``app`` is an
+    # ``async_typer.AsyncTyper``); no ``await`` is required and behaviour is unchanged.
     pi_lora.cli._logging.setup_logging()
 
     if ctx.invoked_subcommand is None:

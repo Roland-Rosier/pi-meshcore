@@ -46,7 +46,7 @@ class Rfm9xSx127xHandler:
         spi_bus = module.spi_bus
         if spi_bus is None:
             raise RuntimeError("module.spi_bus is None")
-        response = await spi_bus.xfer2(bytearray([register & 0x7F, 0x00]))
+        response = await spi_bus.xfer2([register & 0x7F, 0x00])
         return response[1] if len(response) > 1 else 0
 
     @staticmethod
@@ -55,7 +55,7 @@ class Rfm9xSx127xHandler:
         spi_bus = module.spi_bus
         if spi_bus is None:
             raise RuntimeError("module.spi_bus is None")
-        await spi_bus.xfer2(bytearray([register | 0x80, value]))
+        await spi_bus.xfer2([register | 0x80, value])
 
     @staticmethod
     async def set_module_mode(module: "Rfm9xSx127xModule", mode: ModeBits) -> bool:  # noqa: UP037
@@ -63,24 +63,21 @@ class Rfm9xSx127xHandler:
         spi_bus = module.spi_bus
         if spi_bus is None:
             raise RuntimeError("module.spi_bus is None")
-        try:
-            current_value: int = await Rfm9xSx127xHandler.read_reg(
-                module, RegisterLayout.REG_OP_MODE
-            )
-            new_value: int = (
-                current_value
-                & ~RegisterLayout.RegOpMode.MASK_MODE
-                & ~RegisterLayout.RegOpMode.BIT_LF
-                & ~RegisterLayout.RegOpMode.MASK_LORA
-                & ~RegisterLayout.RegOpMode.MASK_META
-            )
-            new_value |= int(mode.value) & RegisterLayout.RegOpMode.MASK_MODE
-            await Rfm9xSx127xHandler.write_reg(
-                module, RegisterLayout.REG_OP_MODE, new_value
-            )
-            return True
-        except Exception:
-            raise
+        current_value: int = await Rfm9xSx127xHandler.read_reg(
+            module, RegisterLayout.REG_OP_MODE
+        )
+        new_value: int = (
+            current_value
+            & ~RegisterLayout.RegOpMode.MASK_MODE
+            & ~RegisterLayout.RegOpMode.BIT_LF
+            & ~RegisterLayout.RegOpMode.MASK_LORA
+            & ~RegisterLayout.RegOpMode.MASK_META
+        )
+        new_value |= int(mode.value) & RegisterLayout.RegOpMode.MASK_MODE
+        await Rfm9xSx127xHandler.write_reg(
+            module, RegisterLayout.REG_OP_MODE, new_value
+        )
+        return True
 
     @staticmethod
     async def write_and_verify_frequency_for_khz(
@@ -90,24 +87,21 @@ class Rfm9xSx127xHandler:
         spi_bus = module.spi_bus
         if spi_bus is None:
             raise RuntimeError("module.spi_bus is None")
-        try:
-            freq_registers = Rfm9xSx127xHandler.calc_freq_registers_for_khz(
-                freq_config, freq_khz
-            )
-            req_msb, req_mid, req_lsb = freq_registers
+        freq_registers = Rfm9xSx127xHandler.calc_freq_registers_for_khz(
+            freq_config, freq_khz
+        )
+        req_msb, req_mid, req_lsb = freq_registers
 
-            await Rfm9xSx127xHandler.write_reg(module, RegisterLayout.REG_FRF_MSB, req_msb)
-            await Rfm9xSx127xHandler.write_reg(module, RegisterLayout.REG_FRF_MID, req_mid)
-            await Rfm9xSx127xHandler.write_reg(module, RegisterLayout.REG_FRF_LSB, req_lsb)
+        await Rfm9xSx127xHandler.write_reg(module, RegisterLayout.REG_FRF_MSB, req_msb)
+        await Rfm9xSx127xHandler.write_reg(module, RegisterLayout.REG_FRF_MID, req_mid)
+        await Rfm9xSx127xHandler.write_reg(module, RegisterLayout.REG_FRF_LSB, req_lsb)
 
-            read_msb: int = await Rfm9xSx127xHandler.read_reg(module, RegisterLayout.REG_FRF_MSB)
-            read_mid: int = await Rfm9xSx127xHandler.read_reg(module, RegisterLayout.REG_FRF_MID)
-            read_lsb: int = await Rfm9xSx127xHandler.read_reg(module, RegisterLayout.REG_FRF_LSB)
+        read_msb: int = await Rfm9xSx127xHandler.read_reg(module, RegisterLayout.REG_FRF_MSB)
+        read_mid: int = await Rfm9xSx127xHandler.read_reg(module, RegisterLayout.REG_FRF_MID)
+        read_lsb: int = await Rfm9xSx127xHandler.read_reg(module, RegisterLayout.REG_FRF_LSB)
 
-            success: bool = (read_msb == req_msb and read_mid == req_mid and read_lsb == req_lsb)
-            return (success, req_msb, req_mid, req_lsb, read_msb, read_mid, read_lsb)
-        except Exception:
-            raise
+        success: bool = (read_msb == req_msb and read_mid == req_mid and read_lsb == req_lsb)
+        return (success, req_msb, req_mid, req_lsb, read_msb, read_mid, read_lsb)
 
     @staticmethod
     def calc_freq_registers_for_khz(
