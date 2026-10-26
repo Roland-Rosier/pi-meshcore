@@ -16,6 +16,7 @@
 
 import sys
 import types
+import contextvars
 from collections.abc import Iterator
 from contextlib import contextmanager
 from unittest.mock import MagicMock
@@ -162,6 +163,9 @@ class FakeSpiDev:
         :return: Received data (read bytes)
         :raises Exception: If simulating an error condition
         """
+        if isinstance(data, bytearray):
+            data = list(data)
+
         if not self._opened:
             raise OSError("SPI device not opened")
 
@@ -445,7 +449,7 @@ def spidev_kernel_patch(fake_spi: FakeSpiDev) -> Iterator[object]:
     module is removed (or restored) on exit so no namespace pollution persists.
 
     :param fake_spi: The FakeSpiDev kernel to expose as ``spidev.SpiDev``.
-    :yield: The injected fake spidev module.
+    :yield: None. The injected fake spidev module is not consumed by callers.
     """
     from pi_lora.drivers.spi.bus import RealSpiBus
 
@@ -456,9 +460,9 @@ def spidev_kernel_patch(fake_spi: FakeSpiDev) -> Iterator[object]:
     # context-local ContextVar so _verify_patch_active() can detect misuse after
     # the context exits. .set()/.reset() isolate the flag per async context and
     # are transparent to the synchronous callers of this context manager.
-    token: bool | None = RealSpiBus._spidev_patch_active.set(True)
+    token: contextvars.Token[bool] = RealSpiBus._spidev_patch_active.set(True)
     try:
-        yield fake_module
+        yield None
     finally:
         RealSpiBus._spidev_patch_active.reset(token)
         if backup is None:

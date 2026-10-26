@@ -89,6 +89,9 @@ class MockSpiBus:
         Returns:
             List of received byte values (simulated response).
         """
+        if isinstance(data, bytearray):
+            data = list(data)
+
         if not self._opened:
             raise RuntimeError("SPI bus not opened")
 
