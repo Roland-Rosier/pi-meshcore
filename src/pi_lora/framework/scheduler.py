@@ -12,7 +12,11 @@
 # see the License for the specific language governing permissions and
 # limitations under the License.
 
-"""Scheduler components for Rfm9xSx127xModule event dispatch."""
+"""Scheduler components for Rfm9xSx127xModule event dispatch.
+
+The ``IdlePacer`` posts IDLE events on a fixed rate (``asyncio.sleep(min_interval)``),
+not a zero-latency rate. See ``IdlePacer.__doc__`` for the breaking-change notice.
+"""
 
 from __future__ import annotations
 
@@ -84,6 +88,13 @@ class TimerScheduler:
     async def unregister_module(self, module: Rfm9xSx127xModule) -> None:
         self._registered.discard(module)
         self._intervals.pop(module, None)
+        # M-19 / Plan-16 FIX: _failure_counts and _last_failure_log must be
+        # cleaned on unregister too. A stale entry would keep the module bound in
+        # those dicts, preventing garbage-collection of the module object and
+        # leaving a dangling failure record that later logic could re-read.
+        # Unregister must fully release the module's scheduler state.
+        self._failure_counts.pop(module, None)
+        self._last_failure_log.pop(module, None)
         task = self._tasks.pop(module, None)
         if task is not None and not task.done():
             task.cancel()
@@ -173,7 +184,13 @@ class TimerScheduler:
 
 
 class IdlePacer:
-    """Single task that paces all idle-enabled modules with IDLE events."""
+    """Single task that paces all idle-enabled modules with IDLE events.
+
+    .. warning:: Breaking change from Plan-14: the IDLE event rate changed from
+       ``asyncio.sleep(0)`` (~1000+ events/sec) to ``asyncio.sleep(min_interval)``
+       (~100 events/sec at the default 0.01s). Modules relying on frequent IDLE
+       events must adjust their expectations.
+    """
 
     @staticmethod
     def _validate_interval(interval: float) -> None:
@@ -244,24 +261,37 @@ class InterruptBridge:
     The producer drop-oldest implementation uses get_nowait() + put_nowait() on
     queue.Full, which is atomic-enough for this use case.
 
-    H-7 FIX (NR-5 atomicity): the compound get_nowait() + put_nowait() drop-oldest
-    operation on queue.Full is wrapped in ``self._trigger_lock`` (a stdlib
-    ``threading.Lock``) so "drop oldest to make room for newest" is atomic across
-    the arbitrary threads that call trigger_interrupt(). This is the ONLY
-    legitimate ``threading.Lock`` use in the codebase and is documented here so
-    future readers understand why it is NOT ``aiologic.Lock``:
-    - trigger_interrupt() runs in a SYNC thread context (GPIO interrupt callbacks
-      from lgpio/RPi.GPIO/gpiod), NOT the event loop thread.
-    - No asyncio event loop is guaranteed at call time; interrupt handlers run
-      early, before any loop is established.
-    - aiologic.Lock (and asyncio.Lock) require a running event loop; using them
-      here would raise RuntimeError or break the sync context.
-    - queue.Queue is stdlib thread-safe; threading.Lock is its natural companion
-      and is safe to instantiate and use without an event loop.
-    - Precedent: locks.py uses asyncio.Lock only for module-level init guards,
-      which DO run in the event loop thread (same rationale as the
-      aiologic-only rule). This thread is the one documented exception.
-    """
+     H-7 FIX (NR-5 atomicity): the compound get_nowait() + put_nowait() drop-oldest
+     operation on queue.Full is wrapped in ``self._trigger_lock`` (a stdlib
+     ``threading.RLock``) so "drop oldest to make room for newest" is atomic across
+     the arbitrary threads that call trigger_interrupt(). This is the ONLY
+     legitimate ``threading.*Lock`` use in the codebase and is documented here so
+     future readers understand why it is NOT ``aiologic.Lock``.
+
+     H-9 FIX (Plan-16): the lock is a ``threading.RLock`` (re-entrant), NOT a plain
+     ``threading.Lock``. GPIO interrupt handlers can be re-entrant — an
+     edge-triggered or recursive callback may invoke ``trigger_interrupt()`` while
+     another call already holds ``self._trigger_lock``. A non-re-entrant
+     ``threading.Lock`` would self-lock and deadlock on that recursive call;
+     ``RLock`` counts acquisitions and releases only once the outermost call
+     exits, so the compound drop-oldest stays atomic without self-locking.
+     Plan-15 used a plain ``Lock`` because it targeted the atomicity of the
+     drop-oldest compound op but missed the re-entrancy requirement that real
+     GPIO handlers (recursive/edge-triggered callbacks) impose.
+
+     WHY ``threading.*Lock`` (NOT ``aiologic.Lock``) — unchanged rationale:
+     - trigger_interrupt() runs in a SYNC thread context (GPIO interrupt callbacks
+       from lgpio/RPi.GPIO/gpiod), NOT the event loop thread.
+     - No asyncio event loop is guaranteed at call time; interrupt handlers run
+       early, before any loop is established.
+     - aiologic.Lock (and asyncio.Lock) require a running event loop; using them
+       here would raise RuntimeError or break the sync context.
+     - queue.Queue is stdlib thread-safe; threading.Lock (and RLock) is its natural
+       companion and is safe to instantiate and use without an event loop.
+     - Precedent: locks.py uses asyncio.Lock only for module-level init guards,
+       which DO run in the event loop thread (same rationale as the
+       aiologic-only rule). This thread is the one documented exception.
+     """
 
     def __init__(self, monitor_queue_depth_threshold: int = 1000) -> None:
         if monitor_queue_depth_threshold <= 0:
@@ -287,13 +317,30 @@ class InterruptBridge:
         # put_nowait() drop-oldest operation in trigger_interrupt() so the
         # "drop oldest to make room for newest" sequence is atomic across the
         # arbitrary threads that call trigger_interrupt() from GPIO drivers.
-        # threading.Lock (NOT aiologic.Lock) is correct because trigger_interrupt()
+        # H-9 FIX (Plan-16): this is a threading.RLock (re-entrant), NOT a plain
+        # threading.Lock, because GPIO interrupt handlers can be re-entrant — an
+        # edge-triggered/recursive callback may call trigger_interrupt() while
+        # another call already holds the lock. A plain Lock would self-lock and
+        # deadlock; RLock counts acquisitions and releases only on the outermost
+        # exit. Plan-15 used a plain Lock and missed this re-entrancy requirement.
+        # threading.RLock (NOT aiologic.Lock) is correct because trigger_interrupt()
         # runs in sync thread context with no event loop guaranteed at call time;
-        # queue.Queue is stdlib thread-safe and threading.Lock is its natural
+        # queue.Queue is stdlib thread-safe and threading.Lock/RLock is its natural
         # companion. Precedent: locks.py uses asyncio.Lock for module-level init
         # guard (same rationale).
-        self._trigger_lock: threading.Lock = threading.Lock()
+        self._trigger_lock: threading.RLock = threading.RLock()
         self._running = False
+        # M-21 FIX (Plan-16): an asyncio.Event that trigger_interrupt() sets when
+        # new data is available so _drain_sync_queue() waits on it instead of
+        # busy-waiting with asyncio.sleep(0.001). The 1ms sleep was bad because it
+        # (a) starved/inefficiently polled the consumer task, (b) imposed a fixed
+        # ~1ms worst-case latency on delivered interrupts, and (c) consumed
+        # unbounded CPU spinning every millisecond forever while idle. An Event is
+        # correct because the drain task sleeps (zero CPU) until data is signaled,
+        # and trigger_interrupt() sets it via loop.call_soon_threadsafe() which is
+        # thread-safe for the sync GPIO interrupt context (no guaranteed running
+        # loop at call time).
+        self._drain_event: asyncio.Event = asyncio.Event()
         self._task: asyncio.Task[None] | None = None
         self._drain_task: asyncio.Task[None] | None = None
 
@@ -353,6 +400,18 @@ class InterruptBridge:
                 self._monitor_queue_depth_threshold,
                 gpio_pin,
             )
+        # M-21 FIX (Plan-16): signal the drain task that new data is available via
+        # asyncio.Event instead of the drain task busy-waiting with
+        # asyncio.sleep(0.001). trigger_interrupt() runs in a SYNC thread context
+        # (GPIO interrupt callbacks), which is possibly NOT the event loop thread.
+        # loop.call_soon_threadsafe() is the thread-safe way to schedule the Event
+        # set on the running loop; guard with try/except RuntimeError because there
+        # may be no running loop (called from a GPIO callback before start()).
+        try:
+            loop = asyncio.get_running_loop()
+            loop.call_soon_threadsafe(self._drain_event.set)
+        except RuntimeError:
+            pass  # No running loop (early init before start()); nothing to signal
 
     async def start(self) -> None:
         self._running = True
@@ -373,26 +432,44 @@ class InterruptBridge:
     async def _drain_sync_queue(self) -> None:
         """Drain thread-safe producer queue into async consumer queue.
 
-        Runs only in the event loop thread (safe for asyncio.Queue). Yields to
-        the loop with a tiny sleep when the producer queue is empty to avoid a
-        busy-wait that would otherwise starve the consumer task.
+        Runs only in the event loop thread (safe for asyncio.Queue). Waits on an
+        asyncio.Event that trigger_interrupt() sets when new data arrives (M-21
+        FIX), so the task no longer busy-waits with asyncio.sleep(0.001). Before,
+        the fixed 1ms sleep starved/inefficiently polled the consumer task, imposed
+        a fixed ~1ms worst-case latency on delivered interrupts, and consumed
+        unbounded CPU spinning every millisecond forever while idle. The Event is
+        correct: the drain task sleeps (zero CPU) until data is signaled, and the
+        Event is set from trigger_interrupt() via loop.call_soon_threadsafe()
+        which is thread-safe for the sync GPIO interrupt context.
+
+        The event is awaited only while the producer queue is empty; on each
+        signal the drain task drains every item currently available before
+        awaiting the next event. This also fixes the pre-fire race where the
+        producer fills before the event loop starts (no running loop means
+        trigger_interrupt() cannot set the Event via call_soon_threadsafe): an
+        unconditional await would hang on that race instead of draining the
+        pre-filled producer.
         """
         while self._running:
-            try:
-                gpio_pin = self._trigger_queue.get_nowait()
-            except queue.Empty:
-                await asyncio.sleep(0.001)  # Yield to event loop; nothing to drain
-                continue
-            try:
-                self._async_trigger_queue.put_nowait(gpio_pin)
-            except asyncio.QueueFull:
-                # Should not happen if both queues share maxsize and the consumer
-                # keeps up, but handle gracefully with a drop-oldest policy.
+            if self._trigger_queue.empty():
+                await self._drain_event.wait()
+                self._drain_event.clear()
+            while True:
                 try:
-                    self._async_trigger_queue.get_nowait()
+                    gpio_pin = self._trigger_queue.get_nowait()
+                except queue.Empty:
+                    break  # Nothing left to drain; await the next event signal
+                try:
                     self._async_trigger_queue.put_nowait(gpio_pin)
-                except asyncio.QueueEmpty:
-                    pass
+                except asyncio.QueueFull:
+                    # Should not happen if both queues share maxsize and the
+                    # consumer keeps up, but handle gracefully with a
+                    # drop-oldest policy.
+                    try:
+                        self._async_trigger_queue.get_nowait()
+                        self._async_trigger_queue.put_nowait(gpio_pin)
+                    except asyncio.QueueEmpty:
+                        pass
 
     async def _interrupt_task(self) -> None:
         while self._running:

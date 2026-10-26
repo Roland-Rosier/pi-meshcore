@@ -77,6 +77,19 @@ class Application:
         async with self._lifecycle_lock:
             if self._started:
                 return
+            # CR-2 FIX (Plan-16): Clear ModuleManager tracking state before
+            # load_from_config() runs so a previously-failed start()/stop() does
+            # not leave stale modules. load_from_config() (module_manager.py:117)
+            # raises DuplicateDeviceIdentityError when a DeviceIdentity is already
+            # present in modules_by_id; a stale re-keyed module from a prior
+            # failed start would block the restart. Cleared here (inside the lock,
+            # after the _started guard, and mirrored in stop()) to guarantee a
+            # clean slate. NOTE: cleared AFTER the _started guard so a no-op
+            # start() (already started) never wipes modules that stop() needs to
+            # unregister — clearing before the lock would break concurrent
+            # start()/stop() cleanup (see test_concurrent_start_stop_no_race).
+            self.module_manager.modules.clear()
+            self.module_manager.modules_by_id.clear()
             self._started_modules = []
             try:
                 assembly_result = await self.get_assembly_config(assembly_name)
@@ -153,6 +166,15 @@ class Application:
             self._started_modules.clear()
             self._scheduler_started = False
             self._started = False
+            # CR-2 FIX (Plan-16): Clear ModuleManager tracking state after cleanup
+            # and state flags are reset, BEFORE the lock exits. This mirrors the
+            # start() clear so a fully-drained application leaves no stale modules
+            # that would re-key on the next start() and raise
+            # DuplicateDeviceIdentityError (module_manager.py:117). Clearing inside
+            # the lock keeps the rollback mutually exclusive with any concurrent
+            # start()/stop().
+            self.module_manager.modules.clear()
+            self.module_manager.modules_by_id.clear()
         if errors:
             raise ExceptionGroup("Errors during Application.stop()", errors)
 

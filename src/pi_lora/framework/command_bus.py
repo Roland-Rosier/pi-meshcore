@@ -21,6 +21,8 @@ import logging
 from collections.abc import Callable
 from typing import TYPE_CHECKING, Any
 
+logger: logging.Logger = logging.getLogger(__name__)
+
 if TYPE_CHECKING:
     from .module_manager import ModuleManager  # noqa: F401
 
@@ -96,13 +98,27 @@ class CommandBus:
             if asyncio.iscoroutine(result):
                 return await result
             return result
+        except asyncio.CancelledError as exc:
+            # H-10 / Plan-16: CancelledError must be caught BEFORE the generic
+            # except Exception since asyncio.CancelledError is a subclass of
+            # Exception. Catching it separately logs the correct "cancelled"
+            # message instead of the generic "raised" message, then re-raises
+            # verbatim so asyncio cancellation semantics are preserved for the
+            # awaiting coroutine. A verbatim re-raise is required: returning
+            # would swallow the cancellation and the caller would never observe
+            # it.
+            logger.warning(
+                "Command handler cancelled for %s",
+                type(command).__name__,
+            )
+            raise exc
         except Exception as exc:
             # Sync and async-await exceptions are caught here uniformly so both
             # are logged and re-raised. Option A (wrap the await) was chosen
             # over Option B (normalize every handler to async): Option B is a
             # breaking change that would force callers to await sync handlers
             # and touch every handler site, so it was rejected.
-            logging.getLogger(__name__).warning(
+            logger.warning(
                 "Command '%s' handler raised: %r",
                 type(command).__name__,
                 exc,
