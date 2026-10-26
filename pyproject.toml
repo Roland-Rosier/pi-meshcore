@@ -59,7 +59,7 @@ dependencies = [
     "spidev>=3.8",
     "gpiod>=2.4",
     # CLI framework (Typer, with Click/Rich/Shellingame extras)
-    "typer[all]==0.27.3",
+    "typer[all]==0.27.2",
     # Async CLI framework (migrate from typer to async-typer for async entry points)
     "async-typer==0.27.2",
     # Configuration system — Pydantic models + YAML parsing
@@ -127,7 +127,6 @@ dev = [
 [project.scripts]
 pi-lora = "pi_lora.cli._entry_points:pi_lora"
 check-hardware = "pi_lora.cli._entry_points:check_hardware"
-config = "pi_lora.cli._entry_points:pi_lora_config"
 pi-lora-config = "pi_lora.cli._entry_points:pi_lora_config"
 pi-lora-test = "pi_lora.cli._entry_points:pi_lora_test"
 
@@ -215,10 +214,6 @@ ignore_missing_imports = true
 [[tool.mypy.overrides]]
 module = ["pi_lora.drivers.spi.bus", "pi_lora.drivers.spi.factory", "pi_lora.drivers.spi.locks"]
 ignore_missing_imports = true
-
-[[tool.mypy.overrides]]
-module = ["pi_lora.drivers.spi.locks"]
-ignore_missing_imports = true
 disable_error_code = ["no-any-return"]
 
 [[tool.mypy.overrides]]
@@ -234,7 +229,7 @@ module = ["fakes", "pi_lora.drivers.lora_module", "pi_lora.drivers.lora_detectio
 ignore_missing_imports = true
 
 [[tool.mypy.overrides]]
-module = ["src.pi_lora.framework", "src.pi_lora.framework.exceptions", "src.pi_lora.framework.application", "src.pi_lora.drivers.rfm9x_sx127x_radio_instance", "src.pi_lora.drivers.rfm9x_sx127x_config_loader", "pi_lora.framework", "pi_lora.framework.exceptions", "pi_lora.framework.application", "pi_lora.drivers.rfm9x_sx127x_radio_instance", "pi_lora.drivers.rfm9x_sx127x_config_loader"]
+module = ["pi_lora.framework", "pi_lora.framework.exceptions", "pi_lora.framework.application", "pi_lora.drivers.rfm9x_sx127x_radio_instance", "pi_lora.drivers.rfm9x_sx127x_config_loader"]
 ignore_missing_imports = true
 
 [[tool.mypy.overrides]]
@@ -317,7 +312,7 @@ keep-runtime-typing = false
 [tool.semgrep]
 language = "python"
 strictness = "default"
-ruling = ["security", "supply-chain"]
+ruling = ["security", "supply-chain", "correctness"]
 
 [tool.semgrep.lint]
 severity = "error"

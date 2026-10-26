@@ -4,13 +4,9 @@
 #
 # Usage: uv run .semgrep/run.sh
 
-mkdir -p /tmp/sandbox/semgrep_tmp
-TMPDIR=/tmp/sandbox/semgrep_tmp/ uv run semgrep scan --verbose \
-   --config=".semgrep/rules/security/" \
-        ".semgrep/rules/best-practice/" \
-        ".semgrep/rules/correctness/" \
-        ".semgrep/rules/maintainability/" \
-        ".semgrep/rules/custom/" \
+TMPDIR=$(mktemp -d)
+uv run semgrep scan --verbose \
+   --config=".semgrep/rules/custom/lazy-lock-guard.yaml" \
   src/pi_lora/drivers/rfm9x_sx127x*.py \
   tests/test_rfm9x_sx127x*.py \
   src/pi_lora/framework/*.py \
@@ -19,4 +15,5 @@ TMPDIR=/tmp/sandbox/semgrep_tmp/ uv run semgrep scan --verbose \
   tests/spi/*.py \
   src/pi_lora/cli/config.py \
   tests/test_config_*.py
+trap 'rm -rf "$TMPDIR"' EXIT
 

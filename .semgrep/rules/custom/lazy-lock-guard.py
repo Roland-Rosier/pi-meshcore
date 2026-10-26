@@ -41,10 +41,9 @@ def get_registry_lock_bad() -> object:
 
 def get_registry_lock_good() -> object:
     """OK: double-checked locking guarded by a module-level asyncio.Lock."""
-    if _registry_lock is None:
+    if _registry_lock is None:  # ok:lazy-lock-without-guard
         async with _registry_guard:
             if _registry_lock is None:
                 _registry_lock = aiologic.Lock()
-    # ok:lazy-lock-without-guard
     async with _registry_lock:
         return _registry_lock
