@@ -15,6 +15,7 @@
 """Unit tests for scheduler components: TimerScheduler, IdlePacer, InterruptBridge."""
 
 import asyncio
+import threading
 import time
 import warnings
 from unittest.mock import MagicMock, patch
@@ -139,6 +140,30 @@ class TestTimerScheduler:
                 raise AssertionError(
                     "RuntimeWarning: Task was destroyed but pending future"
                 )
+
+    @pytest.mark.asyncio
+    async def test_timer_scheduler_unregister_cleans_state(
+        self, mock_module: MagicMock
+    ) -> None:
+        # M-19 FIX (Plan-16): unregister_module() must pop the module from
+        # _failure_counts and _last_failure_log in addition to _registered,
+        # _intervals, and _tasks. A stale entry would keep the module bound in
+        # those dicts, preventing garbage-collection of the module object and
+        # leaving a dangling failure record.
+        ts = TimerScheduler()
+        ts.register_module(mock_module, 1.0)
+        ts._failure_counts[mock_module] = 3
+        ts._last_failure_log[mock_module] = 1234.5
+        assert ts._failure_counts.get(mock_module) == 3
+        assert ts._last_failure_log.get(mock_module) == 1234.5
+        await ts.unregister_module(mock_module)
+        assert ts._failure_counts.get(mock_module) is None
+        assert ts._last_failure_log.get(mock_module) is None
+        assert mock_module not in ts._registered
+        assert ts.get_interval(mock_module) is None
+        assert mock_module not in ts._tasks
+        assert mock_module not in ts._failure_counts
+        assert mock_module not in ts._last_failure_log
 
     @pytest.mark.asyncio
     async def test_timer_task_survives_put_failure(self) -> None:
@@ -411,6 +436,18 @@ class TestIdlePacer:
         )
         assert len(small_timestamps) > len(large_timestamps)
 
+    def test_idle_pacer_docstring_mentions_breaking_change(self) -> None:
+        import src.pi_lora.framework.scheduler as scheduler_module
+
+        doc: str = IdlePacer.__doc__ or ""
+        assert "Breaking change" in doc
+        assert "asyncio.sleep(0)" in doc
+        assert "asyncio.sleep(min_interval)" in doc or "min_interval" in doc
+
+        module_doc: str = scheduler_module.__doc__ or ""
+        assert "IdlePacer" in module_doc
+        assert "min_interval" in module_doc
+
 
 class TestInterruptBridge:
     """Verify InterruptBridge GPIO→module mapping."""
@@ -557,6 +594,67 @@ class TestInterruptBridge:
         bridge = InterruptBridge()
         bridge.trigger_interrupt(25)  # Should not raise
 
+    def test_interrupt_bridge_reentrant_lock(self) -> None:
+        # H-9 FIX (Plan-16): the producer lock is a threading.RLock (re-entrant),
+        # NOT a plain threading.Lock. GPIO interrupt handlers can be re-entrant —
+        # an edge-triggered/recursive callback may call trigger_interrupt() while
+        # another call already holds self._trigger_lock. A plain Lock would
+        # self-lock and deadlock on that recursive call; RLock allows the same
+        # thread to re-acquire.
+        bridge = InterruptBridge()
+
+        # 1. The lock must be a threading.RLock (re-entrant), never a plain
+        # threading.Lock. ``threading.RLock`` is a factory function, not a type,
+        # so the concrete type is captured via an instance's ``type``; a plain
+        # Lock resolves to a distinct ``_thread.lock`` type and would deadlock
+        # on the re-entrant path below.
+        rlock_type = type(threading.RLock())
+        lock_type = type(threading.Lock())
+        assert isinstance(bridge._trigger_lock, rlock_type)
+        assert type(bridge._trigger_lock) is not lock_type
+
+        # 2. Demonstrate genuine re-entrancy in a single thread: a plain Lock
+        # would deadlock here (raise RuntimeError on the second acquire); RLock
+        # counts acquisitions and releases only on the outermost exit.
+        with bridge._trigger_lock, bridge._trigger_lock:
+            pass
+
+        # 3. Functional stress test: hammer trigger_interrupt() from a single
+        # thread while driving the producer queue to full. Every overflow hits
+        # the drop-oldest `with self._trigger_lock:` branch. A plain Lock would
+        # deadlock on the first overflow's compound get_nowait()+put_nowait()
+        # re-entrant path; RLock must not. The queue must stay bounded at
+        # maxsize with no deadlock, and the drop-oldest policy must retain the
+        # most recent pins.
+        for gpio_pin in range(bridge._max_queue_size):
+            bridge.trigger_interrupt(gpio_pin)
+        assert bridge._trigger_queue.qsize() == bridge._max_queue_size
+
+        # 4. Re-entrancy through the real code path: while this thread already
+        # holds self._trigger_lock (simulating a re-entrant/recursive GPIO
+        # callback that fires trigger_interrupt() mid-another-call), a full
+        # trigger_interrupt() re-acquires the same lock in its drop-oldest
+        # branch. A plain Lock would self-lock and deadlock here; RLock does
+        # not, so execution must reach the end of this block.
+        with bridge._trigger_lock:
+            bridge.trigger_interrupt(999_999)
+            assert bridge._trigger_queue.qsize() == bridge._max_queue_size
+
+        # 5. Overflow past maxsize keeps the queue bounded and drop-oldest:
+        # the most recent pins survive.
+        for gpio_pin in range(
+            bridge._max_queue_size, bridge._max_queue_size * 2
+        ):
+            bridge.trigger_interrupt(gpio_pin)
+        assert bridge._trigger_queue.qsize() == bridge._max_queue_size
+        pins: list[int] = []
+        while not bridge._trigger_queue.empty():
+            pins.append(bridge._trigger_queue.get_nowait())
+        assert len(pins) == bridge._max_queue_size
+        assert pins[0] == bridge._max_queue_size
+        assert pins[-1] == bridge._max_queue_size * 2 - 1
+        assert bridge._trigger_queue.empty()
+
     @pytest.mark.asyncio
     async def test_unregister_module_removes_all_pins(self) -> None:
         bridge = InterruptBridge()
@@ -642,6 +740,76 @@ class TestInterruptBridge:
                 for event in interrupt_events
             )
         await bridge.stop()
+
+    @pytest.mark.asyncio
+    async def test_interrupt_bridge_event_not_polling(
+        self, mock_module: MagicMock
+    ) -> None:
+        # M-21 FIX (Plan-16): the drain task is driven by an asyncio.Event, not a
+        # busy-wait asyncio.sleep(0.001) poll. This regression proves both the
+        # type contract and the functional event-driven delivery.
+        #
+        # (1) Type contract: _drain_event must be an asyncio.Event, proving the
+        # drain task waits on an event rather than polling with a fixed 1ms sleep.
+        bridge = InterruptBridge()
+        assert isinstance(bridge._drain_event, asyncio.Event)
+
+        # (2) Functional delivery through the event-driven mechanism. Fill the
+        # producer queue with trigger_interrupt() (which sets the drain event via
+        # loop.call_soon_threadsafe), start the bridge, and confirm the module's
+        # event_queue receives the INTERRUPT events — proving the drain no longer
+        # relies on a fixed 1ms poll.
+        module = MagicMock()
+        module.event_queue = asyncio.Queue()
+        bridge.register_interrupt(25, module)
+        await bridge.start()
+        try:
+            for _ in range(3):
+                bridge.trigger_interrupt(25)
+            await asyncio.sleep(0.05)
+        finally:
+            await bridge.stop()
+        interrupt_events: list[object] = []
+        while not module.event_queue.empty():
+            event = await module.event_queue.get()
+            interrupt_events.append(event)
+        assert len(interrupt_events) == 3
+        assert all(
+            event.event_type == EventType.INTERRUPT for event in interrupt_events
+        )
+        assert all(
+            event.payload.gpio_pin == 25 for event in interrupt_events
+        )
+
+    @pytest.mark.asyncio
+    async def test_interrupt_bridge_drain_awaits_event_not_sleep(
+        self, mock_module: MagicMock
+    ) -> None:
+        # M-21 FIX (Plan-16, preferred): demonstrate the drain task awaits the
+        # asyncio.Event rather than polling with asyncio.sleep. Patch asyncio.sleep
+        # to raise; with an empty producer queue and the drain event pre-set, the
+        # first drain pass must proceed by awaiting the event without consuming
+        # asyncio.sleep. If the drain had busy-waited with sleep(0.001), the
+        # patched sleep would raise and this test would fail.
+        bridge = InterruptBridge()
+        bridge._drain_event.set()
+        bridge._running = True
+        sleep_calls: list[float] = []
+
+        async def fake_sleep(seconds: float) -> None:
+            sleep_calls.append(seconds)
+            raise RuntimeError("polling detected")
+
+        with patch("asyncio.sleep", side_effect=fake_sleep):
+            task = asyncio.create_task(bridge._drain_sync_queue())
+            # The task awaits the pre-set event, drains the empty producer, clears
+            # the event, then awaits the cleared event (hangs). Let the loop advance
+            # past the first pass via a timeout; the patched sleep must never fire.
+            with pytest.raises(asyncio.TimeoutError):
+                await asyncio.wait_for(task, timeout=0.05)
+            if not task.done():
+                task.cancel()
+        assert sleep_calls == []
 
 
 class TestScheduler:

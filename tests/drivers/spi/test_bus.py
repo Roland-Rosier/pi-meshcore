@@ -14,6 +14,9 @@
 
 """Tests for ``RealSpiBus`` protocol compliance and lifecycle."""
 
+import asyncio
+import time
+
 import pytest
 from src.pi_lora.drivers.spi.bus import SpiBus
 
@@ -98,3 +101,99 @@ class TestXfer2Bytearray:
     async def _xfer2(data: list[int] | bytearray, payload: list[int] | bytearray) -> list[int]:
         with FakeSpiBusKernelFactory().create_bus(bus=0, device=0) as bus:
             return await bus.xfer2(payload)
+
+
+class TestRealSpiBusErrorMessage:
+    """H-11 regression: ``_verify_patch_active`` message names ``RealSpiBus``."""
+
+    def test_real_spi_bus_error_message(self) -> None:
+        from contextvars import ContextVar
+
+        from src.pi_lora.drivers.spi.bus import RealSpiBus
+
+        patch_active: ContextVar[bool] = RealSpiBus._spidev_patch_active
+        patch_active.set(False)
+
+        bus = RealSpiBus()
+        bus._factory_owned = True
+
+        with pytest.raises(RuntimeError) as exc_info:
+            bus._verify_patch_active()
+
+        message: str = str(exc_info.value)
+        assert "RealSpiBus" in message
+        assert "MockSpiBus" not in message
+
+    def test_open_surfaces_real_spi_bus_message(self) -> None:
+        from src.pi_lora.drivers.spi.bus import RealSpiBus
+
+        RealSpiBus._spidev_patch_active.set(False)
+
+        bus = RealSpiBus()
+        bus._factory_owned = True
+
+        with pytest.raises(RuntimeError) as exc_info:
+            bus.open()
+
+        message: str = str(exc_info.value)
+        assert "RealSpiBus" in message
+        assert "MockSpiBus" not in message
+
+
+class _HangingKernel:
+    """Sync kernel whose ``xfer2`` blocks past any short timeout budget."""
+
+    def __init__(self, sleep_seconds: float = 2.0) -> None:
+        self._sleep_seconds: float = sleep_seconds
+
+    def xfer2(self, data: list[int]) -> list[int]:
+        time.sleep(self._sleep_seconds)
+        return [1]
+
+
+class TestRealSpiBusXferTimeout:
+    """M-13 regression: ``RealSpiBus.xfer2`` enforces a ``wait_for`` timeout."""
+
+    def test_default_xfer_timeout_is_five(self) -> None:
+        from src.pi_lora.drivers.spi.bus import RealSpiBus
+
+        bus = RealSpiBus()
+        assert bus._xfer_timeout == 5.0
+
+    def test_custom_xfer_timeout_is_honored(self) -> None:
+        from src.pi_lora.drivers.spi.bus import RealSpiBus
+
+        bus = RealSpiBus(xfer_timeout=0.25)
+        assert bus._xfer_timeout == 0.25
+
+    @pytest.mark.asyncio
+    async def test_xfer_timeout_raises_timeout_error(self) -> None:
+        from src.pi_lora.drivers.spi.bus import RealSpiBus
+
+        bus = RealSpiBus(xfer_timeout=0.05)
+        bus.bus_number = 0
+        bus._spidev = _HangingKernel(sleep_seconds=2.0)
+
+        with pytest.raises(asyncio.TimeoutError):
+            await bus.xfer2([1, 2, 3])
+
+
+class TestRealSpiBusPropertiesRaiseWhenClosed:
+    """M-14 regression: closed ``RealSpiBus`` property getters raise ``RuntimeError``.
+
+    A ``RealSpiBus`` that has never been opened (``_spidev is None``) must raise
+    ``RuntimeError("SPI bus not opened")`` when accessing ``max_speed_hz``, ``mode``,
+    ``lsbfirst``, or ``no_cs``, matching ``xfer2()``'s closed-state behavior.
+    """
+
+    _closed_property_names = ("max_speed_hz", "mode", "lsbfirst", "no_cs")
+
+    def test_each_closed_property_raises_runtime_error(self) -> None:
+        from src.pi_lora.drivers.spi.bus import RealSpiBus
+
+        bus = RealSpiBus()
+        assert bus._spidev is None
+
+        for name in self._closed_property_names:
+            with pytest.raises(RuntimeError, match="SPI bus not opened"):
+                getattr(bus, name)

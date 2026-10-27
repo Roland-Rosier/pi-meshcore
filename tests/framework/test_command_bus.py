@@ -418,3 +418,42 @@ class TestSyncVsAsyncHandler:
             rec.levelno == logging.WARNING and "TestCommand" in rec.message
             for rec in caplog.records
         )
+
+    @pytest.mark.asyncio
+    async def test_command_bus_cancelled_error_logging(self, caplog) -> None:
+        # H-10 / Plan-16 regression guard: a cancelled async handler must be
+        # caught by the asyncio.CancelledError branch BEFORE the generic
+        # except Exception (which is a superclass), logging the "cancelled"
+        # message instead of the generic "raised" message, then re-raised
+        # verbatim so asyncio cancellation semantics are preserved for the
+        # awaiting coroutine. Raising asyncio.CancelledError() directly in the
+        # awaited coroutine exercises the exact except asyncio.CancelledError
+        # branch execute() has, since the exception surfaces on `await`.
+        bus = CommandBus()
+
+        async def cancelled_handler(_cmd: TestCommand) -> None:
+            raise asyncio.CancelledError()
+
+        bus.register_handler(TestCommand, cancelled_handler)
+        cmd = TestCommand(action="x")
+        with pytest.raises(asyncio.CancelledError):
+            await bus.execute(cmd)
+        cancelled_records = [
+            rec
+            for rec in caplog.records
+            if rec.levelno == logging.WARNING
+            and "cancelled" in rec.message
+            and "TestCommand" in rec.message
+        ]
+        raised_records = [
+            rec
+            for rec in caplog.records
+            if rec.levelno == logging.WARNING
+            and "raised" in rec.message
+        ]
+        assert cancelled_records, (
+            "expected a 'cancelled' warning naming the command type"
+        )
+        assert not raised_records, (
+            "the generic 'raised' message must not be logged for a cancelled handler"
+        )

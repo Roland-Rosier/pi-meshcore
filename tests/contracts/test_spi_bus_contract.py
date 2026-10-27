@@ -37,15 +37,21 @@ def _is_spi_bus(bus: object) -> bool:
 
     ``SpiBus`` is not ``@runtime_checkable``, so a direct ``isinstance`` against
     the protocol is unavailable; the required members are inspected instead.
+    The ``max_speed_hz``/``mode``/``lsbfirst``/``no_cs`` members are properties
+    declared on the class, so they are checked on ``type(bus)`` (property objects
+    on the class do not invoke the getter and therefore do not raise the
+    closed-property ``RuntimeError``), while the methods are checked on the
+    instance.
     """
+    bus_type = type(bus)
     return (
         hasattr(bus, "open")
         and hasattr(bus, "close")
         and hasattr(bus, "xfer2")
-        and hasattr(bus, "max_speed_hz")
-        and hasattr(bus, "mode")
-        and hasattr(bus, "lsbfirst")
-        and hasattr(bus, "no_cs")
+        and hasattr(bus_type, "max_speed_hz")
+        and hasattr(bus_type, "mode")
+        and hasattr(bus_type, "lsbfirst")
+        and hasattr(bus_type, "no_cs")
     )
 
 

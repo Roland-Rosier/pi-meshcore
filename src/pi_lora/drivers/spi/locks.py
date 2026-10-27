@@ -15,6 +15,8 @@
 from __future__ import annotations
 
 import asyncio
+import sys
+import weakref
 from typing import Any, Protocol, Self
 
 
@@ -90,11 +92,14 @@ _registry_init_lock: asyncio.Lock = asyncio.Lock()
 # runtime, but the SPI contract forbids using it before the instance is obtained
 # by awaiting :func:`get_bus_lock`. aiologic.Lock is ``__slots__``-restricted (no
 # ``__dict__``), so the returned instance cannot carry an ``_acquired`` flag.
-# Acquisition is therefore tracked by id in ``_obtained_lock_ids`` and the base
+# Acquisition is therefore tracked by object identity in ``_obtained_locks`` — a
+# ``weakref.WeakSet`` of the lock instances themselves. Because the set holds the
+# actual lock objects (not bare ids) and drops them on GC, ids are never reused
+# across cycles and cross-test false positives/negatives disappear. The base
 # class's sync ``__enter__`` is wrapped exactly once (see ``_ensure_enter_guard``)
 # to raise ``RuntimeError`` on pre-acquisition sync misuse. The async acquisition
 # path (``__aenter__``) is left untouched.
-_obtained_lock_ids: set[int] = set()
+_obtained_locks: weakref.WeakSet[Any] = weakref.WeakSet()
 _enter_guard_patched: bool = False
 
 
@@ -113,7 +118,7 @@ def _ensure_enter_guard() -> None:
     _original_enter = aiologic.Lock.__enter__
 
     def _guarded_enter(self: Any) -> Any:
-        if id(self) not in _obtained_lock_ids:
+        if self not in _obtained_locks:
             raise RuntimeError("Lock not acquired via get_bus_lock()")
         return _original_enter(self)
 
@@ -152,5 +157,29 @@ async def get_bus_lock(bus_number: int) -> SpiLock:
     async with _registry_lock:
         if bus_number not in _bus_locks:
             _bus_locks[bus_number] = _aiologic_module.Lock()
-        _obtained_lock_ids.add(id(_bus_locks[bus_number]))
+        _obtained_locks.add(_bus_locks[bus_number])
         return _bus_locks[bus_number]
+
+
+# pi_lora.drivers.spi.locks and src.pi_lora.drivers.spi.locks are the same physical
+# namespace package but resolve to distinct module objects under pythonpath implicit
+# namespace packaging. The lock registry and the sync __enter__ guard must be a single
+# shared singleton: the guard is patched once onto aiologic.Lock.__enter__ (global),
+# while get_bus_lock exists on both module objects and would otherwise populate the
+# wrong registry, producing an order-dependent false positive under xdist. Unify the
+# registry so both import paths share one set, one dict, one guard.
+_registry_duals: tuple[str, ...] = ("pi_lora.drivers.spi.locks", "src.pi_lora.drivers.spi.locks")
+_here: Any = sys.modules.get(__name__)
+_candidates: list[Any] = []
+for _name in _registry_duals:
+    _module: Any = sys.modules.get(_name)
+    if _module is not None:
+        _candidates.append(_module)
+if _here is not None and len(_candidates) > 1:
+    _shared: Any = max(_candidates, key=lambda _obj: id(_obj))
+    for _name in _registry_duals:
+        _module = sys.modules.get(_name)
+        if _module is not None and _module is not _shared:
+            sys.modules[_name] = _shared
+    for _attr in ("_bus_locks", "_obtained_locks", "_registry_lock", "_aiologic_module", "_enter_guard_patched"):
+        globals()[_attr] = getattr(_shared, _attr)

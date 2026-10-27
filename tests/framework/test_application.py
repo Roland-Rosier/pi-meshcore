@@ -922,6 +922,147 @@ class TestCancellationSemantics:
         assert app._scheduler_started is False
 
 
+class _RestartControllableModule:
+    """Controllable module mirroring the Rfm9xSx127xModule interface for restart tests.
+
+    ``init_spi_bus()`` succeeds so start() tracks the module; ``start_event_loop()``
+    succeeds so start() completes. This lets a patched ``load_from_config()`` register
+    a real tracked module on the successful restart path.
+    """
+
+    def __init__(self, ce_number: int = 0, spi_device_id: int = 0) -> None:
+        self.ce_number: int = ce_number
+        self.spi_device_id: int = spi_device_id
+        self.spi_bus: Any = object()
+        self.close_spi_calls: int = 0
+        self.stop_event_loop_calls: int = 0
+        self._event_queue: asyncio.Queue = asyncio.Queue()
+
+    async def init_spi_bus(self) -> None:
+        return None
+
+    async def start_event_loop(self) -> None:
+        return None
+
+    async def stop_event_loop(self, mode: Any) -> None:
+        self.stop_event_loop_calls += 1
+        return None
+
+    async def close_spi(self) -> None:
+        self.close_spi_calls += 1
+        return None
+
+    def get_spi_device_id(self) -> int:
+        return self.spi_device_id
+
+    def get_ce_number(self) -> int:
+        return self.ce_number
+
+    def get_current_state_name(self) -> str:
+        return "active"
+
+    def get_event_queue_size(self) -> int:
+        return self._event_queue.qsize()
+
+    @property
+    def event_queue(self) -> asyncio.Queue:
+        return self._event_queue
+
+
+class TestApplicationRestart:
+    """CR-2 FIX (Plan-16): Application.start() clears ModuleManager tracking before
+    load_from_config() and Application.stop() clears it after cleanup, so the
+    application can be restarted after a failed start() or after a completed stop()
+    without a stale DuplicateDeviceIdentityError blocking the next start()."""
+
+    @pytest.mark.asyncio
+    async def test_application_restart_after_failed_start(self) -> None:
+        app = Application(config=None, spi_factory=MockSpiBusFactory())
+        load_calls: list[int] = []
+
+        async def _load(
+            radio_configs: list[Any],
+            scheduler: Any,
+            spi_factory: Any | None = None,
+        ) -> None:
+            load_calls.append(len(load_calls))
+            if len(load_calls) == 1:
+                raise RuntimeError("load_from_config() failed on first start")
+            module = _RestartControllableModule(ce_number=0, spi_device_id=0)
+            scheduler.register_module(
+                module, timer_interval=1.0, idle_enabled=True
+            )
+            app.module_manager.modules.append(module)
+            app.module_manager.modules_by_id[(0, 0)] = module
+
+        app.module_manager.load_from_config = _load  # type: ignore[assignment]
+
+        # First start() fails before scheduler.start(), so no module is tracked.
+        with pytest.raises(RuntimeError):
+            await app.start()
+        assert app._started_modules == []
+        assert app._started is False
+        assert app._scheduler_started is False
+        assert app.module_manager.modules == []
+        assert app.module_manager.modules_by_id == {}
+
+        # Second start() clears state, loads modules, and completes successfully.
+        await app.start()
+        assert app._started is True
+        assert len(app.module_manager.get_all_modules()) >= 1
+        assert app._started_modules == app.module_manager.get_all_modules()
+        assert all(mod.spi_bus is not None for mod in app.module_manager.get_all_modules())
+
+        await app.stop()
+        assert app._started is False
+        assert app._started_modules == []
+        assert app._scheduler_started is False
+
+    @pytest.mark.asyncio
+    async def test_application_restart_after_stop(self) -> None:
+        app = Application(config=None, spi_factory=MockSpiBusFactory())
+        load_calls: list[int] = []
+
+        async def _load(
+            radio_configs: list[Any],
+            scheduler: Any,
+            spi_factory: Any | None = None,
+        ) -> None:
+            load_calls.append(len(load_calls))
+            module = _RestartControllableModule(ce_number=0, spi_device_id=0)
+            scheduler.register_module(
+                module, timer_interval=1.0, idle_enabled=True
+            )
+            app.module_manager.modules.append(module)
+            app.module_manager.modules_by_id[(0, 0)] = module
+
+        app.module_manager.load_from_config = _load  # type: ignore[assignment]
+
+        # First start() loads modules.
+        await app.start()
+        assert app._started is True
+        assert len(app.module_manager.get_all_modules()) >= 1
+
+        # stop() drains modules and clears ModuleManager tracking state.
+        await app.stop()
+        assert app._started is False
+        assert app._started_modules == []
+        assert app._scheduler_started is False
+        assert app.module_manager.modules == []
+        assert app.module_manager.modules_by_id == {}
+
+        # Restart succeeds — not blocked by a stale DuplicateDeviceIdentityError.
+        await app.start()
+        assert app._started is True
+        assert len(app.module_manager.get_all_modules()) >= 1
+        assert app._started_modules == app.module_manager.get_all_modules()
+
+        await app.stop()
+        assert app._started is False
+        assert app._started_modules == []
+        assert app._scheduler_started is False
+
+
 if __name__ == "__main__":
     import sys
     exit_code = pytest.main([__file__, "-v"])

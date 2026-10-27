@@ -14,10 +14,10 @@
 
 """Dependency resolution tests — async-typer / typer version compatibility.
 
-Phase 9 verifies that ``async-typer==0.27.2`` and ``typer[all]==0.27.3`` resolve
+Phase 9 verifies that ``async-typer==0.27.2`` and ``typer[all]==0.27.2`` resolve
 to a single consistent ``typer`` version under ``uv``'s constraint solver. The
 ``async-typer`` 0.27.2 package declares ``typer<0.28.0,>=0.27.2``, which accepts
-the pinned ``typer 0.27.3``. This suite locks that compatibility in.
+the pinned ``typer 0.27.2``. This suite locks that compatibility in.
 """
 
 from __future__ import annotations
@@ -136,7 +136,7 @@ class TestDependencyResolution:
     @pytest.mark.parametrize(
         ("name", "expected"),
         [
-            ("typer", (0, 27, 3)),
+            ("typer", (0, 27, 2)),
             ("async-typer", (0, 27, 2)),
         ],
     )
@@ -179,11 +179,11 @@ class TestDependencyResolution:
             assert _typer_constraint_satisfied(requirements, pinned_typer)
 
     def test_installed_typer_matches_pin(self) -> None:
-        """The installed ``typer`` version must equal the ``pyproject`` pin (0.27.3).
+        """The installed ``typer`` version must equal the ``pyproject`` pin (0.27.2).
 
         This locks in that the resolved environment ships the pinned ``typer
-        0.27.3`` rather than merely satisfying ``async-typer``'s constraint
-        abstractly — both the pin and the installed version are 0.27.3.
+        0.27.2`` rather than merely satisfying ``async-typer``'s constraint
+        abstractly — both the pin and the installed version are 0.27.2.
         """
         deps = _load_dependencies()
         pinned_typer: tuple[int, ...] | None = _pinned_version(deps["typer"])

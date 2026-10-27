@@ -166,14 +166,14 @@ class ModuleManager:
                 # The aggregated ExceptionGroup is chained to original_exc (from
                 # original_exc) so both the load-failure cause and the rollback
                 # failures are visible in the chain.
-                rollback_errors: list[BaseException] = []
+                rollback_errors: list[Exception] = []
                 # Pending modules are unregistered LIFO (reverse of registration
                 # order) so the newest scheduler task is cancelled first.
                 while pending_modules:
                     module = pending_modules.pop()
                     try:
                         await scheduler.unregister_module(module)  # Public async API
-                    except BaseException as e:
+                    except Exception as e:
                         logger.error(
                             "Rollback unregister failed for %s: %s", module, e
                         )

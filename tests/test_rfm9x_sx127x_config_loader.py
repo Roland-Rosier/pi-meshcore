@@ -51,6 +51,26 @@ class TestLoadConfig:
         config = load_config(config_name="devices")
         assert len(config.devices) > 0
 
+    def test_config_loader_config_name_filtering(self) -> None:
+        """M-9: load_config filters by config_name, populating only that section."""
+        devices_config = load_config(config_name="devices")
+        assert len(devices_config.devices) > 0
+        assert len(devices_config.families) == 0
+        assert len(devices_config.modules) == 0
+
+        modules_config = load_config(config_name="modules")
+        assert len(modules_config.modules) > 0
+        assert len(modules_config.devices) == 0
+        assert len(modules_config.families) == 0
+
+        families_config = load_config(config_name="families")
+        assert len(families_config.families) > 0
+        assert len(families_config.devices) == 0
+        assert len(families_config.modules) == 0
+
+        with pytest.raises(ValueError):
+            load_config(config_name="widgets")
+
     def test_load_config_invalid_name(self) -> None:
         """Test that invalid config_name raises ValueError."""
         with pytest.raises(ValueError):

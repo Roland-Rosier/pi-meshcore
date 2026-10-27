@@ -10,16 +10,16 @@ rules:
       module-level guard lock using double-checked locking. See
       pi_lora/drivers/rfm9x_sx127x_config_loader.py (_init_lock) and
       pi_lora/drivers/spi/locks.py (_registry_init_lock) for the correct pattern.
-    pattern-either:
-      - pattern: |
-          if $LOCK is None:
-              ...
-              $LOCK = $Y.Lock()
-      - pattern: |
-          if $LOCK is None:
-              $LOCK = $Y.Lock()
-    pattern-not:
-      - pattern-inside: |
+    patterns:
+      - pattern-either:
+          - pattern: |
+              if $LOCK is None:
+                  ...
+                  $LOCK = $Y.Lock()
+          - pattern: |
+              if $LOCK is None:
+                  $LOCK = $Y.Lock()
+      - pattern-not-inside: |
           async with $GUARD:
               ...
               if $LOCK is None:

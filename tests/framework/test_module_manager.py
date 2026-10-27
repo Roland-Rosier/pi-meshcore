@@ -337,6 +337,102 @@ class TestLoadFromConfig:
         assert module0 in scheduler.timer_scheduler._registered
         assert not any("rolled back" in msg.lower() for msg in caplog.messages)
 
+    @pytest.mark.asyncio
+    async def test_module_manager_rollback_aggregates_errors(
+        self, caplog: pytest.LogCaptureFixture,
+    ) -> None:
+        """H-12: rollback unregister_module failures aggregate into an ExceptionGroup chained to original_exc."""
+        mm = ModuleManager()
+        radio_configs = _make_test_radio_configs()
+        scheduler = Scheduler()
+
+        module0: object = object()
+        original_exc: BaseException = RuntimeError("Second module construction failed")
+
+        _call_count: int = 0
+
+        def _construct(*_args: object, **_kwargs: object) -> object:
+            nonlocal _call_count
+            _call_count += 1
+            if _call_count >= 2:
+                raise original_exc
+            return module0
+
+        async def _fail_unregister(*_args: object, **_kwargs: object) -> None:
+            raise RuntimeError("unregister failed during rollback")
+
+        with mock.patch(
+            "src.pi_lora.framework.module_manager.Rfm9xSx127xModule",
+            side_effect=_construct,
+        ), mock.patch.object(
+            scheduler, "unregister_module", side_effect=_fail_unregister
+        ), pytest.raises(ExceptionGroup) as exc_info:
+            await mm.load_from_config(radio_configs, scheduler)
+
+        assert exc_info.value.__cause__ is original_exc
+        assert any(
+            isinstance(e, RuntimeError)
+            and str(e) == "unregister failed during rollback"
+            for e in exc_info.value.exceptions
+        )
+        assert len(mm.modules) == 0
+        assert len(mm.modules_by_id) == 0
+        assert any("rolled back" in msg.lower() for msg in caplog.messages)
+
+    @pytest.mark.asyncio
+    async def test_module_manager_pending_list_no_dangling_refs(
+        self, caplog: pytest.LogCaptureFixture,
+    ) -> None:
+        """H-13: a failed 2nd load leaves NO dangling scheduler reference to the 1st module.
+
+        The 1st module is registered in the scheduler but parked in pending
+        (never committed to main tracking). On the 2nd-module failure the pending
+        list rollback unregisters it, so no dangling reference survives in any
+        scheduler state field, and main tracking is fully empty.
+        """
+        mm = ModuleManager()
+        radio_configs = _make_test_radio_configs()
+        scheduler = Scheduler()
+
+        module0: object = object()
+        _call_count: int = 0
+
+        def _construct(*_args: object, **_kwargs: object) -> object:
+            nonlocal _call_count
+            _call_count += 1
+            if _call_count >= 2:
+                raise RuntimeError("Second module construction failed during load")
+            return module0
+
+        with mock.patch(
+            "src.pi_lora.framework.module_manager.Rfm9xSx127xModule",
+            side_effect=_construct,
+        ), pytest.raises(RuntimeError) as exc_info:
+            await mm.load_from_config(radio_configs, scheduler)
+
+        assert isinstance(exc_info.value, RuntimeError)
+
+        # Main tracking is fully empty — no partial leak visible to callers.
+        assert len(mm.modules) == 0
+        assert len(mm.modules_by_id) == 0
+
+        # No dangling reference survives in ANY scheduler state field.
+        assert module0 not in scheduler.timer_scheduler._registered
+        assert module0 not in scheduler.timer_scheduler._tasks
+        assert module0 not in scheduler.timer_scheduler._intervals
+        assert module0 not in scheduler.timer_scheduler._failure_counts
+        assert module0 not in scheduler.timer_scheduler._last_failure_log
+        assert module0 not in scheduler.idle_pacer._idle_enabled_modules
+        assert all(
+            m is not module0 for m in scheduler.interrupt_bridge._interrupt_map.values()
+        )
+
+        # Pending-list rollback fully releases scheduler state.
+        assert scheduler.timer_scheduler._failure_counts == {}
+        assert scheduler.timer_scheduler._last_failure_log == {}
+
+        assert any("rolled back" in msg.lower() for msg in caplog.messages)
+
 
 class TestEmptyConfig:
     """Verify ModuleManager handles empty config gracefully."""

@@ -14,9 +14,9 @@
 
 """Fake SPI driver for testing LoRa module detection."""
 
+import contextvars
 import sys
 import types
-import contextvars
 from collections.abc import Iterator
 from contextlib import contextmanager
 from unittest.mock import MagicMock

@@ -27,10 +27,11 @@ from types import TracebackType
 from typing import Any
 from unittest.mock import MagicMock, patch
 
+import aiologic
 import pytest
 
 from pi_lora.drivers.spi.bus import RealSpiBus
-from pi_lora.drivers.spi.locks import get_bus_lock
+from pi_lora.drivers.spi.locks import _ensure_enter_guard, get_bus_lock
 
 
 class _ExceptionLock:
@@ -159,6 +160,29 @@ class TestLockAcquisition:
         with lock:
             assert lock.locked() is True
         assert lock.locked() is False
+
+
+class TestSpiLockSyncContextGuard:
+    """Regression for M-16: sync ``with lock:`` rejects pre-acquisition misuse.
+
+    ``_ensure_enter_guard`` wraps ``aiologic.Lock.__enter__`` once so that a
+    lock instance never handed back by ``get_bus_lock`` raises
+    ``RuntimeError("Lock not acquired via get_bus_lock()")`` on a sync
+    ``with lock:``, while an obtained lock still enters cleanly.
+    """
+
+    def test_spi_lock_sync_cm_runtime_check(self) -> None:
+        """Un-obtained ``aiologic.Lock`` raises on sync ``with``; obtained does not."""
+        _ensure_enter_guard()
+
+        unobtained = aiologic.Lock()
+        assert unobtained not in _ensure_enter_guard.__globals__["_obtained_locks"]
+        with pytest.raises(RuntimeError, match="Lock not acquired via get_bus_lock()"), unobtained:
+            pass
+
+        obtained = asyncio.new_event_loop().run_until_complete(get_bus_lock(0))
+        with obtained:
+            assert obtained.locked() is True
 
 
 class _BlockingKernel:

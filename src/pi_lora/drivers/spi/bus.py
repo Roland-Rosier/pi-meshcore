@@ -220,7 +220,7 @@ class RealSpiBus:
     def max_speed_hz(self) -> int:
         """Maximum speed in Hertz."""
         if self._spidev is not None:
-            return self._spidev.max_speed_hz  # type: ignore[no-any-return]
+            return self._spidev.max_speed_hz
         raise RuntimeError("SPI bus not opened")
 
     @max_speed_hz.setter
@@ -233,7 +233,7 @@ class RealSpiBus:
     def mode(self) -> int:
         """SPI mode setting."""
         if self._spidev is not None:
-            return self._spidev.mode  # type: ignore[no-any-return]
+            return self._spidev.mode
         raise RuntimeError("SPI bus not opened")
 
     @mode.setter
@@ -246,7 +246,7 @@ class RealSpiBus:
     def lsbfirst(self) -> bool:
         """Whether least significant bit comes first."""
         if self._spidev is not None:
-            return self._spidev.lsbfirst  # type: ignore[no-any-return]
+            return self._spidev.lsbfirst
         raise RuntimeError("SPI bus not opened")
 
     @lsbfirst.setter
@@ -259,7 +259,7 @@ class RealSpiBus:
     def no_cs(self) -> bool:
         """Whether chip select is disabled."""
         if self._spidev is not None:
-            return self._spidev.no_cs  # type: ignore[no-any-return]
+            return self._spidev.no_cs
         raise RuntimeError("SPI bus not opened")
 
     @no_cs.setter
