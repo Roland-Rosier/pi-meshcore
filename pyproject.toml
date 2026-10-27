@@ -232,14 +232,6 @@ ignore_missing_imports = true
 module = ["pi_lora.framework", "pi_lora.framework.exceptions", "pi_lora.framework.application", "pi_lora.drivers.rfm9x_sx127x_radio_instance", "pi_lora.drivers.rfm9x_sx127x_config_loader"]
 ignore_missing_imports = true
 
-[[tool.mypy.overrides]]
-module = ["src.pi_lora.drivers.rfm9x_sx127x_config_model"]
-disable_error_code = ["import-untyped"]
-
-[[tool.mypy.overrides]]
-module = ["src.pi_lora.framework.application"]
-disable_error_code = ["no-any-return", "unused-ignore"]
-
 # -----------------------------------------------------------------------------
 # ruff configuration (linting)
 # -----------------------------------------------------------------------------
