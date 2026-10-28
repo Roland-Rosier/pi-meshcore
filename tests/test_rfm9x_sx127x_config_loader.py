@@ -71,6 +71,14 @@ class TestLoadConfig:
         with pytest.raises(ValueError):
             load_config(config_name="widgets")
 
+    def test_load_config_config_name_assemblies(self) -> None:
+        """H-16-4 / Plan-17: config_name='assemblies' populates assemblies only."""
+        assemblies_config = load_config(config_name="assemblies")
+        assert len(assemblies_config.assemblies) > 0
+        assert len(assemblies_config.devices) == 0
+        assert len(assemblies_config.families) == 0
+        assert len(assemblies_config.modules) == 0
+
     def test_load_config_invalid_name(self) -> None:
         """Test that invalid config_name raises ValueError."""
         with pytest.raises(ValueError):

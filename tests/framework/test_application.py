@@ -862,6 +862,35 @@ class TestCancellationSemantics:
         assert ran is True
 
     @pytest.mark.asyncio
+    async def test_cleanup_cancelled_preserves_original_cancellation(
+        self,
+    ) -> None:
+        """§1.3/Plan-17: when the cleanup coroutine itself is cancelled AND an
+        original exception is supplied, the ORIGINAL exception is re-raised (not
+        the cleanup CancelledError) so the caller observes the correct
+        cancellation and the outer CancelledError is not lost."""
+        app = Application(config=None, spi_factory=MockSpiBusFactory())
+        original = asyncio.CancelledError("start() was cancelled")
+        cleanup_cancelled = asyncio.CancelledError("cleanup was cancelled")
+        ran = False
+
+        async def _coro_cancelled_during_cleanup() -> None:
+            nonlocal ran
+            ran = True
+            raise cleanup_cancelled
+
+        with pytest.raises(asyncio.CancelledError) as excinfo:
+            await app._cleanup_and_reraise_cancellation(
+                _coro_cancelled_during_cleanup, original
+            )
+
+        assert ran is True
+        # The ORIGINAL exception is what the caller observes, not the cleanup one.
+        assert excinfo.value is original
+        # The cleanup CancelledError is chained as __cause__.
+        assert excinfo.value.__cause__ is cleanup_cancelled
+
+    @pytest.mark.asyncio
     async def test_cleanup_and_reraise_cancellation_surfaces_generic_exception(
         self,
     ) -> None:

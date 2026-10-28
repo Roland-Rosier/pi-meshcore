@@ -117,7 +117,7 @@ class Application:
             if exc_to_raise is not None:
                 try:
                     await self._cleanup_and_reraise_cancellation(
-                        self._cleanup_partial_start
+                        self._cleanup_partial_start, exc_to_raise
                     )
                 except Exception as cleanup_exc:
                     # Preserve original exception as __cause__; cleanup error available via __context__
@@ -179,16 +179,18 @@ class Application:
             raise ExceptionGroup("Errors during Application.stop()", errors)
 
     async def _cleanup_and_reraise_cancellation(
-        self, cleanup_coro: "Callable[[], Awaitable[None]]"
+        self,
+        cleanup_coro: "Callable[[], Awaitable[None]]",
+        original_exc: BaseException | None = None,
     ) -> None:
-        """Run cleanup then re-raise CancelledError to preserve asyncio semantics.
+        """Run cleanup then re-raise the original exception (typically CancelledError).
 
-        CR-3 FIX: Centralizes the correct cancellation pattern used by start(),
-        stop(), and _cleanup_partial_start():
+        CR-3 FIX / §1.3 (Plan-17): Centralizes the correct cancellation pattern
+        used by start(), stop(), and _cleanup_partial_start():
           - Exception: run cleanup, raise (errors already wrapped in ExceptionGroup
             by the cleanup path).
-          - CancelledError: run cleanup, then re-raise CancelledError so asyncio
-            cancellation semantics are preserved for the caller.
+          - CancelledError: run cleanup, then re-raise the ORIGINAL CancelledError
+            so asyncio cancellation semantics are preserved for the caller.
 
         BUG (CR-3): the pre-fix code caught CancelledError together with generic
         Exception via ``except (Exception, asyncio.CancelledError)`` and then did
@@ -202,11 +204,22 @@ class Application:
         await point actually propagates cancellation to the *caller*. Re-raising
         it verbatim restores that contract.
 
+        §1.3 (Plan-17) FIX: if ``cleanup_coro`` itself is cancelled (e.g. during
+        ``await module.stop_event_loop()`` inside the cleanup path), the outer
+        CancelledError would otherwise be lost. We catch that cleanup-cancelled
+        CancelledError and re-raise the ORIGINAL exception so the caller still
+        observes the correct cancellation.
+
         The alternative (catching CancelledError with generic Exception and
         dropping it) was rejected: dropping the CancelledError would let start()
         return normally to a caller that expected the coroutine to be cancelled,
         silently undoing the cancellation and leaving the caller's own await
         loop in an inconsistent state.
+
+        Args:
+            cleanup_coro: The cleanup coroutine to run.
+            original_exc: The exception that triggered cleanup (e.g. CancelledError
+                from start()). If None, re-raises whatever cleanup raises.
 
         Note: ``cleanup_coro`` already performs its own per-module cleanup and may
         itself raise an ExceptionGroup; both branches simply let that raise
@@ -214,31 +227,35 @@ class Application:
         """
         try:
             await cleanup_coro()
-        except asyncio.CancelledError:
-            # Cleanup already ran inside cleanup_coro; re-raise to propagate
-            # cancellation and preserve asyncio semantics.
-            raise
+        except asyncio.CancelledError as cleanup_cancelled:
+            # §1.3/Plan-17: Cleanup was cancelled. Log it but re-raise the
+            # original exception so the caller observes the correct cancellation
+            # instead of losing the outer CancelledError.
+            logger.warning(
+                "Cleanup was cancelled during exception handling; "
+                "re-raising original exception: %r",
+                original_exc,
+            )
+            if original_exc is not None:
+                raise original_exc from cleanup_cancelled
+            raise  # No original exception; re-raise cleanup cancellation
         except Exception:
-            # Cleanup already ran; surface whatever it raised (already an
-            # ExceptionGroup from the cleanup path).
+            # Cleanup raised an exception (already an ExceptionGroup from the
+            # cleanup path). Let it propagate; original_exc is available via
+            # __context__.
             raise
 
     async def _cleanup_partial_start(self) -> None:
         """Mirror stop() for partially-started modules on failure.
 
-        NR-6 FIX: this method does NOT acquire self._lifecycle_lock. It is only
-        ever called from start() (the sole call site is start()'s cleanup block),
-        which already holds the lock for the entire start+cleanup window. Acquiring
-        the lock here would deadlock asyncio's non-recursive Lock on the self-held
-        lock. Mutual exclusion with stop() is now guaranteed by start() holding the
-        lock across the whole window:
+        MUTual EXCLUSION: This method does NOT acquire self._lifecycle_lock.
+        It is only ever called from start() (the sole call site is start's
+        cleanup block), which already holds the lock for the entire start+cleanup
+        window via `async with self._lifecycle_lock:` at line 77.
 
-        - start() only calls _cleanup_partial_start() when self._started == False
-        - stop() only runs when self._started == True
-        - The state machine guarantees these are mutually exclusive:
-          * _cleanup_partial_start() executes during failed start() BEFORE _started becomes True
-          * stop() executes AFTER _started is True
-          * Therefore they can never run concurrently while start() holds the lock
+        stop() acquires the SAME lock. Therefore start() and stop() can never
+        run their cleanup concurrently. The _started flag check in stop() is a
+        fast-path optimization; the lock is the synchronization primitive.
         """
         errors: list[Exception] = []
         # BUG-2 (Plan-11 Phase 2) — scheduler unregistration BEFORE module cleanup.

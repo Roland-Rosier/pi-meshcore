@@ -811,6 +811,63 @@ class TestInterruptBridge:
                 task.cancel()
         assert sleep_calls == []
 
+    @pytest.mark.asyncio
+    async def test_interrupt_bridge_loop_capture_cross_thread(
+        self, mock_module: MagicMock
+    ) -> None:
+        # H-16-2/Plan-17 FIX: trigger_interrupt() must use the event loop captured
+        # in start() (guaranteed the event loop thread), NOT
+        # asyncio.get_running_loop() which returns the *current thread's* loop.
+        # GPIO interrupt callbacks run in arbitrary threads (lgpio/RPi.GPIO/
+        # gpiod), so get_running_loop() there returns the wrong loop or raises
+        # RuntimeError. This regression proves both branches:
+        #
+        #   1. Before start() there is no captured loop; trigger_interrupt() from
+        #      the event loop thread must be a no-op (AttributeError on _loop is
+        #      None is guarded), not a RuntimeError.
+        #   2. After start(), trigger_interrupt() from a *different* thread (not
+        #      the event loop thread) must still signal the drain event on the
+        #      captured loop via call_soon_threadsafe() and deliver the interrupt.
+        bridge = InterruptBridge()
+
+        # (1) No captured loop yet. trigger_interrupt() from the event loop
+        # thread must not raise; the try/except (RuntimeError, AttributeError)
+        # guard handles _loop is None gracefully.
+        bridge.trigger_interrupt(25)
+        assert bridge._loop is None
+        assert not bridge._trigger_queue.empty()
+
+        # (2) start() captures the event loop.
+        await bridge.start()
+        assert bridge._loop is not None
+
+        # (3) Deliver from a non-event-loop thread after start(). This is the
+        # cross-thread case that the old get_running_loop() code got wrong: from
+        # another thread get_running_loop() returns the wrong loop (or raises),
+        # but the captured loop makes call_soon_threadsafe() correct.
+        module = MagicMock()
+        module.event_queue = asyncio.Queue()
+        bridge.register_interrupt(25, module)
+
+        def _from_other_thread() -> None:
+            bridge.trigger_interrupt(25)
+
+        thread = threading.Thread(target=_from_other_thread)
+        thread.start()
+        thread.join()
+        await asyncio.sleep(0.05)
+        await bridge.stop()
+
+        interrupt_events: list[object] = []
+        while not module.event_queue.empty():
+            event = await module.event_queue.get()
+            interrupt_events.append(event)
+        assert any(
+            event.event_type == EventType.INTERRUPT
+            and event.payload.gpio_pin == 25
+            for event in interrupt_events
+        )
+
 
 class TestScheduler:
     """Verify Scheduler composes TimerScheduler, IdlePacer, InterruptBridge."""

@@ -71,19 +71,25 @@ class CommandBus:
         If the handler is a coroutine function it is awaited; otherwise it
         is called directly.
         """
+        # H-16-3 / Plan-17: The previous depth-based lookup computed
+        # `command_depth - len(registered_type.__mro__)` and assumed a
+        # registered type's MRO is a suffix of the command's MRO. That assumption
+        # breaks for diamond inheritance, where two base classes share a common
+        # ancestor but differ in MRO length, so the shallowest match is not the
+        # correct standard-Python-resolution match. Iterate the command's own
+        # MRO in resolution order instead; the first registered handler wins.
+        # This matches isinstance/except semantics exactly. Priority only
+        # disambiguates when two handlers target the exact same type, which
+        # register_handler already rejects, so it is irrelevant here.
         command_mro: tuple[type[Any], ...] = type(command).__mro__
-        command_depth: int = len(command_mro)
         best_key: type[Any] | None = None
         best_tuple: tuple[Callable[..., Any], int] | None = None
-        best_depth: int = command_depth
-        for registered_type, handler_tuple in self._handlers.items():
-            if not isinstance(command, registered_type):
-                continue
-            depth = command_depth - len(registered_type.__mro__)
-            if best_key is None or depth < best_depth:
+        for registered_type in command_mro:
+            handler_tuple = self._handlers.get(registered_type)
+            if handler_tuple is not None:
                 best_key = registered_type
                 best_tuple = handler_tuple
-                best_depth = depth
+                break  # First match in MRO order wins
         if best_key is None:
             raise ValueError(f"No handler for {type(command).__name__}")
         assert best_tuple is not None

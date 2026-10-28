@@ -457,3 +457,115 @@ class TestSyncVsAsyncHandler:
         assert not raised_records, (
             "the generic 'raised' message must not be logged for a cancelled handler"
         )
+
+
+@dataclass(frozen=True)
+class DiamondBase:
+    """Common ancestor of the diamond hierarchy for MRO dispatch tests."""
+
+    action: str = "diamond_base"
+
+
+@dataclass(frozen=True)
+class DiamondLeft(DiamondBase):
+    """Left branch of the diamond hierarchy for MRO dispatch tests."""
+
+    action: str = "diamond_left"
+
+
+@dataclass(frozen=True)
+class DiamondRight(DiamondBase):
+    """Right branch of the diamond hierarchy for MRO dispatch tests."""
+
+    action: str = "diamond_right"
+
+
+@dataclass(frozen=True)
+class Diamond(DiamondLeft, DiamondRight):
+    """Top of the diamond; standard MRO is Diamond, DiamondLeft, DiamondRight."""
+
+    action: str = "diamond"
+
+
+@dataclass(frozen=True)
+class BaseForDerived:
+    """Base command for the derived-class-wins MRO dispatch test."""
+
+    action: str = "base_for_derived"
+
+
+@dataclass(frozen=True)
+class DerivedForDerived(BaseForDerived):
+    """Derived command for the derived-class-wins MRO dispatch test."""
+
+    action: str = "derived_for_derived"
+
+
+class TestMROResolution:
+    """H-16-3 / Plan-17: verify execute() uses standard Python MRO resolution."""
+
+    @pytest.mark.asyncio
+    async def test_command_bus_mro_diamond_inheritance(self) -> None:
+        # Diamond MRO is [Diamond, DiamondLeft, DiamondRight, DiamondBase].
+        # The old depth-based lookup assumed a registered type's MRO is a suffix
+        # of the command's MRO and broke here: both branches have equal depth,
+        # so it kept whichever was registered first. Standard resolution picks
+        # the first registered type in the command's MRO, which is DiamondLeft.
+        bus = CommandBus()
+        left_calls: list[str] = []
+        right_calls: list[str] = []
+
+        def left_handler(cmd: DiamondLeft) -> str:
+            left_calls.append(cmd.action)
+            return "left"
+
+        def right_handler(cmd: DiamondRight) -> str:
+            right_calls.append(cmd.action)
+            return "right"
+
+        # Register DiamondRight first: the buggy depth-based lookup ties both
+        # branches at equal depth and would return DiamondRight.
+        bus.register_handler(DiamondRight, right_handler)
+        bus.register_handler(DiamondLeft, left_handler)
+        instance = Diamond(action="d")
+        ret = await bus.execute(instance)
+        assert ret == "left"
+        assert left_calls == ["d"]
+        assert right_calls == []
+
+    @pytest.mark.asyncio
+    async def test_command_bus_mro_derived_class_wins(self) -> None:
+        # The handler registered for the most specific type (derived) must win
+        # over the base handler under standard MRO resolution.
+        bus = CommandBus()
+        derived_calls: list[str] = []
+        base_calls: list[str] = []
+
+        def derived_handler(cmd: DerivedForDerived) -> str:
+            derived_calls.append(cmd.action)
+            return "derived"
+
+        def base_handler(cmd: BaseForDerived) -> str:
+            base_calls.append(cmd.action)
+            return "base"
+
+        bus.register_handler(BaseForDerived, base_handler)
+        bus.register_handler(DerivedForDerived, derived_handler)
+        instance = DerivedForDerived(action="x")
+        ret = await bus.execute(instance)
+        assert ret == "derived"
+        assert derived_calls == ["x"]
+        assert base_calls == []
+
+    def test_command_bus_priority_same_type_rejected(self) -> None:
+        # Priority only disambiguates handlers for the exact same type. The
+        # register_handler guard rejects a duplicate same-type registration at
+        # equal or higher priority, so this still raises before lookup.
+        bus = CommandBus()
+        bus.register_handler(TestCommand, lambda _cmd: None, priority=0)
+        with pytest.raises(
+            ValueError, match=r"Handler for 'TestCommand' already registered"
+        ):
+            bus.register_handler(
+                TestCommand, lambda _cmd: None, priority=0
+            )

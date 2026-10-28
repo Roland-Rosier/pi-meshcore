@@ -433,6 +433,123 @@ class TestLoadFromConfig:
 
         assert any("rolled back" in msg.lower() for msg in caplog.messages)
 
+    @pytest.mark.asyncio
+    async def test_load_from_config_keyboard_interrupt_rolls_back(
+        self, caplog: pytest.LogCaptureFixture,
+    ) -> None:
+        """H-16-1/Plan-17: KeyboardInterrupt (a BaseException, not Exception) rolls back.
+
+        A process shutdown signal must NOT commit partial modules; the scheduler
+        owned pending modules must be unregistered and main tracking reset empty.
+        """
+        mm = ModuleManager()
+        radio_configs = _make_test_radio_configs()
+        scheduler = Scheduler()
+
+        module0: object = object()
+        _call_count: int = 0
+
+        def _construct(*_args: object, **_kwargs: object) -> object:
+            nonlocal _call_count
+            _call_count += 1
+            if _call_count >= 2:
+                raise KeyboardInterrupt("KeyboardInterrupt during load")
+            return module0
+
+        with mock.patch(
+            "src.pi_lora.framework.module_manager.Rfm9xSx127xModule",
+            side_effect=_construct,
+        ), pytest.raises(KeyboardInterrupt):
+            await mm.load_from_config(radio_configs, scheduler)
+
+        # Rolled back: no partial modules committed to main tracking.
+        assert len(mm.modules) == 0
+        assert len(mm.modules_by_id) == 0
+        assert scheduler.timer_scheduler._registered == set()
+        assert module0 not in scheduler.idle_pacer._idle_enabled_modules
+        assert all(
+            m is not module0 for m in scheduler.interrupt_bridge._interrupt_map.values()
+        )
+        assert any("rolled back" in msg.lower() for msg in caplog.messages)
+
+    @pytest.mark.asyncio
+    async def test_load_from_config_system_exit_rolls_back(
+        self, caplog: pytest.LogCaptureFixture,
+    ) -> None:
+        """H-16-1/Plan-17: SystemExit (a BaseException, not Exception) rolls back.
+
+        A process shutdown signal must NOT commit partial modules; the scheduler
+        owned pending modules must be unregistered and main tracking reset empty.
+        """
+        mm = ModuleManager()
+        radio_configs = _make_test_radio_configs()
+        scheduler = Scheduler()
+
+        module0: object = object()
+        _call_count: int = 0
+
+        def _construct(*_args: object, **_kwargs: object) -> object:
+            nonlocal _call_count
+            _call_count += 1
+            if _call_count >= 2:
+                raise SystemExit("SystemExit during load")
+            return module0
+
+        with mock.patch(
+            "src.pi_lora.framework.module_manager.Rfm9xSx127xModule",
+            side_effect=_construct,
+        ), pytest.raises(SystemExit):
+            await mm.load_from_config(radio_configs, scheduler)
+
+        # Rolled back: no partial modules committed to main tracking.
+        assert len(mm.modules) == 0
+        assert len(mm.modules_by_id) == 0
+        assert scheduler.timer_scheduler._registered == set()
+        assert module0 not in scheduler.idle_pacer._idle_enabled_modules
+        assert all(
+            m is not module0 for m in scheduler.interrupt_bridge._interrupt_map.values()
+        )
+        assert any("rolled back" in msg.lower() for msg in caplog.messages)
+
+    @pytest.mark.asyncio
+    async def test_load_from_config_cancelled_error_commits(
+        self, caplog: pytest.LogCaptureFixture,
+    ) -> None:
+        """H-16-1/Plan-17 regression: CancelledError commits partial modules.
+
+        CancelledError is a BaseException that signals the caller's task was
+        cancelled, not a recoverable load failure. The successfully-created module
+        must remain committed to main tracking and stay registered in the
+        scheduler (never unregistered). This is the regression test that guards
+        against the previous bug that rolled back on cancellation.
+        """
+        mm = ModuleManager()
+        radio_configs = _make_test_radio_configs()
+        scheduler = Scheduler()
+
+        module0: object = object()
+        _call_count: int = 0
+
+        def _construct(*_args: object, **_kwargs: object) -> object:
+            nonlocal _call_count
+            _call_count += 1
+            if _call_count >= 2:
+                raise asyncio.CancelledError("Module cancelled during load")
+            return module0
+
+        with mock.patch(
+            "src.pi_lora.framework.module_manager.Rfm9xSx127xModule",
+            side_effect=_construct,
+        ), pytest.raises(asyncio.CancelledError):
+            await mm.load_from_config(radio_configs, scheduler)
+
+        # Committed (NOT rolled back): the first module stays registered.
+        assert len(mm.modules) == 1
+        assert module0 in mm.modules
+        assert module0 in scheduler.timer_scheduler._registered
+        assert module0 in scheduler.idle_pacer._idle_enabled_modules
+        assert not any("rolled back" in msg.lower() for msg in caplog.messages)
+
 
 class TestEmptyConfig:
     """Verify ModuleManager handles empty config gracefully."""

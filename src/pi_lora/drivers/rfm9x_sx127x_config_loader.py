@@ -105,6 +105,10 @@ def load_config(
             "devices": config.devices,
             "families": config.families,
             "modules": config.modules,
+            # Plan-17 / H-16-4: assemblies was validated here but had no explicit
+            # handling branch, so it fell through to the families return and
+            # populated families instead of assemblies. Added below.
+            "assemblies": config.assemblies,
         }
         if config_name not in key_map:
             raise ValueError(
@@ -115,6 +119,10 @@ def load_config(
             return Rfm9xSx127xConfig(devices=config.devices)
         if config_name == "modules":
             return Rfm9xSx127xConfig(modules=config.modules)
+        # Plan-17 / H-16-4: explicit assemblies branch mirroring devices/modules.
+        # Previously missing; fell through to families (wrong section populated).
+        if config_name == "assemblies":
+            return Rfm9xSx127xConfig(assemblies=config.assemblies)
         return Rfm9xSx127xConfig(families=config.families)
 
     return config

@@ -21,6 +21,7 @@ not a zero-latency rate. See ``IdlePacer.__doc__`` for the breaking-change notic
 from __future__ import annotations
 
 import asyncio
+import contextlib
 import logging
 import queue
 import threading
@@ -343,6 +344,17 @@ class InterruptBridge:
         self._drain_event: asyncio.Event = asyncio.Event()
         self._task: asyncio.Task[None] | None = None
         self._drain_task: asyncio.Task[None] | None = None
+        # H-16-2/Plan-17 FIX: the event loop captured once in start().
+        # trigger_interrupt() runs in a GPIO interrupt thread (lgpio/RPi.GPIO/
+        # gpiod), which is NOT the event loop thread. asyncio.get_running_loop()
+        # returns the *current thread's* loop, so calling it from the GPIO thread
+        # returns the wrong loop (or raises RuntimeError when no loop is running),
+        # causing call_soon_threadsafe() to signal the wrong loop. start() runs
+        # guaranteed in the event loop thread, so capturing the loop there and
+        # reusing it here is correct. Guarded with try/except (RuntimeError,
+        # AttributeError) so early init before start() (no captured loop yet) is a
+        # no-op.
+        self._loop: asyncio.AbstractEventLoop | None = None
 
     def register_interrupt(self, gpio_pin: int, module: Rfm9xSx127xModule) -> None:
         if gpio_pin in self._interrupt_map:
@@ -405,16 +417,26 @@ class InterruptBridge:
         # asyncio.sleep(0.001). trigger_interrupt() runs in a SYNC thread context
         # (GPIO interrupt callbacks), which is possibly NOT the event loop thread.
         # loop.call_soon_threadsafe() is the thread-safe way to schedule the Event
-        # set on the running loop; guard with try/except RuntimeError because there
-        # may be no running loop (called from a GPIO callback before start()).
-        try:
-            loop = asyncio.get_running_loop()
-            loop.call_soon_threadsafe(self._drain_event.set)
-        except RuntimeError:
-            pass  # No running loop (early init before start()); nothing to signal
+        # set on the running loop. Guarded: if start() has not run yet self._loop is
+        # None (no captured loop), so the signal is skipped; if a loop exists but
+        # has no running loop (called from a GPIO callback before start()),
+        # contextlib.suppress(RuntimeError, AttributeError) absorbs it as a no-op.
+        if self._loop is not None:
+            # H-16-2/Plan-17: Use captured loop from start() instead of
+            # asyncio.get_running_loop() which returns the current thread's loop
+            # (wrong thread for GPIO callbacks).
+            with contextlib.suppress(RuntimeError, AttributeError):
+                self._loop.call_soon_threadsafe(self._drain_event.set)
 
     async def start(self) -> None:
         self._running = True
+        # H-16-2/Plan-17: Capture the event loop here (guaranteed to be the
+        # event loop thread) so trigger_interrupt() can use call_soon_threadsafe
+        # from GPIO interrupt threads. asyncio.get_running_loop() was previously
+        # called inside trigger_interrupt(), but that returned the GPIO thread's
+        # loop (wrong loop) or raised RuntimeError, so the drain Event was
+        # signaled on the wrong loop.
+        self._loop = asyncio.get_running_loop()
         if self._task is None or self._task.done():
             self._task = asyncio.create_task(self._interrupt_task())
         if self._drain_task is None or self._drain_task.done():
