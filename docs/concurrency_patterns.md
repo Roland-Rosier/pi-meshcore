@@ -58,3 +58,58 @@ This is the ONLY `threading.Lock` in the codebase. It is documented inline in
 `threading.Lock` and NOT `aiologic.Lock`. Any other use of `threading.Lock`
 outside this sanctioned case, or any `aiologic.Lock` used in a sync thread
 without an event loop, is a violation flagged by the `lazy-lock-guard` audit.
+
+## InterruptBridge Loop Capture (Plan-17)
+
+`trigger_interrupt()` runs in a **sync thread context** (the GPIO driver thread
+from lgpio / RPi.GPIO / gpiod), which is *not* the asyncio event loop thread.
+Calling `asyncio.get_running_loop()` there returns the *wrong* loop (or raises
+`RuntimeError`), so a drain Event would be signaled on the wrong loop. The fix
+captures the correct loop once in `start()` (which is guaranteed to run in the
+event loop thread) and uses the thread-safe `call_soon_threadsafe()`:
+
+```python
+# __init__
+self._loop: asyncio.AbstractEventLoop | None = None
+
+# start() — guaranteed to run in the event loop thread
+async def start(self) -> None:
+    self._running = True
+    self._loop = asyncio.get_running_loop()  # capture the correct loop
+    ...
+
+# trigger_interrupt() — runs in the GPIO driver thread
+if self._loop is not None:
+    with contextlib.suppress(RuntimeError, AttributeError):
+        self._loop.call_soon_threadsafe(self._drain_event.set)
+```
+
+`start()` captures `self._loop` and guards the use with `if self._loop is not
+None` + `contextlib.suppress(RuntimeError, AttributeError)` so an early call
+before `start()` is a safe no-op. This is the H-16-2 case.
+
+## CommandBus MRO Resolution (Plan-17)
+
+Handler lookup resolves by iterating the command's **own MRO in standard Python
+order** and returning the first registered match. The previous depth-based
+`command_depth - len(registered_type.__mro__)` lookup assumed a registered type's
+MRO is a suffix of the command's MRO, which breaks for diamond inheritance.
+Iterating `type(command).__mro__` matches `isinstance`/`except` semantics exactly;
+the first match in MRO order wins and `priority` is irrelevant (the same-type
+duplicate is rejected at registration):
+
+```python
+command_mro: tuple[type[Any], ...] = type(command).__mro__
+best_key: type[Any] | None = None
+best_tuple: tuple[Callable[..., Any], int] | None = None
+for registered_type in command_mro:
+    handler_tuple = self._handlers.get(registered_type)
+    if handler_tuple is not None:
+        best_key = registered_type
+        best_tuple = handler_tuple
+        break  # First match in MRO order wins
+if best_key is None:
+    raise ValueError(f"No handler for {type(command).__name__}")
+```
+
+This is the H-16-3 case.
