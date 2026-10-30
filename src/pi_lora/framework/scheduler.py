@@ -229,28 +229,41 @@ class IdlePacer:
             now = time.monotonic()
             for module in list(self._idle_enabled_modules):
                 module_id = id(module)
+                # Location 6 (Plan-18 §6 anti-regression). Exponential backoff
+                # mirroring TimerScheduler (Plans 15/16 BUG-7 fix): per-module
+                # failure tracking with exponential backoff (min 0.1s, max 60s),
+                # engaging after 5 consecutive failures and resetting on success.
+                # Without this, a queue-full paced module logged at ~100 Hz ->
+                # unbounded error spam / CPU waste (the pre-Plan-18 pre-existing
+                # bug). Do NOT regress to a flat per-iteration log.
                 # Check backoff
                 if module_id in self._backoff_until and now < self._backoff_until[module_id]:
                     continue
 
                 try:
                     await module.event_queue.put(ModuleEvent(EventType.IDLE))
-                    # Success — reset failure count
+                    # Success — reset failure count and drop any active backoff
+                    # window so the next failure restarts the exponential curve at
+                    # 0.1s (mirrors TimerScheduler's recovery reset).
                     self._failure_count[module_id] = 0
                     if module_id in self._backoff_until:
                         del self._backoff_until[module_id]
                 except asyncio.QueueFull:
-                    # Failure — increment and apply backoff
+                    # Failure — increment per-module failure count and apply
+                    # exponential backoff: after 5 consecutive failures the delay
+                    # grows 0.1s -> 0.2s -> ... -> 60s cap, bounding spam to a
+                    # logarithmic rate (mirrors TimerScheduler's
+                    # min(2 ** failure_count, 60) pattern).
                     count = self._failure_count.get(module_id, 0) + 1
                     self._failure_count[module_id] = count
                     delay: float = 0.0
-                    if count > 5:  # Cap at 5 failures before backoff
+                    if count > 5:  # Cap at 5 failures before backoff engages
                         delay = min(0.1 * (2 ** (count - 5)), 60.0)
                         self._backoff_until[module_id] = now + delay
                     logging.getLogger(__name__).warning(
                         f"IdlePacer queue full for module {module_id}, backoff={delay}s"
                     )
-            await asyncio.sleep(1.0)  # Base idle interval
+            await asyncio.sleep(self._min_interval)  # Base idle interval
 
 
 class InterruptBridge:
@@ -467,7 +480,15 @@ class InterruptBridge:
         if self._drain_task and not self._drain_task.done():
             self._drain_task.cancel()
             await asyncio.gather(self._drain_task, return_exceptions=True)
-        self._loop = None  # Clear _loop on stop to allow safe restart. Stale loop reference would cause RuntimeError on call_soon_threadsafe.
+        # Location 5 (Plan-18 §6 anti-regression). Clear _loop on stop.
+        # Plan-17 H-16-2 captured the event loop in start()
+        # (self._loop = asyncio.get_running_loop()) but did NOT release it in
+        # stop(), so the stale loop reference survived a stop() -> start()
+        # restart. On restart trigger_interrupt() would call
+        # call_soon_threadsafe() on the stale, possibly-closed loop -> RuntimeError.
+        # Setting self._loop = None on stop forces start() to re-capture a fresh
+        # loop, guaranteeing restart safety.
+        self._loop = None
 
     async def _drain_sync_queue(self) -> None:
         """Drain thread-safe producer queue into async consumer queue.

@@ -308,10 +308,17 @@ class TestLoadFromConfig:
         assert any("rolled back" in msg.lower() for msg in caplog.messages)
 
     @pytest.mark.asyncio
-    async def test_cancelled_error_propagates(
+    async def test_cancelled_error_rolls_back(
         self, caplog: pytest.LogCaptureFixture,
     ) -> None:
-        """CancelledError is a BaseException (not Exception); it propagates and is NOT rolled back."""
+        """CancelledError rolls back (Plan-18 §5.1).
+
+        CancelledError is a BaseException (not Exception) in Python 3.13, so it is
+        NOT matched by ``except Exception`` alone. The explicit
+        ``(Exception, asyncio.CancelledError)`` handler catches it and rolls back
+        the pending modules exactly like a regular Exception: the first module is
+        unregistered and main tracking is reset empty.
+        """
         mm = ModuleManager()
         radio_configs = _make_test_radio_configs()
         scheduler = Scheduler()
@@ -332,10 +339,12 @@ class TestLoadFromConfig:
         ), pytest.raises(asyncio.CancelledError):
             await mm.load_from_config(radio_configs, scheduler)
 
-        # Not rolled back: the first module remains registered.
-        assert len(mm.modules) == 1
-        assert module0 in scheduler.timer_scheduler._registered
-        assert not any("rolled back" in msg.lower() for msg in caplog.messages)
+        # Rolled back: the first module is unregistered and main tracking is empty.
+        assert len(mm.modules) == 0
+        assert len(mm.modules_by_id) == 0
+        assert scheduler.timer_scheduler._registered == set()
+        assert module0 not in scheduler.idle_pacer._idle_enabled_modules
+        assert any("rolled back" in msg.lower() for msg in caplog.messages)
 
     @pytest.mark.asyncio
     async def test_module_manager_rollback_aggregates_errors(
@@ -434,13 +443,17 @@ class TestLoadFromConfig:
         assert any("rolled back" in msg.lower() for msg in caplog.messages)
 
     @pytest.mark.asyncio
-    async def test_load_from_config_keyboard_interrupt_rolls_back(
+    async def test_load_from_config_keyboard_interrupt_propagates_no_cleanup(
         self, caplog: pytest.LogCaptureFixture,
     ) -> None:
-        """H-16-1/Plan-17: KeyboardInterrupt (a BaseException, not Exception) rolls back.
+        """KeyboardInterrupt propagates without async cleanup (Plan-18 §5.3).
 
-        A process shutdown signal must NOT commit partial modules; the scheduler
-        owned pending modules must be unregistered and main tracking reset empty.
+        KeyboardInterrupt is a shutdown signal (a BaseException, not Exception, and
+        not CancelledError), so it is NOT matched by the
+        ``(Exception, asyncio.CancelledError)`` handler. It propagates immediately
+        with no rollback: the scheduler keeps the pending module registered and no
+        "rolled back" message is logged. Main tracking stays empty because nothing
+        was ever committed.
         """
         mm = ModuleManager()
         radio_configs = _make_test_radio_configs()
@@ -462,24 +475,28 @@ class TestLoadFromConfig:
         ), pytest.raises(KeyboardInterrupt):
             await mm.load_from_config(radio_configs, scheduler)
 
-        # Rolled back: no partial modules committed to main tracking.
+        # Shutdown signal is NOT caught by the handler -> rollback never ran.
+        # Main tracking stays empty (nothing was committed), but the pending
+        # module remains registered in the scheduler because no rollback ran.
         assert len(mm.modules) == 0
         assert len(mm.modules_by_id) == 0
-        assert scheduler.timer_scheduler._registered == set()
-        assert module0 not in scheduler.idle_pacer._idle_enabled_modules
-        assert all(
-            m is not module0 for m in scheduler.interrupt_bridge._interrupt_map.values()
-        )
-        assert any("rolled back" in msg.lower() for msg in caplog.messages)
+        assert module0 in scheduler.timer_scheduler._registered
+        assert module0 in scheduler.idle_pacer._idle_enabled_modules
+        assert any(m is module0 for m in scheduler.interrupt_bridge._interrupt_map.values())
+        assert not any("rolled back" in msg.lower() for msg in caplog.messages)
 
     @pytest.mark.asyncio
-    async def test_load_from_config_system_exit_rolls_back(
+    async def test_load_from_config_system_exit_propagates_no_cleanup(
         self, caplog: pytest.LogCaptureFixture,
     ) -> None:
-        """H-16-1/Plan-17: SystemExit (a BaseException, not Exception) rolls back.
+        """SystemExit propagates without async cleanup (Plan-18 §5.3).
 
-        A process shutdown signal must NOT commit partial modules; the scheduler
-        owned pending modules must be unregistered and main tracking reset empty.
+        SystemExit is a shutdown signal (a BaseException, not Exception, and not
+        CancelledError), so it is NOT matched by the
+        ``(Exception, asyncio.CancelledError)`` handler. It propagates immediately
+        with no rollback: the scheduler keeps the pending module registered and no
+        "rolled back" message is logged. Main tracking stays empty because nothing
+        was ever committed.
         """
         mm = ModuleManager()
         radio_configs = _make_test_radio_configs()
@@ -501,27 +518,27 @@ class TestLoadFromConfig:
         ), pytest.raises(SystemExit):
             await mm.load_from_config(radio_configs, scheduler)
 
-        # Rolled back: no partial modules committed to main tracking.
+        # Shutdown signal is NOT caught by the handler -> rollback never ran.
+        # Main tracking stays empty (nothing was committed), but the pending
+        # module remains registered in the scheduler because no rollback ran.
         assert len(mm.modules) == 0
         assert len(mm.modules_by_id) == 0
-        assert scheduler.timer_scheduler._registered == set()
-        assert module0 not in scheduler.idle_pacer._idle_enabled_modules
-        assert all(
-            m is not module0 for m in scheduler.interrupt_bridge._interrupt_map.values()
-        )
-        assert any("rolled back" in msg.lower() for msg in caplog.messages)
+        assert module0 in scheduler.timer_scheduler._registered
+        assert module0 in scheduler.idle_pacer._idle_enabled_modules
+        assert any(m is module0 for m in scheduler.interrupt_bridge._interrupt_map.values())
+        assert not any("rolled back" in msg.lower() for msg in caplog.messages)
 
     @pytest.mark.asyncio
-    async def test_load_from_config_cancelled_error_commits(
+    async def test_load_from_config_cancelled_error_rolls_back(
         self, caplog: pytest.LogCaptureFixture,
     ) -> None:
-        """H-16-1/Plan-17 regression: CancelledError commits partial modules.
+        """CancelledError rolls back on load (Plan-18 §5.1).
 
         CancelledError is a BaseException that signals the caller's task was
-        cancelled, not a recoverable load failure. The successfully-created module
-        must remain committed to main tracking and stay registered in the
-        scheduler (never unregistered). This is the regression test that guards
-        against the previous bug that rolled back on cancellation.
+        cancelled, not a recoverable load failure. Plan-18 §5.1 requires it to roll
+        back exactly like a regular Exception: the pending module is unregistered
+        and main tracking is reset empty. This guards against the Plan-17 regression
+        that committed (never unregistered) on cancellation.
         """
         mm = ModuleManager()
         radio_configs = _make_test_radio_configs()
@@ -543,12 +560,105 @@ class TestLoadFromConfig:
         ), pytest.raises(asyncio.CancelledError):
             await mm.load_from_config(radio_configs, scheduler)
 
-        # Committed (NOT rolled back): the first module stays registered.
-        assert len(mm.modules) == 1
-        assert module0 in mm.modules
-        assert module0 in scheduler.timer_scheduler._registered
-        assert module0 in scheduler.idle_pacer._idle_enabled_modules
-        assert not any("rolled back" in msg.lower() for msg in caplog.messages)
+        # Rolled back (NOT committed): the first module is unregistered and main
+        # tracking is reset empty.
+        assert len(mm.modules) == 0
+        assert len(mm.modules_by_id) == 0
+        assert module0 not in scheduler.timer_scheduler._registered
+        assert module0 not in scheduler.idle_pacer._idle_enabled_modules
+        assert any("rolled back" in msg.lower() for msg in caplog.messages)
+
+    @pytest.mark.asyncio
+    async def test_load_from_config_keyboard_interrupt_no_async_cleanup(
+        self,
+    ) -> None:
+        """Blocker 5.3: KeyboardInterrupt (a BaseException, not Exception) propagates
+        immediately without async cleanup. The event loop may be closed during process
+        shutdown, so ``_rollback_pending_modules()`` (which awaits
+        ``scheduler.unregister_module()``) must NOT run. ``KeyboardInterrupt`` is not
+        caught by ``except Exception`` in ``load_from_config()``.
+        """
+        mm = ModuleManager()
+        radio_configs = _make_test_radio_configs()
+        scheduler = Scheduler()
+
+        module0: object = object()
+        _call_count: int = 0
+
+        def _construct(*_args: object, **_kwargs: object) -> object:
+            nonlocal _call_count
+            _call_count += 1
+            if _call_count >= 2:
+                raise KeyboardInterrupt("KeyboardInterrupt during load")
+            return module0
+
+        unregister = mock.MagicMock()
+
+        def _refuse(*_args: object, **_kwargs: object) -> None:
+            raise AssertionError("unregister_module must not run for KeyboardInterrupt")
+
+        unregister.side_effect = _refuse
+
+        with (
+            mock.patch(
+                "src.pi_lora.framework.module_manager.Rfm9xSx127xModule",
+                side_effect=_construct,
+            ),
+            mock.patch.object(scheduler, "unregister_module", unregister),
+            pytest.raises(KeyboardInterrupt),
+        ):
+            await mm.load_from_config(radio_configs, scheduler)
+
+        # KeyboardInterrupt is not caught by ``except Exception`` -> rollback never ran.
+        assert unregister.call_count == 0
+        assert len(mm.modules) == 0
+        assert len(mm.modules_by_id) == 0
+
+    @pytest.mark.asyncio
+    async def test_load_from_config_system_exit_no_async_cleanup(
+        self,
+    ) -> None:
+        """Blocker 5.3: SystemExit (a BaseException, not Exception) propagates
+        immediately without async cleanup. The event loop may be closed during process
+        shutdown, so ``_rollback_pending_modules()`` (which awaits
+        ``scheduler.unregister_module()``) must NOT run. ``SystemExit`` is not caught
+        by ``except Exception`` in ``load_from_config()``.
+        """
+        mm = ModuleManager()
+        radio_configs = _make_test_radio_configs()
+        scheduler = Scheduler()
+
+        module0: object = object()
+        _call_count: int = 0
+
+        def _construct(*_args: object, **_kwargs: object) -> object:
+            nonlocal _call_count
+            _call_count += 1
+            if _call_count >= 2:
+                raise SystemExit("SystemExit during load")
+            return module0
+
+        unregister = mock.MagicMock()
+
+        def _refuse(*_args: object, **_kwargs: object) -> None:
+            raise AssertionError("unregister_module must not run for SystemExit")
+
+        unregister.side_effect = _refuse
+
+        with (
+            mock.patch(
+                "src.pi_lora.framework.module_manager.Rfm9xSx127xModule",
+                side_effect=_construct,
+            ),
+            mock.patch.object(scheduler, "unregister_module", unregister),
+            pytest.raises(SystemExit),
+        ):
+            await mm.load_from_config(radio_configs, scheduler)
+
+        # SystemExit is not caught by ``except Exception`` -> rollback never ran.
+        assert unregister.call_count == 0
+        assert len(mm.modules) == 0
+        assert len(mm.modules_by_id) == 0
 
 
 class TestEmptyConfig:

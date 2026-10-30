@@ -368,7 +368,7 @@ class TestIdlePacer:
             async def put(self, item: object) -> None:
                 if not self._raised_once:
                     self._raised_once = True
-                    raise RuntimeError("event_queue corrupted")
+                    raise asyncio.QueueFull()
                 self._items.append(item)
 
             async def get(self) -> object:
@@ -385,7 +385,9 @@ class TestIdlePacer:
             await asyncio.wait_for(pacer._idle_task(), timeout=0.2)
         assert isinstance(timeout_info.value, asyncio.TimeoutError)
         mock_logger = mock_get_logger.return_value
-        assert mock_logger.error.called
+        # Plan-18 §5.5: a QueueFull put failure is logged as a warning (with
+        # exponential backoff), not an error, and the idle task survives it.
+        assert mock_logger.warning.called
         events: list[object] = []
         while module.event_queue._items:
             events.append(await module.event_queue.get())
@@ -447,6 +449,63 @@ class TestIdlePacer:
         module_doc: str = scheduler_module.__doc__ or ""
         assert "IdlePacer" in module_doc
         assert "min_interval" in module_doc
+
+    @pytest.mark.asyncio
+    async def test_idle_pacer_backoff_on_failure(self) -> None:
+        """Blocker 5.5: IdlePacer applies exponential backoff once the per-module
+        failure count exceeds 5. Fill the module queue to full so ``put()`` raises
+        ``QueueFull``; verify a warning is logged, the backoff delay increases
+        (0.0s -> 0.2s) once count > 5, and spamming stops (the module is skipped while
+        inside ``_backoff_until``).
+        """
+        class _AlwaysFullQueue:
+            def __init__(self) -> None:
+                self.put_calls: int = 0
+
+            async def put(self, item: object) -> None:
+                self.put_calls += 1
+                raise asyncio.QueueFull()
+
+            async def get(self, *_args: object, **_kwargs: object) -> None:
+                return None
+
+        module = MagicMock()
+        module.event_queue = _AlwaysFullQueue()
+
+        pacer = IdlePacer(min_interval=0.01)
+        pacer.set_idle_enabled(module, True)
+        pacer._running = True
+
+        recorded: list[float] = []
+
+        async def fake_sleep(seconds: float) -> None:
+            recorded.append(seconds)
+            if len(recorded) >= 8:
+                pacer._running = False
+
+        with patch("logging.getLogger") as mock_get_logger, patch(
+            "asyncio.sleep", side_effect=fake_sleep
+        ):
+            await pacer._idle_task()
+
+        mock_logger = mock_get_logger.return_value
+        assert mock_logger.warning.called
+
+        # Failure count exceeded 5 -> backoff engaged.
+        assert pacer._failure_count.get(id(module)) == 6
+        # Backoff delay for the 6th failure: min(0.1 * 2**(6-5), 60) == 0.2s.
+        assert pacer._backoff_until.get(id(module)) is not None
+
+        warning_texts = [
+            call.args[0] for call in mock_logger.warning.call_args_list if call.args
+        ]
+        # Counts 1-5 log with no backoff (0.0s); count 6 engages backoff (0.2s).
+        assert any("backoff=0.0s" in text for text in warning_texts)
+        assert any("backoff=0.2s" in text for text in warning_texts)
+
+        # Spamming stopped after backoff engaged: put() called exactly 6 times
+        # (counts 1-6); iterations 7-8 were skipped while inside _backoff_until.
+        assert module.event_queue.put_calls == 6
 
 
 class TestInterruptBridge:
@@ -867,6 +926,35 @@ class TestInterruptBridge:
             and event.payload.gpio_pin == 25
             for event in interrupt_events
         )
+
+    @pytest.mark.asyncio
+    async def test_interrupt_bridge_restart_captures_new_loop(
+        self,
+    ) -> None:
+        """Blocker 5.4: ``stop()`` clears ``self._loop`` to None so a restart captures
+        a fresh running loop. A stale (possibly closed) loop reference would raise
+        ``RuntimeError`` in ``call_soon_threadsafe()`` on restart.
+        """
+        bridge = InterruptBridge()
+
+        await bridge.start()
+        first_loop = bridge._loop
+        assert first_loop is not None
+
+        await bridge.stop()
+        # stop() clears _loop so the next start() does not reuse a stale reference.
+        assert bridge._loop is None
+
+        await bridge.start()
+        second_loop = bridge._loop
+        assert second_loop is not None
+        # The restart re-captured the currently-running loop (fresh, not stale/None).
+        assert second_loop is asyncio.get_running_loop()
+
+        # trigger_interrupt() can safely signal the drain event on the captured loop
+        # without raising RuntimeError (which a stale closed loop would).
+        bridge.trigger_interrupt(25)
+        await bridge.stop()
 
 
 class TestScheduler:

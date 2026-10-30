@@ -223,7 +223,7 @@ class TestRealSpiBusXfer2:
 
     @pytest.mark.asyncio
     async def test_xfer2_uses_shared_bus_lock(self) -> None:
-        assert await get_bus_lock(0) is await get_bus_lock(0)  # nosemgrep: correctness.identical-is-comparison
+        assert await get_bus_lock(0) is await get_bus_lock(0)  # nosemgrep: correctness.common-mistakes.identical-is-comparison
 
         bus = RealSpiBus()
         bus.bus_number = 0
@@ -324,5 +324,5 @@ class TestRealSpiBusExceptionMasking:
             await bus.xfer2(bytearray([1, 2, 3]))
 
         assert exc_info.value is original_exception
-        assert to_thread_called is False  # nosemgrep: correctness.identical-is-comparison
+        assert to_thread_called is False  # nosemgrep: correctness.common-mistakes.identical-is-comparison
         bus._spidev.xfer2.assert_not_called()

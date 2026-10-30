@@ -538,10 +538,14 @@ class TestApplicationLifecycle:
         assert app._scheduler_started is False
 
     @pytest.mark.asyncio
-    async def test_module_init_failure_not_tracked_for_cleanup(self) -> None:
-        """A module whose init_spi_bus() fails is NOT tracked (append happens after
-        init succeeds), so _cleanup_partial_start() does not call close_spi() on an
-        uninitialized module."""
+    async def test_module_init_failure_closes_via_get_all_modules(self) -> None:
+        """A module whose init_spi_bus() fails is still cleaned via get_all_modules().
+
+        Plan-18 §5.1: _cleanup_partial_start() drains ALL modules returned by
+        get_all_modules() (not just _started_modules), so even a module whose
+        init_spi_bus() failed is stop_event_loop()'d and close_spi()'d -- the
+        caller owns defensive cleanup after any exception.
+        """
         app = Application(config=None, spi_factory=MockSpiBusFactory())
 
         failing = _FailingInitModule()
@@ -554,8 +558,8 @@ class TestApplicationLifecycle:
         with pytest.raises(RuntimeError):
             await app.start()
 
-        # The failing module was not tracked before init_spi_bus() failed.
-        assert failing.close_spi_calls == 0
+        # The failing module is in get_all_modules(), so it is drained and closed.
+        assert failing.close_spi_calls == 1
         assert app._started is False
         assert app._started_modules == []
         assert app._scheduler_started is False
@@ -611,9 +615,11 @@ class TestApplicationLifecycle:
 
     @pytest.mark.asyncio
     async def test_init_spi_bus_failure_unregisters_scheduler(self) -> None:
-        """BUG-2 (Plan-11 Phase 2): a module registered by load_from_config() whose
-        ``init_spi_bus()`` fails is unregistered from the scheduler by
-        ``_cleanup_partial_start()``, so no dangling scheduler tasks remain."""
+        """BUG-2 (Plan-11 Phase 2) + Plan-18 §5.1: a module registered by
+        load_from_config() whose ``init_spi_bus()`` fails is unregistered from the
+        scheduler by ``_cleanup_partial_start()``, so no dangling scheduler tasks
+        remain. The module is also in get_all_modules(), so loop 2 drains and closes
+        it via the defensive cleanup."""
         app = Application(config=None, spi_factory=MockSpiBusFactory())
 
         failing = _FailingInitModule()
@@ -643,8 +649,8 @@ class TestApplicationLifecycle:
         assert failing not in app.scheduler.timer_scheduler._intervals
         assert failing not in app.scheduler.idle_pacer._idle_enabled_modules
         assert failing not in app.scheduler.interrupt_bridge._interrupt_map
-        # The module was never tracked (init failed), so close_spi() is not called.
-        assert failing.close_spi_calls == 0
+        # The module is in get_all_modules(), so loop 2 drains and closes it.
+        assert failing.close_spi_calls == 1
         assert app._started is False
         assert app._started_modules == []
         assert app._scheduler_started is False
@@ -949,6 +955,94 @@ class TestCancellationSemantics:
         assert app._started is False
         assert app._started_modules == []
         assert app._scheduler_started is False
+
+    @pytest.mark.asyncio
+    async def test_application_cancelled_during_load_cleans_up_all_modules(
+        self,
+    ) -> None:
+        """Blocker 5.1: when ``load_from_config()`` is cancelled (CancelledError), ALL
+        committed modules must be cleaned up via ``_cleanup_partial_start()`` (both
+        ``stop_event_loop()`` and ``close_spi()``), not just ``_started_modules``.
+        CancelledError rolls back in ``ModuleManager`` but the module is still present
+        in ``module_manager.modules`` (registered in the scheduler), so Application must
+        drain every module returned by ``get_all_modules()``.
+        """
+        app = Application(config=None, spi_factory=MockSpiBusFactory())
+        module = _RestartControllableModule(ce_number=0, spi_device_id=0)
+
+        async def _instant_assembly(
+            assembly_name: str,
+            spi_device_id: Any = None,
+            ce_number: Any = None,
+            config_path: Any = None,
+        ) -> list[Any]:
+            return []
+
+        async def _load_raises_cancelled(
+            radio_configs: list[Any],
+            scheduler: Any,
+            spi_factory: Any | None = None,
+        ) -> None:
+            scheduler.register_module(
+                module, timer_interval=1.0, idle_enabled=True
+            )
+            app.module_manager.modules.append(module)
+            raise asyncio.CancelledError("load_from_config() cancelled")
+
+        def _get_all_modules() -> list[Any]:
+            return [module]
+
+        app.get_assembly_config = _instant_assembly  # type: ignore[assignment]
+        app.module_manager.load_from_config = _load_raises_cancelled  # type: ignore[assignment]
+        app.module_manager.get_all_modules = _get_all_modules  # type: ignore[assignment]
+
+        with pytest.raises(asyncio.CancelledError):
+            await app.start()
+
+        # ALL modules cleaned up via get_all_modules() (blocker 5.1).
+        assert module.stop_event_loop_calls == 1
+        assert module.close_spi_calls == 1
+        assert app._started is False
+        assert app._started_modules == []
+        assert app._scheduler_started is False
+
+    @pytest.mark.asyncio
+    async def test_cleanup_cancelled_with_regular_exception_preserves_both(
+        self,
+    ) -> None:
+        """Blocker 5.2: when the cleanup coroutine itself is cancelled AND
+        ``original_exc`` is a regular Exception (not CancelledError), both facts are
+        preserved via ``__cause__`` chaining (NOT an ExceptionGroup).
+
+        In Python 3.13 asyncio.CancelledError is a BaseException, so
+        ExceptionGroup.__init__ rejects it (TypeError: "Cannot nest BaseExceptions").
+        The correct fix is ``raise original_exc from cleanup_cancelled``: the caller
+        observes the original RuntimeError, and cleanup_cancelled is recorded as
+        __cause__ so the fact that cleanup was interrupted is not lost.
+        """
+        app = Application(config=None, spi_factory=MockSpiBusFactory())
+        original: Exception = RuntimeError("start_event_loop() failed")
+        cleanup_cancelled: asyncio.CancelledError = asyncio.CancelledError(
+            "cleanup was cancelled"
+        )
+        ran = False
+
+        async def _coro_cancelled_during_cleanup() -> None:
+            nonlocal ran
+            ran = True
+            raise cleanup_cancelled
+
+        with pytest.raises(RuntimeError) as excinfo:
+            await app._cleanup_and_reraise_cancellation(
+                _coro_cancelled_during_cleanup, original
+            )
+
+        assert ran is True
+        # The caller observes the ORIGINAL exception (the RuntimeError), not the
+        # cleanup CancelledError.
+        assert excinfo.value is original
+        # The cleanup CancelledError is preserved as __cause__.
+        assert excinfo.value.__cause__ is cleanup_cancelled
 
 
 class _RestartControllableModule:

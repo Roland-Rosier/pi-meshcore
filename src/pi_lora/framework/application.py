@@ -228,17 +228,34 @@ class Application:
         try:
             await cleanup_coro()
         except asyncio.CancelledError as cleanup_cancelled:
-            # ExceptionGroup preserves both original exception and cleanup cancellation. Caller must handle ExceptionGroup (Python 3.11+).
+            # Location 3 (Plan-18 §6 anti-regression; Plan-17 §1.3 FIX).
+            #
+            # Case: original_exc is a regular Exception AND cleanup_coro was
+            # cancelled. Both facts must be preserved for the caller.
+            #
+            # NOTE: in THIS environment (Python 3.13) asyncio.CancelledError is a
+            # BaseException, NOT an Exception. ExceptionGroup.__init__ rejects
+            # any non-Exception member and raises TypeError
+            # ("Cannot nest BaseExceptions in an ExceptionGroup"). So the
+            # ExceptionGroup approach below FAILs at runtime here -- nesting
+            # cleanup_cancelled (a CancelledError) would raise TypeError instead
+            # of the intended ExceptionGroup. The correct fix is __cause__
+            # chaining: `raise original_exc from cleanup_cancelled`, which raises
+            # original_exc (what the caller expects) and records cleanup_cancelled
+            # as __cause__ (the fact that cleanup was interrupted). __cause__
+            # chaining preserves both facts, is valid on Python 3.11+, and never
+            # raises TypeError. Do NOT document/regress to an ExceptionGroup here.
             if original_exc is None:
                 raise
             if isinstance(original_exc, asyncio.CancelledError):
-                # Both are cancellations — chain them
+                # Both are cancellations — chain them. `raise original_exc from
+                # cleanup_cancelled` raises original_exc with cleanup_cancelled as
+                # __cause__, preserving both facts.
                 raise original_exc from cleanup_cancelled
-            # Regular exception + cleanup cancellation → ExceptionGroup
-            raise ExceptionGroup(
-                "Cleanup cancelled while handling original exception",
-                [original_exc, cleanup_cancelled],
-            )
+            # Regular Exception + cleanup cancellation → chain via `from`.
+            # ExceptionGroup is impossible here (CancelledError is a BaseException
+            # in Python 3.13); chaining preserves both facts without TypeError.
+            raise original_exc from cleanup_cancelled
         except Exception:
             # Cleanup raised an exception (already an ExceptionGroup from the
             # cleanup path). Let it propagate; original_exc is available via
@@ -293,9 +310,16 @@ class Application:
                     module.get_ce_number(),
                 )
                 errors.append(exc)
-        # Clean ALL modules from module_manager.get_all_modules(), not just _started_modules.
-        # Handles modules committed before any exception (including CancelledError).
-        for module in self._module_manager.get_all_modules():
+        # Location 4 (Plan-18 §6 anti-regression). Clean ALL modules from
+        # module_manager.get_all_modules(), not just self._started_modules.
+        # NOTE: the attribute is self.module_manager (NOT self._module_manager --
+        # that attribute does not exist and would raise AttributeError at runtime).
+        # Handles modules committed before any exception, including CancelledError:
+        # Plan-17 H-16-1 committed on CancelledError, and those modules live in
+        # get_all_modules() but are absent from _started_modules, so iterating only
+        # _started_modules leaked them. The caller owns cleanup after any
+        # exception; this mirrors stop()'s get_all_modules() contract.
+        for module in self.module_manager.get_all_modules():
             try:
                 await module.stop_event_loop(StopMode.DRAIN)
             except Exception as exc:

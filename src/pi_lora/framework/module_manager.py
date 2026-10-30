@@ -152,15 +152,57 @@ class ModuleManager:
                 # can unregister exactly the modules the scheduler owns.
                 pending_modules.append(module)
                 pending_by_id[device_key] = module
-            except Exception:
-                # Catch Exception only. Shutdown signals (KeyboardInterrupt,
-                # SystemExit, GeneratorExit) propagate immediately -- the event
-                # loop may be closed during process shutdown, so async operations
-                # (await scheduler.unregister_module()) would fail.
-                # asyncio.CancelledError extends Exception in Python 3.11+, so it
-                # IS caught here and rolls back -- Application cleanup via
-                # get_all_modules() then handles all modules uniformly.
-                await self._rollback_pending_modules()
+            except (Exception, asyncio.CancelledError) as original_exc:
+                # Locations 1 & 2 (Plan-18 §6 anti-regression). Two invariants
+                # that must NOT regress:
+                #
+                # [1] Rollback on ALL exceptions, INCLUDING CancelledError.
+                #     Plan-17 H-16-1 originally *committed* (did NOT roll back)
+                #     on CancelledError: pending modules were left registered in
+                #     the scheduler instead of unregistered. That leaked resources
+                #     because Application._cleanup_partial_start() only tracked
+                #     self.module_manager._started_modules (modules appended AFTER
+                #     init_spi_bus() succeeded), so a module committed on
+                #     CancelledError lived in module_manager.get_all_modules()
+                #     but was absent from _started_modules -> never cleaned.
+                #     Rolling back on every caught exception unregisters every
+                #     pending module. asyncio.CancelledError is a BaseException,
+                #     NOT an Exception, in Python 3.13, so it is NOT matched by
+                #     `except Exception` alone; the explicit
+                #     `(Exception, asyncio.CancelledError)` tuple catches it so
+                #     it rolls back too. The caller (Application) then cleans ALL
+                #     modules uniformly via get_all_modules() -- the caller owns
+                #     cleanup after any exception.
+                #
+                # [2] Catch Exception only (plus CancelledError). KeyboardInterrupt,
+                #     SystemExit, and GeneratorExit are shutdown signals, NOT
+                #     recoverable errors. They are NOT matched by
+                #     `(Exception, asyncio.CancelledError)`, so they propagate
+                #     immediately with no async operation running. During process
+                #     shutdown the event loop may be closing or already closed, so
+                #     an async cleanup (await scheduler.unregister_module()) would
+                #     raise RuntimeError and hang shutdown. Let them propagate.
+                #
+                # Inline rollback (no dedicated method): walk the pending list in
+                # reverse, unregister each module from the scheduler, and collect
+                # any unregister failures so a partial rollback still surfaces its
+                # errors to the caller chained from the triggering exception.
+                rollback_errors: list[Exception] = []
+                for module in reversed(pending_modules):
+                    try:
+                        await scheduler.unregister_module(module)
+                    except Exception as unregister_err:
+                        rollback_errors.append(unregister_err)
+                pending_modules.clear()
+                pending_by_id.clear()
+                logger.warning(
+                    "Rolled back pending modules on load failure; main "
+                    "tracking reset empty"
+                )
+                if rollback_errors:
+                    raise ExceptionGroup(
+                        "rollback failed", rollback_errors
+                    ) from original_exc
                 raise
 
         # H-13/Plan-16: whole loop succeeded -- commit pending to main tracking

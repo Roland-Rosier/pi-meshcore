@@ -76,8 +76,8 @@ class Rfm9xSx127xModule:
         self._stop_mode: StopMode = StopMode.DRAIN
         self._paused: bool = False
         self._event_buffer: dict[EventType, deque[ModuleEvent[Any]]] = defaultdict(
-            lambda: deque(maxlen=1000)
-        )  # nosemgrep: correctness.return-in-init
+             lambda: deque(maxlen=1000)  # nosemgrep: correctness.return-in-init
+         )
         self._event_waiters: dict[EventType, list[_EventWaiter]] = defaultdict(list)
 
     # ------------------------------------------------------------------
