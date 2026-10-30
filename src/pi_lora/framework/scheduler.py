@@ -201,6 +201,8 @@ class IdlePacer:
     def __init__(self, min_interval: float = 0.01) -> None:
         self._validate_interval(min_interval)
         self._idle_enabled_modules: set[Rfm9xSx127xModule] = set()
+        self._failure_count: dict[int, int] = {}
+        self._backoff_until: dict[int, float] = {}
         self._running = False
         self._task: asyncio.Task[None] | None = None
         self._min_interval: float = min_interval
@@ -224,16 +226,31 @@ class IdlePacer:
 
     async def _idle_task(self) -> None:
         while self._running:
-            await asyncio.sleep(self._min_interval)
+            now = time.monotonic()
             for module in list(self._idle_enabled_modules):
+                module_id = id(module)
+                # Check backoff
+                if module_id in self._backoff_until and now < self._backoff_until[module_id]:
+                    continue
+
                 try:
                     await module.event_queue.put(ModuleEvent(EventType.IDLE))
-                except Exception as exc:
-                    logging.getLogger(__name__).error(
-                        "IdlePacer: failed to put IDLE event for module %s: %s",
-                        module,
-                        exc,
+                    # Success — reset failure count
+                    self._failure_count[module_id] = 0
+                    if module_id in self._backoff_until:
+                        del self._backoff_until[module_id]
+                except asyncio.QueueFull:
+                    # Failure — increment and apply backoff
+                    count = self._failure_count.get(module_id, 0) + 1
+                    self._failure_count[module_id] = count
+                    delay: float = 0.0
+                    if count > 5:  # Cap at 5 failures before backoff
+                        delay = min(0.1 * (2 ** (count - 5)), 60.0)
+                        self._backoff_until[module_id] = now + delay
+                    logging.getLogger(__name__).warning(
+                        f"IdlePacer queue full for module {module_id}, backoff={delay}s"
                     )
+            await asyncio.sleep(1.0)  # Base idle interval
 
 
 class InterruptBridge:
@@ -450,6 +467,7 @@ class InterruptBridge:
         if self._drain_task and not self._drain_task.done():
             self._drain_task.cancel()
             await asyncio.gather(self._drain_task, return_exceptions=True)
+        self._loop = None  # Clear _loop on stop to allow safe restart. Stale loop reference would cause RuntimeError on call_soon_threadsafe.
 
     async def _drain_sync_queue(self) -> None:
         """Drain thread-safe producer queue into async consumer queue.

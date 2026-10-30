@@ -204,7 +204,7 @@ class TestLoadFromConfig:
         radio_configs = _make_test_radio_configs()
         scheduler = Scheduler()
 
-        def _force_failure(*_args: object, **_kwargs: object) -> None:
+        def _force_failure(*_args: object, **_kwargs: object) -> None:  # nosemgrep: maintainability.useless-inner-function
             raise RuntimeError("Module construction failed during load")
 
         with mock.patch(

@@ -176,7 +176,7 @@ for _name in _registry_duals:
     if _module is not None:
         _candidates.append(_module)
 if _here is not None and len(_candidates) > 1:
-    _shared: Any = max(_candidates, key=lambda _obj: id(_obj))
+    _shared: Any = max(_candidates, key=lambda _obj: id(_obj))  # nosemgrep: maintainability.return-not-in-function
     for _name in _registry_duals:
         _module = sys.modules.get(_name)
         if _module is not None and _module is not _shared:

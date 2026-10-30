@@ -48,7 +48,7 @@ class ModuleEvent(Generic[T]):
 
     event_type: EventType
     payload: T | None = None
-    timestamp: float = field(default_factory=lambda: monotonic())
+    timestamp: float = field(default_factory=lambda: monotonic())  # nosemgrep: maintainability.return-not-in-function
     source: str = ""
 
 

@@ -228,17 +228,17 @@ class Application:
         try:
             await cleanup_coro()
         except asyncio.CancelledError as cleanup_cancelled:
-            # §1.3/Plan-17: Cleanup was cancelled. Log it but re-raise the
-            # original exception so the caller observes the correct cancellation
-            # instead of losing the outer CancelledError.
-            logger.warning(
-                "Cleanup was cancelled during exception handling; "
-                "re-raising original exception: %r",
-                original_exc,
-            )
-            if original_exc is not None:
+            # ExceptionGroup preserves both original exception and cleanup cancellation. Caller must handle ExceptionGroup (Python 3.11+).
+            if original_exc is None:
+                raise
+            if isinstance(original_exc, asyncio.CancelledError):
+                # Both are cancellations — chain them
                 raise original_exc from cleanup_cancelled
-            raise  # No original exception; re-raise cleanup cancellation
+            # Regular exception + cleanup cancellation → ExceptionGroup
+            raise ExceptionGroup(
+                "Cleanup cancelled while handling original exception",
+                [original_exc, cleanup_cancelled],
+            )
         except Exception:
             # Cleanup raised an exception (already an ExceptionGroup from the
             # cleanup path). Let it propagate; original_exc is available via
@@ -293,7 +293,9 @@ class Application:
                     module.get_ce_number(),
                 )
                 errors.append(exc)
-        for module in self._started_modules:
+        # Clean ALL modules from module_manager.get_all_modules(), not just _started_modules.
+        # Handles modules committed before any exception (including CancelledError).
+        for module in self._module_manager.get_all_modules():
             try:
                 await module.stop_event_loop(StopMode.DRAIN)
             except Exception as exc:

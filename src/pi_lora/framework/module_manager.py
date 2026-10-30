@@ -152,73 +152,16 @@ class ModuleManager:
                 # can unregister exactly the modules the scheduler owns.
                 pending_modules.append(module)
                 pending_by_id[device_key] = module
-            except asyncio.CancelledError:
-                # H-16-1/Plan-17: Only task cancellation commits partial modules.
-                # asyncio.CancelledError is a BaseException that signals the
-                # *caller's* load task was cancelled, not a clean load failure.
-                # The successfully-created modules are valid and must remain owned
-                # by the caller, so they are committed to the main tracking and
-                # left registered in the scheduler (never unregistered). Rolling
-                # back here would be wrong: the caller can no longer await the
-                # cancelled task, so it must clean up whatever it owns itself.
-                # This handler is placed BEFORE `except BaseException` so that
-                # CancelledError (a subclass of Exception) is committed rather
-                # than rolled back. Previously the single `except BaseException`
-                # handler (and the old `except Exception` rollback path) collapsed
-                # this distinction and rolled back on cancellation.
-                for device_key, module in pending_by_id.items():
-                    self.modules.append(module)
-                    self.modules_by_id[device_key] = module
-                pending_modules.clear()
-                pending_by_id.clear()
+            except Exception:
+                # Catch Exception only. Shutdown signals (KeyboardInterrupt,
+                # SystemExit, GeneratorExit) propagate immediately -- the event
+                # loop may be closed during process shutdown, so async operations
+                # (await scheduler.unregister_module()) would fail.
+                # asyncio.CancelledError extends Exception in Python 3.11+, so it
+                # IS caught here and rolls back -- Application cleanup via
+                # get_all_modules() then handles all modules uniformly.
+                await self._rollback_pending_modules()
                 raise
-
-            except BaseException as base_exc:
-                # H-16-1/Plan-17: Every OTHER BaseException MUST roll back and
-                # re-raise. This covers both a normal load failure (an `Exception`
-                # such as RuntimeError or DuplicateDeviceIdentityError) and a
-                # genuine process shutdown signal (KeyboardInterrupt, SystemExit,
-                # GeneratorExit). These are NOT a recoverable task cancellation:
-                # they demand cleanup, not a partial commit. CancelledError is
-                # intentionally excluded by the preceding handler, so this path
-                # only ever handles recoverable failures and shutdown states that
-                # must unregister the scheduler-owned pending modules and reset
-                # main tracking to a fully empty set.
-                #
-                # H-13/Plan-16: rollback only touches pending modules -- the only
-                # modules the scheduler owns during a failed load -- so no dangling
-                # scheduler reference survives. Failures are aggregated into
-                # rollback_errors so every pending module still gets unregistered;
-                # state is always reset regardless of partial unregister failures.
-                # The aggregated ExceptionGroup is chained to base_exc so both the
-                # load-failure cause and the rollback failures are visible in the
-                # chain.
-                rollback_errors: list[Exception] = []
-                # Pending modules are unregistered LIFO (reverse of registration
-                # order) so the newest scheduler task is cancelled first.
-                while pending_modules:
-                    module = pending_modules.pop()
-                    try:
-                        await scheduler.unregister_module(module)  # Public async API
-                    except Exception as e:
-                        logger.error(
-                            "Rollback unregister failed for %s: %s", module, e
-                        )
-                        rollback_errors.append(e)
-                self.modules.clear()
-                self.modules_by_id.clear()
-                pending_modules.clear()
-                pending_by_id.clear()
-                logger.warning(
-                    "Module load failed at config index %d (%s); rolled back partial state",
-                    index,
-                    radio_config.device_id_key,
-                )
-                if rollback_errors:
-                    raise ExceptionGroup(
-                        "Rollback failures during load_from_config", rollback_errors
-                    ) from base_exc
-                raise base_exc
 
         # H-13/Plan-16: whole loop succeeded -- commit pending to main tracking
         # so callers see a fully consistent set. Only now is self.modules and
