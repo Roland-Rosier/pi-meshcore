@@ -75,7 +75,7 @@ class SpiLock(Protocol):
 
 
 # LAZY INITIALIZATION - no aiologic import at module level
-_bus_locks: dict[int, Any] = {}
+_bus_locks: dict[int, _GuardedLock] = {}
 _registry_lock: Any = None
 _aiologic_module: Any = None
 
@@ -88,42 +88,61 @@ _aiologic_module: Any = None
 # Python 3.11+ (no running loop required), mirroring config_loader.py's NR-1.
 _registry_init_lock: asyncio.Lock = asyncio.Lock()
 
-# CR-16 (M-16) runtime guard: aiologic.Lock supports sync ``with lock:`` at
-# runtime, but the SPI contract forbids using it before the instance is obtained
-# by awaiting :func:`get_bus_lock`. aiologic.Lock is ``__slots__``-restricted (no
-# ``__dict__``), so the returned instance cannot carry an ``_acquired`` flag.
-# Acquisition is therefore tracked by object identity in ``_obtained_locks`` — a
-# ``weakref.WeakSet`` of the lock instances themselves. Because the set holds the
-# actual lock objects (not bare ids) and drops them on GC, ids are never reused
-# across cycles and cross-test false positives/negatives disappear. The base
-# class's sync ``__enter__`` is wrapped exactly once (see ``_ensure_enter_guard``)
-# to raise ``RuntimeError`` on pre-acquisition sync misuse. The async acquisition
-# path (``__aenter__``) is left untouched.
-_obtained_locks: weakref.WeakSet[Any] = weakref.WeakSet()
-_enter_guard_patched: bool = False
 
+class _GuardedLock:
+    """Wrapper around aiologic.Lock that enforces acquisition via get_bus_lock().
 
-def _ensure_enter_guard() -> None:
-    """Wrap aiologic.Lock's sync ``__enter__`` to reject pre-acquisition misuse.
-
-    Called once, lazily, the first time :func:`get_bus_lock` imports aiologic.
-    The wrapper raises ``RuntimeError`` when ``with lock:`` is used on an instance
-    that was never handed back by :func:`get_bus_lock`; the async acquisition
-    path is unaffected. Idempotent via ``_enter_guard_patched``.
+    PLAN-19 FIX: Replaces global monkey-patch of aiologic.Lock.__enter__
+    (code_review-18.1.json #7). The monkey-patch affected ALL aiologic.Lock
+    instances in the process, including those used by other libraries.
+    Wrapper confines guard to SPI locks only. __getattr__ fallback ensures
+    complete delegation to the wrapped lock for any current or future
+    aiologic.Lock methods, making the wrapper a transparent proxy.
     """
-    global _enter_guard_patched
-    if _enter_guard_patched:
-        return
-    import aiologic
-    _original_enter = aiologic.Lock.__enter__
 
-    def _guarded_enter(self: Any) -> Any:
-        if self not in _obtained_locks:
+    __slots__ = ("_lock", "_obtained")
+
+    def __init__(self, lock: Any) -> None:
+        self._lock = lock
+        self._obtained = False
+
+    # Async context manager (primary acquisition path)
+    async def __aenter__(self) -> "Self":
+        self._obtained = True
+        await self._lock.__aenter__()
+        return self
+
+    async def __aexit__(self, exc_type: Any, exc_val: Any, exc_tb: Any) -> None:
+        await self._lock.__aexit__(exc_type, exc_val, exc_tb)
+        self._obtained = False
+
+    # Sync context manager — ONLY valid after async acquisition via get_bus_lock()
+    def __enter__(self) -> "Self":
+        if not self._obtained:
             raise RuntimeError("Lock not acquired via get_bus_lock()")
-        return _original_enter(self)
+        self._lock.__enter__()
+        return self
 
-    aiologic.Lock.__enter__ = _guarded_enter  # type: ignore[method-assign]
-    _enter_guard_patched = True
+    def __exit__(self, exc_type: Any, exc_val: Any, exc_tb: Any) -> None:
+        self._lock.__exit__(exc_type, exc_val, exc_tb)
+
+    # Delegate known methods explicitly (for type checker)
+    async def async_acquire(self, *, blocking: bool = True, timeout: float | None = None) -> bool:
+        return await self._lock.async_acquire(blocking=blocking, timeout=timeout)
+
+    def async_release(self) -> None:
+        self._lock.async_release()
+
+    def green_release(self) -> None:
+        self._lock.green_release()
+
+    def locked(self) -> bool:
+        return self._lock.locked()
+
+    # PLAN-19 FIX: Fallback delegation for any other aiologic.Lock methods
+    # (current or future). Ensures wrapper is a transparent proxy.
+    def __getattr__(self, name: str) -> Any:
+        return getattr(self._lock, name)
 
 
 async def get_bus_lock(bus_number: int) -> SpiLock:
@@ -138,9 +157,14 @@ async def get_bus_lock(bus_number: int) -> SpiLock:
         bus_number: The bus identifier to lock.
 
     Returns:
-        A :class:`SpiLock` (concretely an :class:`aiologic.Lock`) for the given bus number.
+        A :class:`SpiLock` (concretely a :class:`_GuardedLock` wrapping :class:`aiologic.Lock`) for the given bus number.
     """
     global _registry_lock, _aiologic_module
+
+    # Lazy aiologic import — outside lock for first call, only imports module,
+    # doesn't patch it. Safe because module import is thread-safe in Python (GIL).
+    # The _registry_lock creation is guarded.
+    # PLAN-19 FIX: import aiologic outside the guard (thread-safe), lock creation inside.
     if _aiologic_module is None:
         try:
             import aiologic
@@ -149,37 +173,15 @@ async def get_bus_lock(bus_number: int) -> SpiLock:
             raise ImportError(
                 "aiologic is required for SPI locking. Install with: pip install aiologic"
             ) from e
-        _ensure_enter_guard()
+
     if _registry_lock is None:
         async with _registry_init_lock:  # Race-free guard
             if _registry_lock is None:  # Re-check inside lock
                 _registry_lock = _aiologic_module.Lock()
+
     async with _registry_lock:
         if bus_number not in _bus_locks:
-            _bus_locks[bus_number] = _aiologic_module.Lock()
-        _obtained_locks.add(_bus_locks[bus_number])
+            # Wrap the raw aiologic.Lock in our guard (PLAN-19 FIX)
+            raw_lock = _aiologic_module.Lock()
+            _bus_locks[bus_number] = _GuardedLock(raw_lock)
         return _bus_locks[bus_number]
-
-
-# pi_lora.drivers.spi.locks and src.pi_lora.drivers.spi.locks are the same physical
-# namespace package but resolve to distinct module objects under pythonpath implicit
-# namespace packaging. The lock registry and the sync __enter__ guard must be a single
-# shared singleton: the guard is patched once onto aiologic.Lock.__enter__ (global),
-# while get_bus_lock exists on both module objects and would otherwise populate the
-# wrong registry, producing an order-dependent false positive under xdist. Unify the
-# registry so both import paths share one set, one dict, one guard.
-_registry_duals: tuple[str, ...] = ("pi_lora.drivers.spi.locks", "src.pi_lora.drivers.spi.locks")
-_here: Any = sys.modules.get(__name__)
-_candidates: list[Any] = []
-for _name in _registry_duals:
-    _module: Any = sys.modules.get(_name)
-    if _module is not None:
-        _candidates.append(_module)
-if _here is not None and len(_candidates) > 1:
-    _shared: Any = max(_candidates, key=lambda _obj: id(_obj))  # nosemgrep: maintainability.return-not-in-function
-    for _name in _registry_duals:
-        _module = sys.modules.get(_name)
-        if _module is not None and _module is not _shared:
-            sys.modules[_name] = _shared
-    for _attr in ("_bus_locks", "_obtained_locks", "_registry_lock", "_aiologic_module", "_enter_guard_patched"):
-        globals()[_attr] = getattr(_shared, _attr)

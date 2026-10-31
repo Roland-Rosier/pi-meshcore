@@ -38,7 +38,11 @@ def _normalise_module_type(value: str | None) -> Literal["rfm95w", "rfm98w", "no
     if value is None:
         return None
     canonical = value.strip().lower()
-    mapping: dict[str, Literal["rfm95w", "rfm98w", "none"]] = {
+    # PLAN-19: Mapping key type includes all CLI aliases (sx1276/sx1278); cast matches LoRaModuleConfig field type which normalizes in __post_init__.
+    mapping: dict[
+        Literal["rfm95w", "sx1276", "rfm98w", "sx1278", "none"],
+        Literal["rfm95w", "rfm98w", "none"]
+    ] = {
         "rfm95w": "rfm95w",
         "sx1276": "rfm95w",
         "rfm98w": "rfm98w",
@@ -105,8 +109,8 @@ async def detect_modules(
 
     if ce0 is not None or ce1 is not None:
         config = LoRaModuleConfig(
-            ce0_expected_module_type=cast(Literal["rfm95w", "rfm98w", "none"], ce0) if ce0 is not None else None,  # Already normalised by callback
-            ce1_expected_module_type=cast(Literal["rfm95w", "rfm98w", "none"], ce1) if ce1 is not None else None,  # Already normalised by callback
+            ce0_expected_module_type=cast(Literal["rfm95w", "rfm98w", "none", "sx1276", "sx1278"], ce0) if ce0 is not None else None,  # Already normalised by callback
+            ce1_expected_module_type=cast(Literal["rfm95w", "rfm98w", "none", "sx1276", "sx1278"], ce1) if ce1 is not None else None,  # Already normalised by callback
         )
 
         validation_results: list[ValidationResult] = detector.validate_config(config)

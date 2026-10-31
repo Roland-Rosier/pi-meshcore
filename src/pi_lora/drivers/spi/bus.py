@@ -150,7 +150,19 @@ class RealSpiBus:
         Args:
             bus: The bus identifier. If None, the value stored by create() is used.
             device: The device identifier. If None, the value stored by create() is used.
+
+        Raises:
+            RuntimeError: If the bus is already open. Call close() first.
         """
+        # PLAN-19 FIX: Prevent resource leak from multiple open() without close().
+        # code_review-18.1.json #6: open() can be called multiple times without close()
+        # -> kernel FD leak. Explicit guard forces caller to manage lifecycle correctly.
+        if self._spidev is not None:
+            raise RuntimeError(
+                f"SPI bus {self.bus_number}.{self.device_number} already open. "
+                "Call close() before open()."
+            )
+
         # CR-8 FIX: ensure the spidev kernel patch is active before importing it.
         self._verify_patch_active()
         # Note: spidev is a real python library; do not assume otherwise

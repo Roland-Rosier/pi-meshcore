@@ -283,7 +283,7 @@ class Rfm9xSx127xModule:
         try:
             try:
                 await asyncio.wait_for(waiter.event.wait(), timeout=timeout)
-            except TimeoutError:
+            except asyncio.TimeoutError:  # PLAN-19: Use asyncio.TimeoutError explicitly (not builtin TimeoutError alias) for clarity in async context.
                 return None
             return waiter.result
         finally:

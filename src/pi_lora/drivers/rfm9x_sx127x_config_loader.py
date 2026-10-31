@@ -183,26 +183,22 @@ async def get_preloaded_config(
     global _config_lock
     global _aiologic_module
 
-    # Override path bypasses cache entirely.
+    # PLAN-19 FIX: force_reload=True with config_path now updates _config_cache (docstring contract).
+    # Before this, the override path bypassed the cache entirely.
     if config_path is not None:
-        return load_config(config_path=config_path)
+        config = load_config(config_path=config_path)
+        if force_reload:
+            _config_cache = config  # Update cache when explicitly requested
+        return config
 
     # Fast path: cache hit and no forced reload.
     if _config_cache is not None and not force_reload:
         return _config_cache
 
-    # Lazy aiologic import and lock initialisation (BUG-4 / Plan-11 Option A):
-    # aiologic is only required for this async singleton path, so it is imported
-    # here rather than at module scope to keep the sync public functions
-    # (load_config / load_family_config) free of the dependency.
-    #
-    # Double-checked locking (FIX CR-1 / Plan-12 Option A1): the initial ``None``
-    # guard is race-free because it is executed under the module-level
-    # ``_init_lock`` before re-checking ``_config_lock`` inside the lock, so only
-    # one coroutine ever creates the ``aiologic.Lock`` and all callers share it.
-    # PATTERN (per Plan-14 R-3 / locks.py): import aiologic FIRST outside guard,
-    # then initialize lock INSIDE guard. This separates import failures from
-    # lock initialization and caches the module for subsequent calls.
+    # Lazy aiologic import and lock initialisation.
+    # PLAN-19 FIX: import aiologic FIRST outside the _init_lock guard (module import
+    # is thread-safe in CPython — GIL + sys.modules cache); only _config_lock
+    # creation needs the _init_lock guard to be race-free.
     if _aiologic_module is None:
         try:
             import aiologic
@@ -213,7 +209,7 @@ async def get_preloaded_config(
             ) from e
 
     if _config_lock is None:
-        async with _init_lock:  # Race-free guard
+        async with _init_lock:  # Race-free guard (covers lock creation only)
             if _config_lock is None:  # Re-check inside lock
                 _config_lock = _aiologic_module.Lock()
 

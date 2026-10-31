@@ -106,13 +106,16 @@ class CommandBus:
             return result
         except asyncio.CancelledError as exc:
             # H-10 / Plan-16: CancelledError must be caught BEFORE the generic
-            # except Exception since asyncio.CancelledError is a subclass of
-            # Exception. Catching it separately logs the correct "cancelled"
-            # message instead of the generic "raised" message, then re-raises
-            # verbatim so asyncio cancellation semantics are preserved for the
-            # awaiting coroutine. A verbatim re-raise is required: returning
-            # would swallow the cancellation and the caller would never observe
-            # it.
+            # except Exception. In Python 3.13+, asyncio.CancelledError is a
+            # direct subclass of BaseException (NOT Exception). In Python 3.11-3.12,
+            # it is a subclass of Exception. Catching it explicitly first works
+            # correctly in ALL versions and logs the correct "cancelled" message
+            # instead of the generic "raised" message, then re-raises verbatim so
+            # asyncio cancellation semantics are preserved for the awaiting
+            # coroutine. A verbatim re-raise is required: returning would swallow
+            # the cancellation and the caller would never observe it.
+            #
+            # PLAN-19: Comment updated for Python 3.13+ where CancelledError is BaseException, not Exception. Explicit catch before Exception works in all versions.
             logger.warning(
                 "Command handler cancelled for %s",
                 type(command).__name__,

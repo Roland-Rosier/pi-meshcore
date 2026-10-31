@@ -4,6 +4,8 @@
 #
 # Usage: uv run .semgrep/run.sh
 
+# PLAN-19: mkdir -p ensures temp parent exists; trap handles EXIT INT TERM for cleanup on Ctrl+C/kill.
+mkdir -p /tmp/sandbox/semgrep_tmp
 TMPDIR=$(mktemp -d --tmpdir=/tmp/sandbox/semgrep_tmp)
 uv run semgrep scan --verbose \
    --config=".semgrep/rules/security/" \
@@ -19,5 +21,5 @@ uv run semgrep scan --verbose \
   tests/spi/*.py \
   src/pi_lora/cli/config.py \
   tests/test_config_*.py
-trap 'rm -rf "$TMPDIR"' EXIT
+trap 'rm -rf "$TMPDIR"' EXIT INT TERM
 
