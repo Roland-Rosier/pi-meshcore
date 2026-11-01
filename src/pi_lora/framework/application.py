@@ -111,6 +111,17 @@ class Application:
                 exc_to_raise = exc
             except Exception as exc:
                 exc_to_raise = exc
+            # PLAN-20: Handle KeyboardInterrupt/SystemExit (BaseException) explicitly.
+            # These shutdown signals bypass `except Exception` and would skip cleanup,
+            # leaking SPI handles, scheduler tasks, and module registrations.
+            # Run cleanup then re-raise verbatim to preserve Ctrl+C / sys.exit semantics.
+            except BaseException as exc:  # KeyboardInterrupt, SystemExit
+                exc_to_raise = exc
+                try:
+                    await self._cleanup_partial_start()
+                except Exception as cleanup_exc:
+                    raise exc from cleanup_exc
+                raise exc
             # NR-6 FIX: cleanup runs INSIDE the lock so it is mutually exclusive
             # with a concurrent stop(). _cleanup_partial_start() must NOT re-acquire
             # the lock (NR-6 FIX) or asyncio's non-recursive Lock would deadlock.

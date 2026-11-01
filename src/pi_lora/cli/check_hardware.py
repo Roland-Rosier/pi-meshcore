@@ -109,8 +109,14 @@ async def detect_modules(
 
     if ce0 is not None or ce1 is not None:
         config = LoRaModuleConfig(
-            ce0_expected_module_type=cast(Literal["rfm95w", "rfm98w", "none", "sx1276", "sx1278"], ce0) if ce0 is not None else None,  # Already normalised by callback
-            ce1_expected_module_type=cast(Literal["rfm95w", "rfm98w", "none", "sx1276", "sx1278"], ce1) if ce1 is not None else None,  # Already normalised by callback
+            ce0_expected_module_type=cast(  # PLAN-20: Cast matches runtime reality — Typer callback _normalise_module_type
+                # already converted sx1276/sx1278 → rfm95w/rfm98w. Only canonical values exist here.
+                Literal["rfm95w", "rfm98w", "none"], ce0
+            ) if ce0 is not None else None,
+            ce1_expected_module_type=cast(  # PLAN-20: Cast matches runtime reality — Typer callback _normalise_module_type
+                # already converted sx1276/sx1278 → rfm95w/rfm98w. Only canonical values exist here.
+                Literal["rfm95w", "rfm98w", "none"], ce1
+            ) if ce1 is not None else None,
         )
 
         validation_results: list[ValidationResult] = detector.validate_config(config)

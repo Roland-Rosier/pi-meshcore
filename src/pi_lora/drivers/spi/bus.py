@@ -228,12 +228,19 @@ class RealSpiBus:
                 timeout=self._xfer_timeout,
             )
 
+    # PLAN-20: Restore safe default (Plan-14 regression fix). Factory contract:
+    # create() returns unopened bus; properties readable before open(). Return 0/False
+    # for unconfigured state. Check max_speed_hz > 0 to verify bus is open+configured.
     @property
     def max_speed_hz(self) -> int:
-        """Maximum speed in Hertz."""
+        """Maximum speed in Hertz.
+
+        Returns 0 if the bus is not yet opened (spidev not initialized).
+        Check `max_speed_hz > 0` to determine if the bus is open and configured.
+        """
         if self._spidev is not None:
             return self._spidev.max_speed_hz
-        raise RuntimeError("SPI bus not opened")
+        return 0  # Safe default: unconfigured
 
     @max_speed_hz.setter
     def max_speed_hz(self, value: int) -> None:
@@ -241,12 +248,15 @@ class RealSpiBus:
         if self._spidev is not None:
             self._spidev.max_speed_hz = value
 
+    # PLAN-20: Restore safe default (Plan-14 regression fix). Factory contract:
+    # create() returns unopened bus; properties readable before open(). Return 0/False
+    # for unconfigured state. Check max_speed_hz > 0 to verify bus is open+configured.
     @property
     def mode(self) -> int:
-        """SPI mode setting."""
+        """SPI mode setting. Returns 0 if bus not opened."""
         if self._spidev is not None:
             return self._spidev.mode
-        raise RuntimeError("SPI bus not opened")
+        return 0
 
     @mode.setter
     def mode(self, value: int) -> None:
@@ -254,12 +264,15 @@ class RealSpiBus:
         if self._spidev is not None:
             self._spidev.mode = value
 
+    # PLAN-20: Restore safe default (Plan-14 regression fix). Factory contract:
+    # create() returns unopened bus; properties readable before open(). Return 0/False
+    # for unconfigured state. Check max_speed_hz > 0 to verify bus is open+configured.
     @property
     def lsbfirst(self) -> bool:
-        """Whether least significant bit comes first."""
+        """Whether least significant bit comes first. Returns False if bus not opened."""
         if self._spidev is not None:
             return self._spidev.lsbfirst
-        raise RuntimeError("SPI bus not opened")
+        return False
 
     @lsbfirst.setter
     def lsbfirst(self, value: bool) -> None:
@@ -267,12 +280,15 @@ class RealSpiBus:
         if self._spidev is not None:
             self._spidev.lsbfirst = value
 
+    # PLAN-20: Restore safe default (Plan-14 regression fix). Factory contract:
+    # create() returns unopened bus; properties readable before open(). Return 0/False
+    # for unconfigured state. Check max_speed_hz > 0 to verify bus is open+configured.
     @property
     def no_cs(self) -> bool:
-        """Whether chip select is disabled."""
+        """Whether chip select is disabled. Returns False if bus not opened."""
         if self._spidev is not None:
             return self._spidev.no_cs
-        raise RuntimeError("SPI bus not opened")
+        return False
 
     @no_cs.setter
     def no_cs(self, value: bool) -> None:

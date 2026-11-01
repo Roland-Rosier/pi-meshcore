@@ -178,22 +178,29 @@ class TestRealSpiBusXferTimeout:
             await bus.xfer2([1, 2, 3])
 
 
-class TestRealSpiBusPropertiesRaiseWhenClosed:
-    """M-14 regression: closed ``RealSpiBus`` property getters raise ``RuntimeError``.
+class TestRealSpiBusPropertiesSafeDefaults:
+    """PLAN-20 Fix 5 (M-14 regression reversal): closed ``RealSpiBus`` property
+    getters return safe defaults instead of raising ``RuntimeError``.
 
-    A ``RealSpiBus`` that has never been opened (``_spidev is None``) must raise
-    ``RuntimeError("SPI bus not opened")`` when accessing ``max_speed_hz``, ``mode``,
-    ``lsbfirst``, or ``no_cs``, matching ``xfer2()``'s closed-state behavior.
+    The factory contract returns an unopened bus (``_spidev is None``) between
+    ``create()`` and ``open()``. Properties must be readable before opening:
+    ``max_speed_hz``/``mode`` default to ``0`` and ``lsbfirst``/``no_cs`` default
+    to ``False``. Checking ``max_speed_hz > 0`` is the way to determine if the
+    bus is open and configured.
     """
 
-    _closed_property_names = ("max_speed_hz", "mode", "lsbfirst", "no_cs")
+    _closed_property_defaults = {
+        "max_speed_hz": 0,
+        "mode": 0,
+        "lsbfirst": False,
+        "no_cs": False,
+    }
 
-    def test_each_closed_property_raises_runtime_error(self) -> None:
+    def test_each_closed_property_returns_safe_default(self) -> None:
         from src.pi_lora.drivers.spi.bus import RealSpiBus
 
         bus = RealSpiBus()
         assert bus._spidev is None
 
-        for name in self._closed_property_names:
-            with pytest.raises(RuntimeError, match="SPI bus not opened"):
-                getattr(bus, name)
+        for name, expected in self._closed_property_defaults.items():
+            assert getattr(bus, name) == expected

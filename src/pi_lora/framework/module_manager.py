@@ -32,6 +32,26 @@ from ..types import StateBits
 logger = logging.getLogger(__name__)
 
 
+async def _rollback_pending(
+    pending_modules: list[Rfm9xSx127xModule],
+    scheduler: Scheduler,
+) -> None:
+    """Rollback pending modules with shield to prevent cancellation mid-cleanup.
+
+    PLAN-20: asyncio.shield ensures the entire rollback completes even if the
+    enclosing scope is cancelled. Without shield, a CancelledError during
+    rollback leaves modules registered in the scheduler (resource leak).
+    """
+    rollback_errors: list[Exception] = []
+    for module in reversed(pending_modules):
+        try:
+            await scheduler.unregister_module(module)
+        except Exception as unregister_err:
+            rollback_errors.append(unregister_err)
+    if rollback_errors:
+        raise ExceptionGroup("rollback failed", rollback_errors)
+
+
 class DuplicateDeviceIdentityError(RadioInstanceError):
     """Raised when a ``DeviceIdentity`` already exists in the manager during load."""
 
@@ -183,26 +203,19 @@ class ModuleManager:
                 #     an async cleanup (await scheduler.unregister_module()) would
                 #     raise RuntimeError and hang shutdown. Let them propagate.
                 #
-                # Inline rollback (no dedicated method): walk the pending list in
-                # reverse, unregister each module from the scheduler, and collect
-                # any unregister failures so a partial rollback still surfaces its
-                # errors to the caller chained from the triggering exception.
-                rollback_errors: list[Exception] = []
-                for module in reversed(pending_modules):
-                    try:
-                        await scheduler.unregister_module(module)
-                    except Exception as unregister_err:
-                        rollback_errors.append(unregister_err)
+                # PLAN-20: asyncio.shield protects rollback from cancellation. If the original
+                # exception was CancelledError (or a new cancellation arrives), the rollback
+                # still completes fully — no partial unregister leaves dangling scheduler refs.
+                try:
+                    await asyncio.shield(_rollback_pending(pending_modules, scheduler))
+                except Exception as rollback_exc:
+                    raise ExceptionGroup("rollback failed", rollback_exc.exceptions) from original_exc
                 pending_modules.clear()
                 pending_by_id.clear()
                 logger.warning(
                     "Rolled back pending modules on load failure; main "
                     "tracking reset empty"
                 )
-                if rollback_errors:
-                    raise ExceptionGroup(
-                        "rollback failed", rollback_errors
-                    ) from original_exc
                 raise
 
         # H-13/Plan-16: whole loop succeeded -- commit pending to main tracking

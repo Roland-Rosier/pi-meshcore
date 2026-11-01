@@ -78,14 +78,11 @@ _bus_locks: dict[int, _GuardedLock] = {}
 _registry_lock: Any = None
 _aiologic_module: Any = None
 
-# GUARD LOCK: module-level asyncio.Lock for ONE-TIME initialization guard ONLY.
-# Rationale: aiologic must stay lazily imported (sync CLI constraint), so the
-# aiologic.Lock registry guard cannot be materialised at module scope. Instead
-# a stdlib asyncio.Lock serialises ONLY the first-time creation of the
-# aiologic.Lock registry lock; once _registry_lock is populated this guard is
-# never awaited again. asyncio.Lock is safe to instantiate at module level in
-# Python 3.11+ (no running loop required), mirroring config_loader.py's NR-1.
-_registry_init_lock: asyncio.Lock = asyncio.Lock()
+# PLAN-20 FIX: The module-level asyncio.Lock guard was removed. asyncio.Lock.__init__
+# calls asyncio.get_running_loop() (Python 3.10+), so a module-level instantiation
+# raises RuntimeError when imported by synchronous code (e.g. the check-hardware CLI).
+# The guard lock is now lazily created inside the async get_bus_lock() where an event
+# loop exists, stored as a function attribute (single creation, no global state).
 
 
 class _GuardedLock:
@@ -174,7 +171,14 @@ async def get_bus_lock(bus_number: int) -> SpiLock:
             ) from e
 
     if _registry_lock is None:
-        async with _registry_init_lock:  # Race-free guard
+        # PLAN-20: Lazy init of _init_lock — created inside async get_bus_lock()
+        # where event loop exists. Module-level asyncio.Lock() fails in sync CLI
+        # (no running loop). threading.Lock was considered but rejected: it would
+        # require changing `async with` → `with`, mixing sync/async primitives.
+        # Function attribute ensures single creation, no global state.
+        if not hasattr(get_bus_lock, "_init_lock"):
+            get_bus_lock._init_lock = asyncio.Lock()
+        async with get_bus_lock._init_lock:
             if _registry_lock is None:  # Re-check inside lock
                 _registry_lock = _aiologic_module.Lock()
 
