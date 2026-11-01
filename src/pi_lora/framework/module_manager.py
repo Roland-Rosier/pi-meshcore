@@ -209,7 +209,20 @@ class ModuleManager:
                 try:
                     await asyncio.shield(_rollback_pending(pending_modules, scheduler))
                 except Exception as rollback_exc:
-                    raise ExceptionGroup("rollback failed", rollback_exc.exceptions) from original_exc
+                    # PLAN-20: when unregister failures aggregate into an ExceptionGroup,
+                    # main tracking must still reset and the "rolled back" warning must
+                    # still be emitted (H-12 / test_module_manager_rollback_aggregates_errors
+                    # asserts both). Clear pending lists and log before raising the
+                    # aggregated group so the Plan-19 warning path is not regressed.
+                    pending_modules.clear()
+                    pending_by_id.clear()
+                    logger.warning(
+                        "Rolled back pending modules on load failure; main "
+                        "tracking reset empty"
+                    )
+                    raise ExceptionGroup(
+                        "rollback failed", rollback_exc.exceptions
+                    ) from original_exc
                 pending_modules.clear()
                 pending_by_id.clear()
                 logger.warning(
