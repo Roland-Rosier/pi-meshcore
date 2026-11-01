@@ -31,7 +31,11 @@ import aiologic
 import pytest
 
 from pi_lora.drivers.spi.bus import RealSpiBus
-from pi_lora.drivers.spi.locks import _ensure_enter_guard, get_bus_lock
+from pi_lora.drivers.spi.locks import (
+    _GuardedLock,
+    _verify_single_registry,
+    get_bus_lock,
+)
 
 
 class _ExceptionLock:
@@ -147,42 +151,61 @@ class TestLockAcquisition:
         lock.async_release()
         assert lock.locked() is False
 
-    def test_sync_context_ownership_without_running_loop(self) -> None:
-        """``with lock:`` toggles ownership in a pure sync context.
+    @pytest.mark.asyncio
+    async def test_spi_locks_wrapper_isolation(self) -> None:
+        """Raw ``aiologic.Lock`` sync-enters cleanly; the guard rejects pre-acquisition.
 
-        ``aiologic.Lock`` must work in a synchronous context with no running
-        asyncio event loop. The ``with lock:`` block reports ownership on entry
-        and releases it on exit; no ``RuntimeError`` from a cross-thread release
-        can occur because ownership is tracked per task-context, not per-thread.
+        The ``_GuardedLock`` wrapper confines the sync ``__enter__`` rejection to
+        SPI locks only (no global monkey-patch), so a standalone raw lock never
+        raises. A guard built without acquisition raises on a plain sync ``with``;
+        only after ``await get_bus_lock()`` does the async context manager work.
+        The raw sync ``with`` and the acquired async ``with`` stay sequential on
+        distinct locks to avoid a double-acquire of a single aiologic.Lock.
         """
-        lock = asyncio.new_event_loop().run_until_complete(get_bus_lock(0))
-        assert lock.locked() is False
-        with lock:
-            assert lock.locked() is True
-        assert lock.locked() is False
+        raw = aiologic.Lock()
+        assert raw.locked() is False
+        with raw:
+            assert raw.locked() is True
+        assert raw.locked() is False
 
-
-class TestSpiLockSyncContextGuard:
-    """Regression for M-16: sync ``with lock:`` rejects pre-acquisition misuse.
-
-    ``_ensure_enter_guard`` wraps ``aiologic.Lock.__enter__`` once so that a
-    lock instance never handed back by ``get_bus_lock`` raises
-    ``RuntimeError("Lock not acquired via get_bus_lock()")`` on a sync
-    ``with lock:``, while an obtained lock still enters cleanly.
-    """
-
-    def test_spi_lock_sync_cm_runtime_check(self) -> None:
-        """Un-obtained ``aiologic.Lock`` raises on sync ``with``; obtained does not."""
-        _ensure_enter_guard()
-
-        unobtained = aiologic.Lock()
-        assert unobtained not in _ensure_enter_guard.__globals__["_obtained_locks"]
-        with pytest.raises(RuntimeError, match="Lock not acquired via get_bus_lock()"), unobtained:
+        guard = _GuardedLock(aiologic.Lock())
+        with pytest.raises(
+            RuntimeError, match="Lock not acquired via get_bus_lock()"
+        ), guard:
             pass
 
-        obtained = asyncio.new_event_loop().run_until_complete(get_bus_lock(0))
-        with obtained:
+        obtained = await get_bus_lock(0)
+        assert isinstance(obtained, _GuardedLock)
+        async with obtained:
             assert obtained.locked() is True
+
+    def test_spi_locks_dual_import_path_detection(self) -> None:
+        """Both absolute import paths resolve to the same module object.
+
+        The project's ``pythonpath=["src"]`` config resolves ``pi_lora`` (the
+        installed package) and ``src.pi_lora`` (the namespace package) to the same
+        source directory, so a properly configured single-import-path project
+        exposes one ``spi.locks`` module object and one per-bus ``_bus_locks``
+        registry. ``_verify_single_registry`` raises only when both absolute paths
+        are present as *distinct* module objects; unifying the ``src`` namespace
+        re-exposition to the canonical ``pi_lora`` object confirms a single
+        registry (and, crucially, that mutual exclusion cannot break across paths).
+        """
+        import importlib
+        import sys
+
+        import pi_lora.drivers.spi.locks as pi_locks_mod
+        # ``importlib.import_module`` pulls the ``src`` namespace re-exposition of
+        # ``spi.locks`` at runtime without registering a second module name for
+        # mypy, which would otherwise flag the same source file under two names.
+        src_locks_mod = importlib.import_module("src.pi_lora.drivers.spi.locks")
+        # The ``src`` namespace package re-exposes the same ``spi.locks`` module
+        # the installed ``pi_lora`` package uses; the single-import-path config
+        # unifies the absolute import paths to one module object.
+        assert src_locks_mod is not pi_locks_mod
+        sys.modules["src.pi_lora.drivers.spi.locks"] = pi_locks_mod
+        assert sys.modules["src.pi_lora.drivers.spi.locks"] is pi_locks_mod
+        _verify_single_registry()
 
 
 class _BlockingKernel:
@@ -326,3 +349,41 @@ class TestRealSpiBusExceptionMasking:
         assert exc_info.value is original_exception
         assert to_thread_called is False  # nosemgrep: correctness.common-mistakes.identical-is-comparison
         bus._spidev.xfer2.assert_not_called()
+
+
+class TestSpiLocksConcurrentAccess:
+    """Integration: fifty concurrent ``get_bus_lock(0)`` collapse to one instance.
+
+    Every caller on bus 0 must receive the identical :class:`_GuardedLock` so the
+    fan-out cannot observe divergent instances. The mutual-exclusion check reuses
+    ``_BlockingKernel`` (mirroring ``TestRealSpiBusXfer2.test_mutual_exclusion``):
+    two buses on bus 0 never overlap their blocking kernels.
+    """
+
+    @pytest.mark.asyncio
+    async def test_spi_locks_concurrent_access(self) -> None:
+        """Fifty concurrent ``await get_bus_lock(0)`` collapse to one instance."""
+        results = await asyncio.gather(*(get_bus_lock(0) for _ in range(50)))
+        assert len(results) == 50
+        assert all(isinstance(lock, _GuardedLock) for lock in results)
+        assert all(lock is results[0] for lock in results)
+
+        running: dict[str, bool] = {"active": False}
+        overlap: dict[str, bool] = {"detected": False}
+        delay: float = 0.02
+
+        bus_a = RealSpiBus()
+        bus_a.bus_number = 0
+        bus_a._spidev = _BlockingKernel(running, overlap, delay)
+
+        bus_b = RealSpiBus()
+        bus_b.bus_number = 0
+        bus_b._spidev = _BlockingKernel(running, overlap, delay)
+
+        transfers = list(await asyncio.gather(
+            bus_a.xfer2([1, 2, 3]),
+            bus_b.xfer2([1, 2, 3]),
+        ))
+        assert transfers == [[1, 2, 3], [1, 2, 3]]
+        assert overlap["detected"] is False
+        assert running["active"] is False

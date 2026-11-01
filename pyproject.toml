@@ -287,6 +287,12 @@ ignore = [
 # Tests that verify simulated SPI failures use bare Exception intentionally.
 "tests/test_fakes.py" = ["B017"]
 
+# Plan-19 Fix 3 deliberately uses the explicit ``asyncio.TimeoutError`` (the
+# canonical async timeout) rather than the builtin alias for clarity in async
+# code. ruff's UP041 prefers the builtin; the explicit choice is intentional,
+# so the warning is suppressed here.
+"src/pi_lora/drivers/rfm9x_sx127x_module.py" = ["UP041"]
+
 [tool.ruff.lint.isort]
 
 known-first-party = ["pi_lora.drivers", "pi_lora.cli", "tests.fakes"]

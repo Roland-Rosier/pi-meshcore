@@ -31,7 +31,6 @@ from io import StringIO
 import pytest
 
 from pi_lora.drivers.spi.bus import RealSpiBus
-from pi_lora.drivers.spi.locks import get_bus_lock
 from tests.spi.mock import hardware_enabled, spidev_available
 from tests.test_hardware_cli import (
     _SUCCESSFUL_EVENT,
@@ -50,9 +49,9 @@ class TestHardwareRealPath:
     async def test_real_hardware_xfer2(self) -> None:
         """Run ``xfer2`` on a real spidev kernel when hardware is enabled.
 
-        No-op when ``PI_LORA_HARDWARE`` is unset or the ``spidev`` extension is
-        unavailable. When active, opens a real bus, acquires the per-bus lock via
-        ``await get_bus_lock`` and runs the transfer.
+         No-op when ``PI_LORA_HARDWARE`` is unset or the ``spidev`` extension is
+         unavailable. When active, opens a real bus and runs the transfer; the
+         per-bus lock is acquired internally by ``xfer2`` via ``get_bus_lock``.
         """
         if not hardware_enabled() or not spidev_available():
             return
@@ -60,12 +59,13 @@ class TestHardwareRealPath:
         bus = RealSpiBus()
         bus.open(bus=0, device=0)
 
-        lock = await get_bus_lock(0)
-        await lock.acquire()
-        try:
-            result = await bus.xfer2(bytearray([0x01 | 0x80, 0x42]))
-        finally:
-            lock.release()
+        # xfer2 acquires the per-bus lock internally via get_bus_lock; a manual
+        # acquisition here would double-acquire the same aiologic.Lock (not
+        # reentrant), so the lock is left to xfer2. This replaces the stale
+        # acquire()/release() calls (aiologic.Lock exposes async_acquire /
+        # green_release / locked, not acquire / release) that were incompatible
+        # with the _GuardedLock return type introduced by Plan-19 Fix 6.
+        result = await bus.xfer2(bytearray([0x01 | 0x80, 0x42]))
 
         assert isinstance(result, list)
         assert len(result) == 2

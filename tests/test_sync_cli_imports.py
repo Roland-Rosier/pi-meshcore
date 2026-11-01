@@ -25,7 +25,7 @@ import sys
 import pytest
 
 
-def test_sync_cli_imports_without_aiologic(monkeypatch):
+def test_sync_cli_imports_without_aiologic(monkeypatch: pytest.FixtureRequest) -> None:
     monkeypatch.setitem(sys.modules, 'aiologic', None)
     from pi_lora.cli.config import app as config_app
     from pi_lora.cli.main import app as main_app
@@ -34,7 +34,7 @@ def test_sync_cli_imports_without_aiologic(monkeypatch):
     assert main_app is not None
 
 
-def test_importing_locks_without_aiologic(monkeypatch):
+def test_importing_locks_without_aiologic(monkeypatch: pytest.FixtureRequest) -> None:
     monkeypatch.setitem(sys.modules, 'aiologic', None)
     # Importing spi/locks.py must not raise even when aiologic is unavailable.
     from src.pi_lora.drivers.spi import locks
@@ -42,9 +42,11 @@ def test_importing_locks_without_aiologic(monkeypatch):
 
 
 @pytest.mark.asyncio
-async def test_get_bus_lock_with_aiologic_present():
+async def test_get_bus_lock_with_aiologic_present() -> None:
     # Real import of aiologic (NOT monkeypatched None) in this test.
     import aiologic
-    from src.pi_lora.drivers.spi.locks import get_bus_lock
+    from src.pi_lora.drivers.spi.locks import _GuardedLock, get_bus_lock
     lock = await get_bus_lock(0)
-    assert isinstance(lock, aiologic.Lock)
+    # get_bus_lock now returns a _GuardedLock wrapper around an aiologic.Lock.
+    assert isinstance(lock, _GuardedLock)
+    assert isinstance(lock._lock, aiologic.Lock)

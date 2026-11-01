@@ -71,7 +71,7 @@ async def test_registry_lock_created_once_under_concurrency() -> None:
     assert len(created) == 2, "exactly one registry lock + one per-bus lock for bus 0"
     assert all(r is results[0] for r in results), "all callers get the same bus lock"
     assert created[0] is locks._registry_lock, "registry lock is created first (under guard)"
-    assert results[0] is created[1], "per-bus lock is the second created"
+    assert results[0]._lock is created[1], "per-bus lock is the second created"
 
 
 @pytest.mark.asyncio

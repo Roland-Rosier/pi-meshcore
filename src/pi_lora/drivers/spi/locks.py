@@ -16,7 +16,6 @@ from __future__ import annotations
 
 import asyncio
 import sys
-import weakref
 from typing import Any, Protocol, Self
 
 
@@ -107,7 +106,7 @@ class _GuardedLock:
         self._obtained = False
 
     # Async context manager (primary acquisition path)
-    async def __aenter__(self) -> "Self":
+    async def __aenter__(self) -> Self:
         self._obtained = True
         await self._lock.__aenter__()
         return self
@@ -117,7 +116,7 @@ class _GuardedLock:
         self._obtained = False
 
     # Sync context manager — ONLY valid after async acquisition via get_bus_lock()
-    def __enter__(self) -> "Self":
+    def __enter__(self) -> Self:
         if not self._obtained:
             raise RuntimeError("Lock not acquired via get_bus_lock()")
         self._lock.__enter__()
@@ -185,3 +184,38 @@ async def get_bus_lock(bus_number: int) -> SpiLock:
             raw_lock = _aiologic_module.Lock()
             _bus_locks[bus_number] = _GuardedLock(raw_lock)
         return _bus_locks[bus_number]
+
+
+def _verify_single_registry() -> None:
+    """Verify that both absolute import paths for this module resolve to one object.
+
+    PLAN-19 FIX: code_review-18.1.json #7 root-cause remediation. The previous
+    implementation monkey-patched aiologic.Lock.__enter__ globally and then
+    attempted to unify ``pi_lora.drivers.spi.locks`` and ``src.pi_lora.drivers
+    .spi.locks`` by overwriting ``sys.modules`` entries -- a fragile technique
+    that broke under xdist, editable installs, and alternate PYTHONPATHs,
+    allowing two independent ``_bus_locks`` registries (and hence broken mutual
+    exclusion) to coexist. That sys.modules manipulation has been removed
+    entirely -- the _GuardedLock wrapper confines the acquisition guard to SPI
+    locks without touching global state, so no registry unification is needed.
+
+    If both absolute import paths are present in ``sys.modules`` simultaneously,
+    they MUST be the same module object; otherwise the per-bus ``_bus_locks``
+    registry would not be shared and transfers on the same bus could run
+    concurrently. This helper raises RuntimeError in that case so the root cause
+    (an import-path configuration defect) surfaces at test time instead of being
+    masked by silent dual registries.
+
+    Raises:
+        RuntimeError: If dual import paths create separate registries.
+    """
+    mod1 = sys.modules.get("pi_lora.drivers.spi.locks")
+    mod2 = sys.modules.get("src.pi_lora.drivers.spi.locks")
+    if mod1 is not None and mod2 is not None and mod1 is not mod2:
+        raise RuntimeError(
+            "Dual import paths detected for spi.locks: "
+            f"pi_lora.drivers.spi.locks (id={id(mod1)}) != "
+            f"src.pi_lora.drivers.spi.locks (id={id(mod2)}). "
+            "This breaks mutual exclusion. Fix: ensure single import path "
+            "(e.g., configure pyproject.toml packages correctly)."
+        )

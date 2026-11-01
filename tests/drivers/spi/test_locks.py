@@ -224,12 +224,11 @@ class TestLockProtocolSignatures:
         lock.async_release()
         assert lock.locked() is False
 
-    def test_enter_returns_self(self) -> None:
-        """``with lock:`` returns the lock instance itself."""
+    def test_enter_requires_async_acquisition(self) -> None:
+        """Sync ``with lock`` is guarded: it requires ``__aenter__`` first."""
         lock = asyncio.new_event_loop().run_until_complete(get_bus_lock(2))
-        with lock as entered:
-            assert entered is lock
-        assert entered is lock
+        with pytest.raises(RuntimeError, match="Lock not acquired via get_bus_lock()"), lock:
+            pass
 
     @pytest.mark.asyncio
     async def test_aenter_returns_self(self) -> None:
@@ -245,8 +244,9 @@ class TestLockProtocolSignatures:
         lock = await get_bus_lock(4)
         assert inspect.iscoroutinefunction(lock.async_acquire) is True
 
-    def test_concrete_lock_supports_sync_context_manager_after_async_acquisition(self) -> None:
-        """The concrete ``aiologic.Lock`` exposes sync ``__enter__``/``__exit__``.
+    @pytest.mark.asyncio
+    async def test_concrete_lock_supports_sync_context_manager_after_async_acquisition(self) -> None:
+        """Sync context-manager members exist on the guard; acquisition is async.
 
         CR-4. Before the fix the ``SpiLock`` protocol omitted ``__enter__``/
         ``__exit__`` even though ``aiologic.Lock`` supports them at runtime, so
@@ -254,10 +254,12 @@ class TestLockProtocolSignatures:
         now declares them so the static-vs-runtime gap is closed. ``__members__``
         is a static-only attribute (absent at runtime), so the ground truth is the
         concrete instance: it must expose every protocol member -- including the
-        newly declared sync context managers -- and ``with lock:`` must work after
-        the instance is obtained by awaiting ``get_bus_lock()``.
+        newly declared sync context managers -- which is verified here with
+        ``hasattr``. Because ``get_bus_lock`` returns a :class:`_GuardedLock` whose
+        sync ``__enter__`` raises unless ``__aenter__`` has already run, acquisition
+        must go through ``async with lock:`` rather than a bare sync ``with lock:``.
         """
-        lock = asyncio.new_event_loop().run_until_complete(get_bus_lock(6))
+        lock = await get_bus_lock(6)
         protocol_members = (
             "__enter__",
             "__exit__",
@@ -272,6 +274,6 @@ class TestLockProtocolSignatures:
                 f"concrete lock is missing protocol member {member_name!r}"
             )
         assert lock.locked() is False
-        with lock:
+        async with lock:
             assert lock.locked() is True
         assert lock.locked() is False
