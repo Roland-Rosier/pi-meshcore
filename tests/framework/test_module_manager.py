@@ -660,6 +660,63 @@ class TestLoadFromConfig:
         assert len(mm.modules) == 0
         assert len(mm.modules_by_id) == 0
 
+    @pytest.mark.asyncio
+    async def test_module_manager_rollback_shielded_on_cancel(
+        self, caplog: pytest.LogCaptureFixture,
+    ) -> None:
+        """Shielded rollback survives a mid-rollback cancellation (Plan-20 Fix 4).
+
+        The enclosing ``load_from_config`` task is cancelled *while the shielded
+        rollback is awaiting* ``scheduler.unregister_module()``'s ``asyncio.sleep``.
+        ``asyncio.shield`` protects the inner ``_rollback_pending`` future from
+        that cancellation, so the rollback still completes fully and ``module0``
+        is unregistered -- no dangling scheduler reference survives.
+        """
+        mm = ModuleManager()
+        radio_configs = _make_test_radio_configs()
+        scheduler = Scheduler()
+
+        module0: object = object()
+        _call_count: int = 0
+
+        def _construct(*_args: object, **_kwargs: object) -> object:
+            nonlocal _call_count
+            _call_count += 1
+            if _call_count >= 2:
+                raise asyncio.CancelledError("Module cancelled during load")
+            return module0
+
+        async def _shielded_unregister(_module: object) -> None:
+            # PLAN-20: the sleep makes the rollback window cancelable; the shield
+            # protects this ``await`` from the enclosing task's cancellation so the
+            # discard still runs and no dangling scheduler reference survives.
+            await asyncio.sleep(0.05)
+            scheduler.timer_scheduler._registered.discard(_module)
+
+        with mock.patch(
+            "src.pi_lora.framework.module_manager.Rfm9xSx127xModule",
+            side_effect=_construct,
+        ), mock.patch.object(
+            scheduler, "unregister_module", side_effect=_shielded_unregister
+        ):
+            task = asyncio.ensure_future(
+                mm.load_from_config(radio_configs, scheduler)
+            )
+            await asyncio.sleep(0.1)
+            task.cancel()
+
+        # PLAN-20: the shield ensured the rollback completed despite the task
+        # cancellation; the enclosing cancellation re-surfaces on ``await task``.
+        with pytest.raises(asyncio.CancelledError):
+            await task
+
+        # The shield protected the mid-rollback cancellation, so module0 is fully
+        # unregistered (no dangling scheduler reference) and main tracking is empty.
+        assert module0 not in scheduler.timer_scheduler._registered
+        assert len(mm.modules) == 0
+        assert len(mm.modules_by_id) == 0
+        assert any("rolled back" in msg.lower() for msg in caplog.messages)
+
 
 class TestEmptyConfig:
     """Verify ModuleManager handles empty config gracefully."""

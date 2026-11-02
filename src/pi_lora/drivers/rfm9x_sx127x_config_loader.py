@@ -17,7 +17,7 @@
 from __future__ import annotations
 
 import asyncio
-import importlib.resources
+import importlib
 import types
 from pathlib import Path
 from typing import TYPE_CHECKING, Any

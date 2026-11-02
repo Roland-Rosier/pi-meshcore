@@ -1044,6 +1044,64 @@ class TestCancellationSemantics:
         # The cleanup CancelledError is preserved as __cause__.
         assert excinfo.value.__cause__ is cleanup_cancelled
 
+    @pytest.mark.asyncio
+    async def test_application_start_cleanup_on_keyboard_interrupt(
+        self,
+    ) -> None:
+        """PLAN-20 FIX 3: KeyboardInterrupt/SystemExit are BaseExceptions that
+        bypass ``except Exception`` in start(). This verifies that a KeyboardInterrupt
+        raised during ``load_from_config()`` triggers ``_cleanup_partial_start()``
+        (draining the module via stop_event_loop() and close_spi(), and draining the
+        scheduler via unregister_module) and then re-raises the KeyboardInterrupt
+        verbatim to preserve Ctrl+C semantics — preventing the SPI handle leak that
+        previously occurred when cleanup was skipped for BaseExceptions."""
+        app = Application(config=None, spi_factory=MockSpiBusFactory())
+        module = _FailingInitModule(ce_number=0, spi_device_id=0)
+
+        async def _instant_assembly(
+            assembly_name: str,
+            spi_device_id: Any = None,
+            ce_number: Any = None,
+            config_path: Any = None,
+        ) -> list[Any]:
+            return []
+
+        async def _load_raises_keyboard(
+            radio_configs: list[Any],
+            scheduler: Any,
+            spi_factory: Any | None = None,
+        ) -> None:
+            scheduler.register_module(
+                module, timer_interval=1.0, idle_enabled=True
+            )
+            app.module_manager.modules.append(module)
+            raise KeyboardInterrupt("Ctrl+C during load")
+
+        def _get_all_modules() -> list[Any]:
+            return [module]
+
+        app.get_assembly_config = _instant_assembly  # type: ignore[assignment]
+        app.module_manager.load_from_config = _load_raises_keyboard  # type: ignore[assignment]
+        app.module_manager.get_all_modules = _get_all_modules  # type: ignore[assignment]
+
+        # KeyboardInterrupt is a BaseException, not an Exception, so it bypasses
+        # the ``except Exception`` handler and is caught by ``except BaseException``.
+        with pytest.raises(KeyboardInterrupt):
+            await app.start()
+
+        # Cleanup ran exactly once: the SPI handle was drained (close_spi) and the
+        # event loop drained (stop_event_loop), so no SPI handle leaks.
+        assert module.close_spi_calls == 1
+        assert module.stop_event_loop_calls == 1
+
+        # State flags reset to a clean baseline.
+        assert app._started is False
+        assert app._started_modules == []
+        assert app._scheduler_started is False
+
+        # The scheduler is drained — no dangling module references remain.
+        assert app.scheduler.timer_scheduler._registered == set()
+
 
 class _RestartControllableModule:
     """Controllable module mirroring the Rfm9xSx127xModule interface for restart tests.

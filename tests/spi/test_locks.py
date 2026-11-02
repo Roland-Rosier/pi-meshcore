@@ -22,6 +22,7 @@ reports ownership. ``RealSpiBus.xfer2`` uses that context manager, so an
 """
 
 import asyncio
+import contextlib
 import time
 from types import TracebackType
 from typing import Any
@@ -127,6 +128,41 @@ class TestLockRegistry:
                 assert per_bus[bus_id] is lock
         assert len(per_bus) == len(bus_numbers)
         assert len({id(v) for v in per_bus.values()}) == len(bus_numbers)
+
+    def test_spi_locks_lazy_init_guard_sync_import(self) -> None:
+        """PLAN-20 FIX: verifies the lazy-init guard contract in pure sync context.
+
+        The module-level ``asyncio.Lock()`` guard was removed because
+        ``asyncio.Lock.__init__`` calls ``asyncio.get_running_loop()`` (Python
+        3.10+), which raises ``RuntimeError: no running event loop`` when
+        instantiated at import time by synchronous code (e.g. the
+        check-hardware CLI). This test proves the guard is instead lazily
+        created as a function attribute inside the async ``get_bus_lock()``.
+        """
+        # PLAN-20: importing the module must NOT raise RuntimeError, proving no
+        # module-level asyncio.Lock() instantiation exists at import time.
+        import pi_lora.drivers.spi.locks
+
+        assert pi_lora.drivers.spi.locks is not None
+        # PLAN-20: reset any state left by earlier async tests so the pristine
+        # (pre-async-call) state is observable; the guard is NOT created at
+        # import/module level, so both the module sentinel and the function
+        # attribute must be absent here.
+        pi_lora.drivers.spi.locks._registry_lock = None
+        with contextlib.suppress(AttributeError):
+            del get_bus_lock._init_lock
+        pi_lora.drivers.spi.locks._registry_init_lock_holder[0] = None
+        assert pi_lora.drivers.spi.locks._registry_lock is None
+        assert pi_lora.drivers.spi.locks._registry_init_lock_holder[0] is None
+
+        # PLAN-20: ``asyncio.run`` is a sync entry point with a running event
+        # loop, so the lazy guard is created here and a _GuardedLock is returned.
+        lock = asyncio.run(get_bus_lock(0))
+        assert isinstance(lock, _GuardedLock)
+
+        # PLAN-20: after the first async call the module-level holder guard now
+        # exists, proving lazy init rather than module-level instantiation.
+        assert pi_lora.drivers.spi.locks._registry_init_lock_holder[0] is not None
 
 
 class TestLockAcquisition:

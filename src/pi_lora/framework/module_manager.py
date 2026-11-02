@@ -220,9 +220,11 @@ class ModuleManager:
                         "Rolled back pending modules on load failure; main "
                         "tracking reset empty"
                     )
-                    raise ExceptionGroup(
-                        "rollback failed", rollback_exc.exceptions
-                    ) from original_exc
+                    if isinstance(rollback_exc, ExceptionGroup):
+                        raise ExceptionGroup(
+                            "rollback failed", rollback_exc.exceptions
+                        ) from original_exc
+                    raise rollback_exc from original_exc
                 pending_modules.clear()
                 pending_by_id.clear()
                 logger.warning(
