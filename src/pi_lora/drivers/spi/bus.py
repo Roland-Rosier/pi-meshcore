@@ -238,7 +238,7 @@ class RealSpiBus:
                     asyncio.to_thread(self._spidev.xfer2, data),
                     timeout=self._xfer_timeout,
                 )
-            except asyncio.TimeoutError:
+            except asyncio.TimeoutError:  # noqa: UP041 — canonical async timeout (plan-19); builtin TimeoutError is equivalent in 3.11+
                 logger.warning(
                     "SPI xfer2 timeout on bus %d (%.1fs). Attempting hardware reset.",
                     self.bus_number, self._xfer_timeout,
