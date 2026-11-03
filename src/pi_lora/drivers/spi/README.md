@@ -92,8 +92,8 @@ class SpiBusFactory(Protocol):
 ```python
 class RealSpiBusFactory:
     def create(self, bus: int, device: int) -> SpiBus:
-        bus_instance = RealSpiBus()
-        bus_instance.open(bus=bus, device=device)
+        bus_instance = RealSpiBus(bus_number=bus, device_number=device)
+        bus_instance.open()
         return bus_instance
 ```
 
@@ -146,7 +146,7 @@ class Rfm9xSx127xModule:
         self.spi_bus = self._spi_factory.create(
             bus=self.spi_device_id, device=self.ce_number or 0
         )
-        self.spi_bus.open(self.spi_device_id, self.ce_number or 0)
+        self.spi_bus.open()
 
     async def close_spi(self) -> None:
         if self.spi_bus is not None:

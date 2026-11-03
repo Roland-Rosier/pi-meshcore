@@ -25,6 +25,12 @@ rules:
               if $LOCK is None:
                   ...
                   $LOCK = $Y.Lock()
+      - pattern-not-inside: |
+          if $OUTER_LOCK is None:
+              if $GUARD_LOCK is None:
+                  $GUARD_LOCK = asyncio.Lock()
+              async with $GUARD_LOCK:
+                  ...
     metadata:
       category: correctness
       technology:

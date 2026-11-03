@@ -66,6 +66,8 @@ dependencies = [
     "pydantic>=2.8",
     "ruamel.yaml>=0.6",
     # Async/sync locking primitives (works in both contexts)
+    # Required: SPI locking needs sync context manager support (aiologic.Lock).
+    # See H-6 FIX in src/pi_lora/drivers/spi/locks.py — no sync fallback by design.
     "aiologic>=0.1",
     # --- Optional: MeshCore protocol library ---
     # Uncomment the line below if you need MeshCore client/repeater functionality.

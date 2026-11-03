@@ -451,7 +451,7 @@ def spidev_kernel_patch(fake_spi: FakeSpiDev) -> Iterator[object]:
     :param fake_spi: The FakeSpiDev kernel to expose as ``spidev.SpiDev``.
     :yield: None. The injected fake spidev module is not consumed by callers.
     """
-    from pi_lora.drivers.spi.bus import RealSpiBus
+    from pi_lora.drivers.spi.bus import _spidev_patch_active
 
     backup: object | None = sys.modules.get("spidev", None)
     fake_module: types.SimpleNamespace = types.SimpleNamespace(SpiDev=lambda: fake_spi)
@@ -460,11 +460,11 @@ def spidev_kernel_patch(fake_spi: FakeSpiDev) -> Iterator[object]:
     # context-local ContextVar so _verify_patch_active() can detect misuse after
     # the context exits. .set()/.reset() isolate the flag per async context and
     # are transparent to the synchronous callers of this context manager.
-    token: contextvars.Token[bool] = RealSpiBus._spidev_patch_active.set(True)
+    token: contextvars.Token[bool] = _spidev_patch_active.set(True)
     try:
         yield None
     finally:
-        RealSpiBus._spidev_patch_active.reset(token)
+        _spidev_patch_active.reset(token)
         if backup is None:
             sys.modules.pop("spidev", None)
         else:

@@ -49,7 +49,7 @@ class TestRealSpiBusLifecycle:
     async def test_init_without_open_raises_on_xfer2(self) -> None:
         from src.pi_lora.drivers.spi.bus import RealSpiBus
 
-        bus = RealSpiBus()
+        bus = RealSpiBus(bus_number=0, device_number=0)
         with pytest.raises(RuntimeError, match="SPI bus not opened"):
             await bus.xfer2([0x01])
 
@@ -109,13 +109,12 @@ class TestRealSpiBusErrorMessage:
     def test_real_spi_bus_error_message(self) -> None:
         from contextvars import ContextVar
 
-        from src.pi_lora.drivers.spi.bus import RealSpiBus
+        from src.pi_lora.drivers.spi.bus import RealSpiBus, _spidev_patch_active
 
-        patch_active: ContextVar[bool] = RealSpiBus._spidev_patch_active
+        patch_active: ContextVar[bool] = _spidev_patch_active
         patch_active.set(False)
 
-        bus = RealSpiBus()
-        bus._factory_owned = True
+        bus = RealSpiBus(bus_number=0, device_number=0, factory_owned=True)
 
         with pytest.raises(RuntimeError) as exc_info:
             bus._verify_patch_active()
@@ -125,12 +124,11 @@ class TestRealSpiBusErrorMessage:
         assert "MockSpiBus" not in message
 
     def test_open_surfaces_real_spi_bus_message(self) -> None:
-        from src.pi_lora.drivers.spi.bus import RealSpiBus
+        from src.pi_lora.drivers.spi.bus import RealSpiBus, _spidev_patch_active
 
-        RealSpiBus._spidev_patch_active.set(False)
+        _spidev_patch_active.set(False)
 
-        bus = RealSpiBus()
-        bus._factory_owned = True
+        bus = RealSpiBus(bus_number=0, device_number=0, factory_owned=True)
 
         with pytest.raises(RuntimeError) as exc_info:
             bus.open()
@@ -157,21 +155,20 @@ class TestRealSpiBusXferTimeout:
     def test_default_xfer_timeout_is_five(self) -> None:
         from src.pi_lora.drivers.spi.bus import RealSpiBus
 
-        bus = RealSpiBus()
+        bus = RealSpiBus(bus_number=0, device_number=0)
         assert bus._xfer_timeout == 5.0
 
     def test_custom_xfer_timeout_is_honored(self) -> None:
         from src.pi_lora.drivers.spi.bus import RealSpiBus
 
-        bus = RealSpiBus(xfer_timeout=0.25)
+        bus = RealSpiBus(bus_number=0, device_number=0, xfer_timeout=0.25)
         assert bus._xfer_timeout == 0.25
 
     @pytest.mark.asyncio
     async def test_xfer_timeout_raises_timeout_error(self) -> None:
         from src.pi_lora.drivers.spi.bus import RealSpiBus
 
-        bus = RealSpiBus(xfer_timeout=0.05)
-        bus.bus_number = 0
+        bus = RealSpiBus(bus_number=0, device_number=0, xfer_timeout=0.05)
         bus._spidev = _HangingKernel(sleep_seconds=2.0)
 
         with pytest.raises(asyncio.TimeoutError):
@@ -199,7 +196,7 @@ class TestRealSpiBusPropertiesSafeDefaults:
     def test_each_closed_property_returns_safe_default(self) -> None:
         from src.pi_lora.drivers.spi.bus import RealSpiBus
 
-        bus = RealSpiBus()
+        bus = RealSpiBus(bus_number=0, device_number=0)
         assert bus._spidev is None
 
         for name, expected in self._closed_property_defaults.items():

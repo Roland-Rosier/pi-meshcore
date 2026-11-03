@@ -12,7 +12,7 @@
 # see the License for the specific language governing permissions and
 # limitations under the License.
 
-"""R-4 regression: ``RealSpiBus._spidev_patch_active`` is a ContextVar.
+"""R-4 regression: ``_spidev_patch_active`` is a ContextVar.
 
 These tests prove the class-level ``bool`` flag (CR-8/Plan-11 debt) was
 replaced by a :class:`contextvars.ContextVar`, so the flag is isolated per
@@ -24,7 +24,7 @@ import asyncio
 import contextvars
 
 import pytest
-from src.pi_lora.drivers.spi.bus import RealSpiBus
+from src.pi_lora.drivers.spi.bus import _spidev_patch_active
 
 
 class TestContextVarPatchFlag:
@@ -36,16 +36,16 @@ class TestContextVarPatchFlag:
 
     def test_contextvar_default_is_false(self) -> None:
         """The ContextVar default (no active patch) is ``False``."""
-        assert RealSpiBus._spidev_patch_active.get() is False
+        assert _spidev_patch_active.get() is False
 
     def test_contextvar_set_get_in_same_context(self) -> None:
         """Setting ``True`` is observable by ``.get()``; ``.reset()`` clears it."""
-        token: bool | None = RealSpiBus._spidev_patch_active.set(True)
+        token: bool | None = _spidev_patch_active.set(True)
         try:
-            assert RealSpiBus._spidev_patch_active.get() is True
+            assert _spidev_patch_active.get() is True
         finally:
-            RealSpiBus._spidev_patch_active.reset(token)
-        assert RealSpiBus._spidev_patch_active.get() is False
+            _spidev_patch_active.reset(token)
+        assert _spidev_patch_active.get() is False
 
     @pytest.mark.asyncio
     async def test_contextvar_isolates_async_tasks(self) -> None:
@@ -59,14 +59,14 @@ class TestContextVarPatchFlag:
         """
 
         async def _task_a() -> bool:
-            token_a: bool | None = RealSpiBus._spidev_patch_active.set(True)
+            token_a: bool | None = _spidev_patch_active.set(True)
             try:
-                return RealSpiBus._spidev_patch_active.get()
+                return _spidev_patch_active.get()
             finally:
-                RealSpiBus._spidev_patch_active.reset(token_a)
+                _spidev_patch_active.reset(token_a)
 
         async def _task_b() -> bool:
-            return RealSpiBus._spidev_patch_active.get()
+            return _spidev_patch_active.get()
 
         results: dict[str, bool] = {}
         results["a"], results["b"] = await asyncio.gather(_task_a(), _task_b())
@@ -75,11 +75,11 @@ class TestContextVarPatchFlag:
         # discarded on completion, so the main context stays clean. Re-set ``True``
         # in the main context to confirm the ContextVar remains fully controllable
         # after ``.reset()`` rather than being stuck at a leaked global value.
-        token_main: bool | None = RealSpiBus._spidev_patch_active.set(True)
+        token_main: bool | None = _spidev_patch_active.set(True)
         try:
-            results["b_after"] = RealSpiBus._spidev_patch_active.get()
+            results["b_after"] = _spidev_patch_active.get()
         finally:
-            RealSpiBus._spidev_patch_active.reset(token_main)
+            _spidev_patch_active.reset(token_main)
 
         assert results["a"] is True
         assert results["b"] is False
@@ -99,15 +99,15 @@ class TestContextVarPatchFlag:
             ctx: contextvars.Context = contextvars.copy_context()
 
             def _observe() -> bool:
-                token_w: bool | None = RealSpiBus._spidev_patch_active.set(True)
+                token_w: bool | None = _spidev_patch_active.set(True)
                 try:
-                    return RealSpiBus._spidev_patch_active.get()
+                    return _spidev_patch_active.get()
                 finally:
-                    RealSpiBus._spidev_patch_active.reset(token_w)
+                    _spidev_patch_active.reset(token_w)
 
             return ctx.run(_observe)
 
         worker_result: bool = _worker()
-        main_result: bool = RealSpiBus._spidev_patch_active.get()
+        main_result: bool = _spidev_patch_active.get()
         assert worker_result is True
         assert main_result is False

@@ -16,26 +16,22 @@ from __future__ import annotations
 
 import asyncio
 import contextvars
+import logging
 from typing import Any, Protocol
 
 from .locks import get_bus_lock
+
+logger = logging.getLogger(__name__)
 
 
 class SpiBus(Protocol):
     """Protocol defining the SPI bus interface."""
 
-    def open(self, bus: int | None = None, device: int | None = None) -> None:
-        """Open the SPI bus.
+    def open(self) -> None:
+        """Open the SPI bus using bus/device set at construction.
 
-        Args:
-            bus: The bus identifier. When omitted (``None``), the value stored by
-                the factory's ``create()`` is used instead.
-            device: The device identifier. When omitted (``None``), the value
-                stored by the factory's ``create()`` is used instead.
-
-        The factory-stored bus/device values set by ``create()`` are applied when
-        the corresponding argument is not supplied, so ``open()`` may be called
-        with no arguments. This matches :meth:`RealSpiBus.open` and upholds the
+        The bus/device identifiers are fixed by the constructor (see
+        :class:`RealSpiBus`), so ``open()`` takes no arguments and upholds the
         ``SpiBus`` Liskov Substitution principle.
         """
 
@@ -85,36 +81,43 @@ class SpiBus(Protocol):
         """Set whether chip select is disabled."""
 
 
+# CONTEXT-LOCAL FLAG: module-level ContextVar for async-context isolation.
+# Process-global patch state, but isolated per async context (task) for parallel
+# test execution (pytest-xdist or concurrent async tasks). A class attribute
+# would be shared across all RealSpiBus instances in the same context (H-1).
+# This is finding H-1: moving it to module level fixes the cross-instance sharing.
+_spidev_patch_active: contextvars.ContextVar[bool] = contextvars.ContextVar(
+    "_spidev_patch_active", default=False
+)
+
+
 class RealSpiBus:
     """Real implementation of SpiBus wrapping spidev.SpiDev."""
 
-    # CONTEXT-LOCAL FLAG: use contextvars.ContextVar for async-context isolation.
-    # Class-level flag shared across all instances causes cross-test interference
-    # in parallel test execution (pytest-xdist or concurrent async tasks).
-    # contextvars.ContextVar isolates per async context (task); default is False.
-    # This replaces the class attribute _spidev_patch_active (CR-8/Plan-11 debt).
-    _spidev_patch_active: contextvars.ContextVar[bool] = contextvars.ContextVar(
-        "_spidev_patch_active", default=False
-    )
-
-    def __init__(self, xfer_timeout: float = 5.0) -> None:
+    def __init__(
+        self,
+        bus_number: int,
+        device_number: int,
+        xfer_timeout: float = 5.0,
+        factory_owned: bool = False,
+    ) -> None:
         """Initialize the real SPI bus.
 
-        Bus/device identity is set by ``open()`` — matching the underlying
-        ``spidev.SpiDev`` lifecycle (init → open).
-
         Args:
+            bus_number: SPI bus identifier (required).
+            device_number: SPI device identifier (required).
             xfer_timeout: Upper bound in seconds for a single blocking
                 ``spidev.SpiDev.xfer2`` transfer. :func:`asyncio.wait_for`
                 raises :class:`asyncio.TimeoutError` if the transfer exceeds
                 this budget, preventing an unbounded hang on the event loop.
+            factory_owned: True if created by test factory with spidev patch.
         """
         self._xfer_timeout: float = xfer_timeout
         # spidev.SpiDev has no stubs; use Any to suppress attr-defined errors.
         self._spidev: Any | None = None
-        self.bus_number: int = 0
-        self.device_number: int = 0
-        self._factory_owned: bool = False  # CR-8 FIX: set True when yielded by create_bus
+        self.bus_number: int = bus_number
+        self.device_number: int = device_number
+        self._factory_owned: bool = factory_owned
 
     def _verify_patch_active(self) -> None:
         """CR-8 FIX: Verify the injected ``spidev`` kernel patch is still active.
@@ -135,7 +138,7 @@ class RealSpiBus:
 
         :raises RuntimeError: If this is a :meth:`FakeSpiBusKernelFactory.create_bus` yielded bus whose ``spidev`` patch has been deactivated on context-manager exit.
         """
-        if self._factory_owned and not self._spidev_patch_active.get():
+        if self._factory_owned and not _spidev_patch_active.get():
             raise RuntimeError(
                 "RealSpiBus operation failed: the spidev kernel patch is no longer "
                 "active. This happens when you retain a bus reference after the "
@@ -144,35 +147,24 @@ class RealSpiBus:
                 "the test to keep the context manager open for the bus's lifetime."
             )
 
-    def open(self, bus: int | None = None, device: int | None = None) -> None:
-        """Open the SPI bus. Uses stored bus/device from create() if not provided.
-
-        Args:
-            bus: The bus identifier. If None, the value stored by create() is used.
-            device: The device identifier. If None, the value stored by create() is used.
+    def open(self) -> None:
+        """Open the SPI bus using bus/device from the constructor.
 
         Raises:
-            RuntimeError: If the bus is already open. Call close() first.
+            RuntimeError: If the bus is already open. Call close() before open().
         """
         # PLAN-19 FIX: Prevent resource leak from multiple open() without close().
-        # code_review-18.1.json #6: open() can be called multiple times without close()
-        # -> kernel FD leak. Explicit guard forces caller to manage lifecycle correctly.
         if self._spidev is not None:
             raise RuntimeError(
                 f"SPI bus {self.bus_number}.{self.device_number} already open. "
                 "Call close() before open()."
             )
 
-        # CR-8 FIX: ensure the spidev kernel patch is active before importing it.
+        # H-8 FIX: _verify_patch_active() now runs after bus/device are resolved
+        # (they are fixed in __init__, so this check uses the correct bus/device).
         self._verify_patch_active()
         # Note: spidev is a real python library; do not assume otherwise
         import spidev
-
-        # Use stored values if not overridden
-        if bus is not None:
-            self.bus_number = bus
-        if device is not None:
-            self.device_number = device
 
         self._spidev = spidev.SpiDev()
         self._spidev.open(self.bus_number, self.device_number)
@@ -223,10 +215,36 @@ class RealSpiBus:
 
         lock = await get_bus_lock(self.bus_number)
         async with lock:
-            return await asyncio.wait_for(
-                asyncio.to_thread(self._spidev.xfer2, data),
-                timeout=self._xfer_timeout,
-            )
+            # CR-1 FIX: asyncio.wait_for + asyncio.to_thread cannot interrupt a
+            # blocking spidev.xfer2() (C extension). On timeout the worker thread
+            # keeps running, the lock stays held, and hardware may be inconsistent.
+            # Best-effort recovery: close()/open() to reset hardware. If recovery
+            # fails, the original TimeoutError is raised and bus state is
+            # indeterminate. Recovery is exception-safe via try/finally semantics.
+            try:
+                return await asyncio.wait_for(
+                    asyncio.to_thread(self._spidev.xfer2, data),
+                    timeout=self._xfer_timeout,
+                )
+            except asyncio.TimeoutError:
+                logger.warning(
+                    "SPI xfer2 timeout on bus %d (%.1fs). Attempting hardware reset.",
+                    self.bus_number, self._xfer_timeout,
+                )
+                try:
+                    self.close()
+                    self.open()  # Uses stored bus_number/device_number from __init__
+                except Exception as reset_err:
+                    # Recovery failed — log and raise the original TimeoutError.
+                    # Caller sees TimeoutError; bus may be in closed state.
+                    logger.error(
+                        "SPI hardware reset failed after timeout: %s", reset_err
+                    )
+                raise
+            # ALTERNative (Option C) documented for true interruptibility:
+            # offload SPI to a separate process via multiprocessing; on timeout,
+            # terminate the process. Higher overhead but real isolation. Consider
+            # if timeout-based reset proves insufficient in production.
 
     # PLAN-20: Restore safe default (Plan-14 regression fix). Factory contract:
     # create() returns unopened bus; properties readable before open(). Return 0/False
@@ -244,9 +262,19 @@ class RealSpiBus:
 
     @max_speed_hz.setter
     def max_speed_hz(self, value: int) -> None:
-        """Set maximum speed in Hertz."""
-        if self._spidev is not None:
-            self._spidev.max_speed_hz = value
+        """Set maximum speed in Hertz.
+
+        Raises:
+            RuntimeError: If the bus is not opened. Callers can check
+            `bus.max_speed_hz == 0` to verify the bus is opened before setting.
+
+        H-2 anti-regression: the setter previously no-op'd silently when
+        ``_spidev`` was ``None``, so callers lost their config. Raising here
+        closes the finding.
+        """
+        if self._spidev is None:
+            raise RuntimeError("SPI bus not opened. Call open() first.")
+        self._spidev.max_speed_hz = value
 
     # PLAN-20: Restore safe default (Plan-14 regression fix). Factory contract:
     # create() returns unopened bus; properties readable before open(). Return 0/False
@@ -260,9 +288,19 @@ class RealSpiBus:
 
     @mode.setter
     def mode(self, value: int) -> None:
-        """Set SPI mode setting."""
-        if self._spidev is not None:
-            self._spidev.mode = value
+        """Set SPI mode setting.
+
+        Raises:
+            RuntimeError: If the bus is not opened. Callers can check
+            `bus.mode == 0` to verify the bus is opened before setting.
+
+        H-2 anti-regression: the setter previously no-op'd silently when
+        ``_spidev`` was ``None``, so callers lost their config. Raising here
+        closes the finding.
+        """
+        if self._spidev is None:
+            raise RuntimeError("SPI bus not opened. Call open() first.")
+        self._spidev.mode = value
 
     # PLAN-20: Restore safe default (Plan-14 regression fix). Factory contract:
     # create() returns unopened bus; properties readable before open(). Return 0/False
@@ -276,9 +314,19 @@ class RealSpiBus:
 
     @lsbfirst.setter
     def lsbfirst(self, value: bool) -> None:
-        """Set whether least significant bit comes first."""
-        if self._spidev is not None:
-            self._spidev.lsbfirst = value
+        """Set whether least significant bit comes first.
+
+        Raises:
+            RuntimeError: If the bus is not opened. Callers can check
+            `bus.lsbfirst is False` to verify the bus is opened before setting.
+
+        H-2 anti-regression: the setter previously no-op'd silently when
+        ``_spidev`` was ``None``, so callers lost their config. Raising here
+        closes the finding.
+        """
+        if self._spidev is None:
+            raise RuntimeError("SPI bus not opened. Call open() first.")
+        self._spidev.lsbfirst = value
 
     # PLAN-20: Restore safe default (Plan-14 regression fix). Factory contract:
     # create() returns unopened bus; properties readable before open(). Return 0/False
@@ -292,6 +340,16 @@ class RealSpiBus:
 
     @no_cs.setter
     def no_cs(self, value: bool) -> None:
-        """Set whether chip select is disabled."""
-        if self._spidev is not None:
-            self._spidev.no_cs = value
+        """Set whether chip select is disabled.
+
+        Raises:
+            RuntimeError: If the bus is not opened. Callers can check
+            `bus.no_cs is False` to verify the bus is opened before setting.
+
+        H-2 anti-regression: the setter previously no-op'd silently when
+        ``_spidev`` was ``None``, so callers lost their config. Raising here
+        closes the finding.
+        """
+        if self._spidev is None:
+            raise RuntimeError("SPI bus not opened. Call open() first.")
+        self._spidev.no_cs = value

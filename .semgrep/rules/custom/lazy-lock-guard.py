@@ -32,6 +32,7 @@ _registry_guard: asyncio.Lock = asyncio.Lock()
 def get_registry_lock_bad() -> object:
     """BUG: the lock is created directly with no guard lock (race condition)."""
     # ruleid:lazy-lock-without-guard
+    global _registry_lock
     if _registry_lock is None:
         _registry_lock = aiologic.Lock()
         ...
@@ -47,3 +48,19 @@ def get_registry_lock_good() -> object:
                 _registry_lock = aiologic.Lock()
     async with _registry_lock:
         return _registry_lock
+
+
+_outer_lock: object = None
+_guard_lock: asyncio.Lock | None = None
+
+
+def get_config_loader_style_good() -> object:
+    """OK: config_loader.py style - guard lock created lazily, then used in async with."""
+    if _outer_lock is None:  # ok:lazy-lock-without-guard
+        if _guard_lock is None:
+            _guard_lock = asyncio.Lock()
+        async with _guard_lock:
+            if _outer_lock is None:
+                _outer_lock = aiologic.Lock()
+    async with _outer_lock:
+        return _outer_lock

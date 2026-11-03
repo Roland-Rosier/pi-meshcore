@@ -284,7 +284,7 @@ class TestRealSpiBusXfer2:
     async def test_xfer2_uses_shared_bus_lock(self) -> None:
         assert await get_bus_lock(0) is await get_bus_lock(0)  # nosemgrep: correctness.common-mistakes.identical-is-comparison
 
-        bus = RealSpiBus()
+        bus = RealSpiBus(bus_number=0, device_number=0)
         bus.bus_number = 0
         bus._spidev = MagicMock()
         bus._spidev.xfer2 = MagicMock(return_value=[1, 2, 3])
@@ -328,11 +328,11 @@ class TestRealSpiBusXfer2:
         overlap: dict[str, bool] = {"detected": False}
         delay: float = 0.02
 
-        bus_a = RealSpiBus()
+        bus_a = RealSpiBus(bus_number=0, device_number=0)
         bus_a.bus_number = 0
         bus_a._spidev = _BlockingKernel(running, overlap, delay)
 
-        bus_b = RealSpiBus()
+        bus_b = RealSpiBus(bus_number=0, device_number=0)
         bus_b.bus_number = 0
         bus_b._spidev = _BlockingKernel(running, overlap, delay)
 
@@ -358,7 +358,7 @@ class TestRealSpiBusExceptionMasking:
     @pytest.mark.asyncio
     async def test_aenter_failure_preserves_original_exception(self) -> None:
         """``xfer2`` raises the original ``__aenter__`` exception, never a mask."""
-        bus = RealSpiBus()
+        bus = RealSpiBus(bus_number=0, device_number=0)
         bus.bus_number = 0
         bus._spidev = MagicMock()
         bus._spidev.xfer2 = MagicMock(return_value=[1, 2, 3])
@@ -408,11 +408,11 @@ class TestSpiLocksConcurrentAccess:
         overlap: dict[str, bool] = {"detected": False}
         delay: float = 0.02
 
-        bus_a = RealSpiBus()
+        bus_a = RealSpiBus(bus_number=0, device_number=0)
         bus_a.bus_number = 0
         bus_a._spidev = _BlockingKernel(running, overlap, delay)
 
-        bus_b = RealSpiBus()
+        bus_b = RealSpiBus(bus_number=0, device_number=0)
         bus_b.bus_number = 0
         bus_b._spidev = _BlockingKernel(running, overlap, delay)
 

@@ -109,7 +109,7 @@ class Rfm9xSx127xModule:
         self.spi_bus = self._spi_factory.create(
             bus=self.spi_device_id, device=self.ce_number
         )
-        self.spi_bus.open(self.spi_device_id, self.ce_number)
+        self.spi_bus.open()
 
     async def close_spi(self) -> None:
         """Close the SPI bus if one is open."""

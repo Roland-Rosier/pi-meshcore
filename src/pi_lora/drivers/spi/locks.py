@@ -87,6 +87,16 @@ _aiologic_module: Any = None
 # --strict accepts element assignment and indexing.
 _registry_init_lock_holder: list[asyncio.Lock | None] = [None]
 
+# H-5 FIX: Sentinel placeholder for the double-checked-locking race. If
+# aiologic.Lock() internally awaits during construction, the _holder guard could
+# be released before the real lock exists, letting a second coroutine re-enter
+# `if _registry_lock is None:` before the first coroutine finishes. Assigning
+# _SENTINEL to _registry_lock INSIDE the guard marks the slot occupied before
+# awaiting Lock(), closing the race. On failure the sentinel is reset to None
+# (NOT leaked) so a later call can retry — a leaked sentinel would raise
+# AttributeError on subsequent `async with _registry_lock:` calls.
+_SENTINEL = object()
+
 
 class _GuardedLock:
     """Wrapper around aiologic.Lock that enforces acquisition via get_bus_lock().
@@ -160,6 +170,13 @@ async def get_bus_lock(bus_number: int) -> SpiLock:
     """
     global _registry_lock, _aiologic_module
 
+    # H-6 FIX: aiologic is a REQUIRED dependency for SPI locking.
+    # The SpiLock protocol requires sync context manager support (__enter__/__exit__),
+    # which only aiologic.Lock provides (asyncio.Lock lacks sync `with`).
+    # See pyproject.toml for the declared (required, not optional) dependency.
+    # No sync fallback exists by design; an ImportError here signals the
+    # dependency is uninstalled, not a runtime recoverable condition.
+
     # Lazy aiologic import — outside lock for first call, only imports module,
     # doesn't patch it. Safe because module import is thread-safe in Python (GIL).
     # The _registry_lock creation is guarded.
@@ -174,17 +191,24 @@ async def get_bus_lock(bus_number: int) -> SpiLock:
             ) from e
 
     if _registry_lock is None:
-        # PLAN-20: Lazy init of the guard lock — created inside async get_bus_lock()
-        # where event loop exists. Module-level asyncio.Lock() fails in sync CLI
-        # (no running loop). threading.Lock was considered but rejected: it would
-        # require changing `async with` → `with`, mixing sync/async primitives.
-        # The module-level list holder ensures single creation with a type mypy
-        # --strict accepts; the asyncio.Lock() itself is still created lazily here.
+        # H-5 FIX: Sentinel pattern with exception-safe try/finally.
+        # If aiologic.Lock() internally awaits during construction, the _holder
+        # could be released before the lock is built, letting a second coroutine
+        # re-enter `if _registry_lock is None:`. Setting _registry_lock to a
+        # sentinel INSIDE the guard prevents that race: the first coroutine marks
+        # the slot occupied before awaiting Lock(). If Lock() raises, the sentinel
+        # is reset to None (NOT leaked) so a later call can retry — a leaked
+        # sentinel would cause AttributeError on subsequent `async with` calls.
         _holder: asyncio.Lock = _registry_init_lock_holder[0] or asyncio.Lock()
         _registry_init_lock_holder[0] = _holder
         async with _holder:
             if _registry_lock is None:  # Re-check inside lock
-                _registry_lock = _aiologic_module.Lock()
+                _registry_lock = _SENTINEL  # Placeholder — prevents race if Lock() awaits
+                try:
+                    _registry_lock = _aiologic_module.Lock()
+                except Exception:
+                    _registry_lock = None  # Reset on failure — don't leak sentinel
+                    raise
 
     async with _registry_lock:
         if bus_number not in _bus_locks:

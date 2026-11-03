@@ -32,7 +32,7 @@ from pi_lora.drivers.rfm9x_sx127x_config_model import (
 # Default config resource path as configuration string (not magic).
 _DEFAULT_CONFIG_RESOURCE: str = "pi_lora.drivers.configs:rfm9x_sx127x_config.yaml"
 
-# GUARD LOCK: Use stdlib asyncio.Lock for ONE-TIME initialization guard ONLY.
+# GUARD LOCK: Lazy sentinel for ONE-TIME initialization guard ONLY.
 # Rationale:
 # - This project uses aiologic for ALL runtime synchronization (see locks.py, scheduler.py, application.py)
 # - The guard lock _init_lock is used ONLY during first call to get_preloaded_config()
@@ -40,9 +40,13 @@ _DEFAULT_CONFIG_RESOURCE: str = "pi_lora.drivers.configs:rfm9x_sx127x_config.yam
 # - After initialization, _init_lock is NEVER used again
 # - Creating aiologic.Lock at module level would import aiologic at import time,
 #   breaking BUG-4 fix (sync CLI load_config/load_family_config must work without aiologic)
-# - asyncio.Lock is safe to create at module level (no running loop required in Python 3.11+)
+# - H-7 (2026-11-02): asyncio.Lock.__init__ calls asyncio.get_running_loop(), which raises
+#   RuntimeError when there is no running event loop (e.g. module import in a sync context
+#   like the check-hardware CLI). A module-level asyncio.Lock() therefore breaks import.
+# - Fix: defer asyncio.Lock() creation to inside get_preloaded_config()'s async guard
+#   (lazy sentinel), so it is only ever constructed while an event loop is running.
 # - This is a deliberate, well-contained exception to the "aiologic-only" rule
-_init_lock: asyncio.Lock = asyncio.Lock()
+_init_lock: asyncio.Lock | None = None  # Lazy init guard
 _config_cache: Rfm9xSx127xConfig | None = None
 
 if TYPE_CHECKING:
@@ -182,6 +186,7 @@ async def get_preloaded_config(
     global _config_cache
     global _config_lock
     global _aiologic_module
+    global _init_lock
 
     # PLAN-19 FIX: force_reload=True with config_path now updates _config_cache (docstring contract).
     # Before this, the override path bypassed the cache entirely.
@@ -209,6 +214,11 @@ async def get_preloaded_config(
             ) from e
 
     if _config_lock is None:
+        # H-7 fix: _init_lock is a lazy sentinel (see module comment). asyncio.Lock()
+        # must be created under a running event loop or it raises RuntimeError, so it is
+        # constructed here inside the async guard rather than at module import time.
+        if _init_lock is None:
+            _init_lock = asyncio.Lock()
         async with _init_lock:  # Race-free guard (covers lock creation only)
             if _config_lock is None:  # Re-check inside lock
                 _config_lock = _aiologic_module.Lock()

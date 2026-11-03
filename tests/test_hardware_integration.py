@@ -56,8 +56,8 @@ class TestHardwareRealPath:
         if not hardware_enabled() or not spidev_available():
             return
 
-        bus = RealSpiBus()
-        bus.open(bus=0, device=0)
+        bus = RealSpiBus(bus_number=0, device_number=0)
+        bus.open()
 
         # xfer2 acquires the per-bus lock internally via get_bus_lock; a manual
         # acquisition here would double-acquire the same aiologic.Lock (not

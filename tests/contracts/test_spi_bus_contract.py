@@ -14,10 +14,10 @@
 
 """Contract tests pinning ``SpiBus`` protocol conformance (R-2 regression).
 
-These tests verify that the ``SpiBus.open`` protocol declares optional
-``bus``/``device`` parameters that mirror :meth:`RealSpiBus.open`, closing the
-Liskov Substitution violation that existed while the protocol used required
-parameters.
+These tests verify that the ``SpiBus.open`` protocol declares no ``bus``/``device``
+parameters that now mirror :meth:`RealSpiBus.open`, whose bus/device identity is
+fixed at construction (H-3/H-4 fix). ``open()`` takes no arguments and uses the
+constructor values, upholding the ``SpiBus`` Liskov Substitution principle.
 """
 
 import inspect
@@ -86,10 +86,10 @@ class TestSpiBusContract:
         assert mock_bus.device_number == 6
 
     def test_open_with_explicit_args_overrides_stored(self) -> None:
-        real_bus = RealSpiBusFactory().create(bus=5, device=6)
+        real_bus = RealSpiBusFactory().create(bus=7, device=8)
         kernel = MagicMock()
         with spidev_kernel_patch(kernel):
-            real_bus.open(bus=7, device=8)
+            real_bus.open()
         assert kernel.open.call_args == ((7, 8),)
         assert real_bus.bus_number == 7
         assert real_bus.device_number == 8
@@ -111,10 +111,8 @@ class TestSpiBusContract:
             for param in inspect.signature(RealSpiBus.open).parameters.values()
             if param.name != "self"
         ]
-        assert [param.name for param in proto_params] == ["bus", "device"]
-        assert [param.name for param in impl_params] == ["bus", "device"]
-        for param in (*proto_params, *impl_params):
-            assert param.default is not inspect.Parameter.empty
+        assert [param.name for param in proto_params] == []
+        assert [param.name for param in impl_params] == []
 
     def test_mock_open_params_are_optional(self) -> None:
         mock_params = [

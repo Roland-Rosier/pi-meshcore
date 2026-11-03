@@ -146,19 +146,28 @@ class ConfigConsistencyError(RadioInstanceError):
         super().__init__(message, context)
 
 
-async def create_radio_instance(
+def _create_radio_instance_core(
     assembly_name: str,
     spi_device_id: int,
     ce_number: int,
-    config: Rfm9xSx127xConfig | None = None,
+    config: Rfm9xSx127xConfig,
 ) -> RadioInstanceConfig:
     """Resolve and aggregate configuration for a single radio instance.
+
+    CR-2 FIX (sync core): This is the pure aggregation body extracted from the
+    former ``create_radio_instance`` coroutine. It performs NO config-loading,
+    NO I/O, and NO ``await`` — it consumes an already-loaded ``config`` and
+    returns the aggregated ``RadioInstanceConfig``. The finding that changed
+    ``create_radio_instance`` from sync to async made ``config`` optional and
+    broke synchronous callers; this core restores the sync path so callers can
+    load config explicitly via ``load_config()`` and call
+    ``create_radio_instance_sync()`` without awaiting.
 
     Args:
         assembly_name: Assembly identifier (e.g., "default").
         spi_device_id: SPI bus number (e.g., 0).
         ce_number: Chip enable slot (e.g., 0 or 1).
-        config: Pre-loaded config. If None, the preloaded default config is loaded.
+        config: Pre-loaded config (required — callers load it explicitly).
 
     Returns:
         Fully populated RadioInstanceConfig.
@@ -171,10 +180,6 @@ async def create_radio_instance(
         FamilyNotFoundError: If no family contains the device_name.
         ConfigConsistencyError: If cross-reference validation fails.
     """
-    if config is None:
-        from pi_lora.drivers.rfm9x_sx127x_config_loader import get_preloaded_config
-        config = await get_preloaded_config()
-
     # 1. Get assembly (physical deployment unit with antenna config)
     if assembly_name not in config.assemblies:
         raise AssemblyNotFoundError(assembly_name, DeviceIdentity(spi_device_id, ce_number))
@@ -276,6 +281,87 @@ async def create_radio_instance(
     )
 
     return result
+
+
+async def create_radio_instance(
+    assembly_name: str,
+    spi_device_id: int,
+    ce_number: int,
+    config: Rfm9xSx127xConfig | None = None,
+) -> RadioInstanceConfig:
+    """Resolve and aggregate configuration for a single radio instance.
+
+    CR-2 FIX (async wrapper): This is the async wrapper around the sync core
+    ``_create_radio_instance_core``. When ``config`` is None it auto-loads the
+    preloaded default config via ``get_preloaded_config()`` (available in async
+    context per H-7). Callers that must stay synchronous should instead load
+    config via ``load_config()`` and call ``create_radio_instance_sync()``.
+
+    Args:
+        assembly_name: Assembly identifier (e.g., "default").
+        spi_device_id: SPI bus number (e.g., 0).
+        ce_number: Chip enable slot (e.g., 0 or 1).
+        config: Pre-loaded config. If None, the preloaded default config is loaded.
+
+    Returns:
+        Fully populated RadioInstanceConfig.
+
+    Raises:
+        DriverModuleNotFoundError: If module_name not in config.modules.
+        DeviceAttachmentNotFoundError: If no attachment matches spi_device_id/ce_number.
+        AssemblyNotFoundError: If no assembly found for the module.
+        DeviceSpecNotFoundError: If device spec not in config.devices.
+        FamilyNotFoundError: If no family contains the device_name.
+        ConfigConsistencyError: If cross-reference validation fails.
+    """
+    # CR-2 FIX: config is optional here because the async wrapper can await the
+    # preloaded config. Sync callers cannot await, so they must pass an explicit
+    # config (loaded via ``load_config()``) and use ``create_radio_instance_sync()``.
+    if config is None:
+        from pi_lora.drivers.rfm9x_sx127x_config_loader import get_preloaded_config
+        config = await get_preloaded_config()
+
+    return _create_radio_instance_core(assembly_name, spi_device_id, ce_number, config)
+
+
+def create_radio_instance_sync(
+    assembly_name: str,
+    spi_device_id: int,
+    ce_number: int,
+    config: Rfm9xSx127xConfig,
+) -> RadioInstanceConfig:
+    """Resolve and aggregate configuration for a single radio instance (sync).
+
+    CR-2 FIX (sync wrapper): Synchronous callers cannot ``await`` the async
+    ``create_radio_instance`` wrapper, and making that function sync originally
+    broke callers that relied on the auto-loaded config. This wrapper requires
+    an explicit ``config`` and delegates to the pure sync core
+    ``_create_radio_instance_core``. Sync migration path:
+
+        from pi_lora.drivers.rfm9x_sx127x_config_loader import load_config
+        config = load_config()
+        result = create_radio_instance_sync(
+            assembly_name="default", spi_device_id=0, ce_number=0, config=config
+        )
+
+    Args:
+        assembly_name: Assembly identifier (e.g., "default").
+        spi_device_id: SPI bus number (e.g., 0).
+        ce_number: Chip enable slot (e.g., 0 or 1).
+        config: Pre-loaded config (required — load it via ``load_config()``).
+
+    Returns:
+        Fully populated RadioInstanceConfig.
+
+    Raises:
+        DriverModuleNotFoundError: If module_name not in config.modules.
+        DeviceAttachmentNotFoundError: If no attachment matches spi_device_id/ce_number.
+        AssemblyNotFoundError: If no assembly found for the module.
+        DeviceSpecNotFoundError: If device spec not in config.devices.
+        FamilyNotFoundError: If no family contains the device_name.
+        ConfigConsistencyError: If cross-reference validation fails.
+    """
+    return _create_radio_instance_core(assembly_name, spi_device_id, ce_number, config)
 
 
 async def create_radio_instance_from_default(

@@ -92,7 +92,7 @@ class TestRealSpiBusFactory:
         assert bus.device_number == 1
 
         with spidev_kernel_patch(fake_kernel):
-            bus.open(bus=0, device=1)
+            bus.open()
             assert bus.bus_number == 0
             assert bus.device_number == 1
 
@@ -141,7 +141,7 @@ class TestFakeSpiBusKernelFactoryContext:
         """CR-8 FIX: operating on a create_bus bus after the context exits raises RuntimeError.
 
         After the ``with`` block exits the bus is closed (``_spidev`` is ``None``)
-        and the ``spidev`` patch is deactivated (``RealSpiBus._spidev_patch_active``
+         and the ``spidev`` patch is deactivated (``_spidev_patch_active``
         is ``False``). A retained bus reference whose :meth:`RealSpiBus.open` or
         :meth:`RealSpiBus.xfer2` is then called surfaces a clear :class:`RuntimeError`
         instead of a mysterious ``import spidev`` failure.
@@ -155,7 +155,7 @@ class TestFakeSpiBusKernelFactoryContext:
         assert bus._spidev is None
 
         with pytest.raises(RuntimeError) as open_exc:
-            bus.open(0, 0)
+            bus.open()
         assert "patch" in str(open_exc.value).lower()
 
         with pytest.raises(RuntimeError):
