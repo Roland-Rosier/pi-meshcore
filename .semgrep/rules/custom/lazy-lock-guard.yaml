@@ -35,3 +35,8 @@ rules:
       category: correctness
       technology:
         - python
+    # CR-3 FIX: This rule produces false positives on valid double-checked
+    # locking (e.g. config_loader.py and locks.py), where the `if $LOCK is
+    # None` check is intentionally nested inside a guard lock. The
+    # pattern-not-inside guards are incomplete and must be hardened to reject
+    # the guarded pattern before accepting the bare pattern as an ERROR.
