@@ -101,6 +101,10 @@ class RealSpiBus:
         xfer_timeout: float = 5.0,
         factory_owned: bool = False,
     ) -> None:
+        # H-4 FIX: bus_number and device_number are positional-required with no
+        # default of 0, so open() cannot silently target bus 0.0. A default of
+        # 0 would let open() open the wrong bus; the constructor enforces an
+        # explicit bus/device set instead.
         """Initialize the real SPI bus.
 
         Args:
@@ -117,6 +121,10 @@ class RealSpiBus:
         self._spidev: Any | None = None
         self.bus_number: int = bus_number
         self.device_number: int = device_number
+        # H-3 FIX: _factory_owned is True only for buses yielded by
+        # FakeSpiBusKernelFactory and False for production buses. Because the
+        # _verify_patch_active() guard keys on _factory_owned, the guard is
+        # silently disabled for production buses (the bug).
         self._factory_owned: bool = factory_owned
 
     def _verify_patch_active(self) -> None:
@@ -162,6 +170,10 @@ class RealSpiBus:
 
         # H-8 FIX: _verify_patch_active() now runs after bus/device are resolved
         # (they are fixed in __init__, so this check uses the correct bus/device).
+        # Root-cause (why the bug occurred): the call previously happened BEFORE
+        # bus/device were resolved, so it validated against the default values of
+        # 0,0 instead of the real bus/device -- _verify_patch_active() therefore
+        # checked the wrong (default) bus/device and could pass or fail incorrectly.
         self._verify_patch_active()
         # Note: spidev is a real python library; do not assume otherwise
         import spidev
