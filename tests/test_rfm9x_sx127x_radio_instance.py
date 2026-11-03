@@ -18,6 +18,7 @@ from dataclasses import FrozenInstanceError
 
 import pytest
 
+from pi_lora.drivers.rfm9x_sx127x_config_loader import load_config
 from pi_lora.drivers.rfm9x_sx127x_config_model import (
     AntennaConfig,
     AssemblyConfig,
@@ -38,8 +39,10 @@ from pi_lora.drivers.rfm9x_sx127x_radio_instance import (
     FamilyNotFoundError,
     RadioInstanceConfig,
     RadioInstanceError,
+    _create_radio_instance_core,
     create_radio_instance,
     create_radio_instance_from_default,
+    create_radio_instance_sync,
 )
 
 # ──────────────────────────────────────────────────────────────────────
@@ -1738,3 +1741,64 @@ class TestExceptionHierarchy:
 
         exc5: FamilyNotFoundError = FamilyNotFoundError("DEV2")
         assert "DEV2" in str(exc5)
+
+
+class TestSyncMigrationPath:
+    """CR-2 Fix: sync core, async wrapper, and sync migration coverage."""
+
+    def test_create_radio_instance_sync_core(
+        self, default_config: Rfm9xSx127xConfig
+    ) -> None:
+        """The pure sync core returns a ``RadioInstanceConfig`` without awaiting."""
+        result: RadioInstanceConfig = _create_radio_instance_core(
+            assembly_name="default",
+            spi_device_id=0,
+            ce_number=0,
+            config=default_config,
+        )
+
+        assert isinstance(result, RadioInstanceConfig)
+        assert result.device_name == "RFM95"
+        assert result.ce_number == 0
+        assert result.min_radio_freq_hz == 868000000
+        assert result.max_radio_freq_hz == 915000000
+        assert result.family_name == "RFM9X"
+
+    def test_sync_caller_migration_path(self) -> None:
+        """Sync callers: ``load_config()`` then ``create_radio_instance_sync()``.
+
+        CR-2 migration path. ``load_config()`` is a synchronous loader, so the
+        whole path runs in a purely sync context with no ``await`` and no event
+        loop, returning a valid ``RadioInstanceConfig`` synchronously.
+        """
+        config: Rfm9xSx127xConfig = load_config()
+        assert isinstance(config, Rfm9xSx127xConfig)
+
+        result: RadioInstanceConfig = create_radio_instance_sync(
+            assembly_name="default",
+            spi_device_id=0,
+            ce_number=0,
+            config=config,
+        )
+
+        assert isinstance(result, RadioInstanceConfig)
+        assert result.device_name == "RFM95"
+        assert result.ce_number == 0
+
+    @pytest.mark.asyncio
+    async def test_create_radio_instance_async_wrapper(self) -> None:
+        """The async wrapper auto-loads config via ``get_preloaded_config()``.
+
+        CR-2. Passing ``config=None`` triggers the auto-load branch, so the
+        returned ``RadioInstanceConfig`` is built from the preloaded default
+        configuration without the caller supplying one explicitly.
+        """
+        result: RadioInstanceConfig = await create_radio_instance(
+            assembly_name="default",
+            spi_device_id=0,
+            ce_number=0,
+        )
+
+        assert isinstance(result, RadioInstanceConfig)
+        assert result.device_name == "RFM95"
+        assert result.ce_number == 0

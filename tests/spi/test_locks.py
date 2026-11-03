@@ -165,6 +165,50 @@ class TestLockRegistry:
         assert pi_lora.drivers.spi.locks._registry_init_lock_holder[0] is not None
 
 
+class TestSentinelPattern:
+    """H-5 Fix: sentinel double-checked-locking race and exception safety."""
+
+    @pytest.mark.asyncio
+    async def test_sentinel_pattern_prevents_race(self) -> None:
+        """Concurrent ``get_bus_lock(0)`` collapse to exactly one lock instance.
+
+        The sentinel marks the registry slot occupied before awaiting
+        ``aiologic.Lock()``, so no second coroutine can re-enter the creation
+        branch. Every caller therefore observes the single instance -- a
+        threading ``Lock`` race would surface as divergent instances here.
+        """
+        first = await get_bus_lock(0)
+        results = await asyncio.gather(
+            *(get_bus_lock(0) for _ in range(100))
+        )
+
+        assert len(results) == 100
+        assert all(lock is first for lock in results)
+        assert len({id(lock) for lock in results}) == 1
+
+    @pytest.mark.asyncio
+    async def test_sentinel_exception_safety(self) -> None:
+        """A ``aiologic.Lock()`` failure resets ``_registry_lock`` to None.
+
+        H-5. If lock construction raises, the sentinel must be reset to ``None``
+        (NOT leaked) so a later call can retry. A leaked sentinel would raise
+        ``AttributeError`` on the next ``async with _registry_lock:``.
+        """
+        import aiologic
+
+        import pi_lora.drivers.spi.locks as _locks
+
+        _locks._registry_lock = None
+        _locks._aiologic_module = None
+
+        with patch.object(
+            aiologic, "Lock", side_effect=RuntimeError("Lock build failed")
+        ), pytest.raises(RuntimeError):
+            await _locks.get_bus_lock(0)
+
+        assert _locks._registry_lock is None
+
+
 class TestLockAcquisition:
     """Tests for ``async with lock:`` acquisition/release toggling."""
 

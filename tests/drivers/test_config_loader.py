@@ -143,3 +143,16 @@ async def test_config_loader_full_lifecycle() -> None:
         assert _device_name(third, "rfm95") == "CUSTOM95"
     finally:
         _loader._config_cache = _original_cache
+
+
+def test_config_loader_sync_import() -> None:
+    """``load_config()`` works in pure sync context (no running event loop).
+
+    H-7: the async coroutine's ``asyncio.Lock()`` guard is lazily created inside
+    the event loop, so importing the module and calling the sync ``load_config()``
+    here never raises ``RuntimeError: no running event loop``.
+    """
+    assert _loader is not None
+    config: Rfm9xSx127xConfig = _loader.load_config()
+    assert isinstance(config, Rfm9xSx127xConfig)
+    assert _device_name(config, "rfm95") == "RFM95"

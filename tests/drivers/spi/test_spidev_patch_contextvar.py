@@ -111,3 +111,35 @@ class TestContextVarPatchFlag:
         main_result: bool = _spidev_patch_active.get()
         assert worker_result is True
         assert main_result is False
+
+    @pytest.mark.asyncio
+    async def test_contextvar_isolation_per_async_context(self) -> None:
+        """Two parallel async tasks set different values without interfering.
+
+        Each task sets ``_spidev_patch_active`` to a distinct value inside its own
+        coroutine context. With a :class:`contextvars.ContextVar`, each task runs
+        in its own copied context, so ``_task_a`` observes ``True`` and
+        ``_task_b`` observes ``False`` concurrently -- the old class-level ``bool``
+        would have made both observe the same leaked value.
+        """
+
+        async def _task_a() -> bool:
+            token_a: bool | None = _spidev_patch_active.set(True)
+            try:
+                return _spidev_patch_active.get()
+            finally:
+                _spidev_patch_active.reset(token_a)
+
+        async def _task_b() -> bool:
+            token_b: bool | None = _spidev_patch_active.set(False)
+            try:
+                return _spidev_patch_active.get()
+            finally:
+                _spidev_patch_active.reset(token_b)
+
+        observed_a, observed_b = await asyncio.gather(_task_a(), _task_b())
+
+        assert observed_a is True
+        assert observed_b is False
+        # Both tasks reset their tokens; the main context stays at the default.
+        assert _spidev_patch_active.get() is False
