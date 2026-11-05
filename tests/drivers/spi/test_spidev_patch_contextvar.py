@@ -24,7 +24,8 @@ import asyncio
 import contextvars
 
 import pytest
-from src.pi_lora.drivers.spi.bus import _spidev_patch_active
+
+from pi_lora.drivers.spi.bus import _spidev_patch_active
 
 
 class TestContextVarPatchFlag:

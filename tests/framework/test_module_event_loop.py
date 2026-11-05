@@ -20,8 +20,9 @@ from typing import Any
 from unittest.mock import AsyncMock, MagicMock
 
 import pytest
-from src.pi_lora.drivers.rfm9x_sx127x_modes import StateBits
-from src.pi_lora.framework.events import (
+
+from pi_lora.drivers.rfm9x_sx127x_modes import StateBits
+from pi_lora.framework.events import (
     EventType,
     ModuleEvent,
     StateChangeEvent,
@@ -31,7 +32,7 @@ from src.pi_lora.framework.events import (
 
 def _get_module_class() -> type:
     """Lazily import Rfm9xSx127xModule to avoid circular import at module level."""
-    mod = importlib.import_module("src.pi_lora.drivers.rfm9x_sx127x_module")
+    mod = importlib.import_module("pi_lora.drivers.rfm9x_sx127x_module")
     return mod.Rfm9xSx127xModule
 
 
@@ -270,7 +271,7 @@ class TestStateTransitions:
         stream = StringIO()
         handler = logging.StreamHandler(stream)
         handler.setLevel(logging.INFO)
-        modes_logger = logging.getLogger("src.pi_lora.drivers.rfm9x_sx127x_modes")
+        modes_logger = logging.getLogger("pi_lora.drivers.rfm9x_sx127x_modes")
         orig_level = modes_logger.level
         modes_logger.setLevel(logging.INFO)
         modes_logger.addHandler(handler)
@@ -286,8 +287,8 @@ class TestStateTransitions:
     async def test_reset_state_handler_stubs(self) -> None:
         from unittest.mock import MagicMock
 
-        from src.pi_lora.drivers.rfm9x_sx127x_modes import ResetState
-        from src.pi_lora.framework.events import ModuleEvent
+        from pi_lora.drivers.rfm9x_sx127x_modes import ResetState
+        from pi_lora.framework.events import ModuleEvent
 
         rs = ResetState()
         module = MagicMock()

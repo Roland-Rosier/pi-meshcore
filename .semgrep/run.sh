@@ -4,9 +4,10 @@
 #
 # Usage: uv run .semgrep/run.sh
 
-# PLAN-19: mkdir -p ensures temp parent exists; trap handles EXIT INT TERM for cleanup on Ctrl+C/kill.
+# PLAN-22 (Section 6, Item 11): mkdir -p ensures temp parent exists; trap handles EXIT INT TERM for cleanup on Ctrl+C/kill.
+# Item 11: `mktemp -d --tmpdir=...` is not universally supported on non-GNU systems; the POSIX-compliant form uses the `TMPDIR=... mktemp -d` construct where `TMPDIR` is a standard environment variable.
 mkdir -p /tmp/sandbox/semgrep_tmp
-TMPDIR=$(mktemp -d --tmpdir=/tmp/sandbox/semgrep_tmp)
+TMPDIR=$(TMPDIR=/tmp/sandbox/semgrep_tmp mktemp -d)
 uv run semgrep scan --verbose \
    --config=".semgrep/rules/security/" \
    --config=".semgrep/rules/best-practice/" \

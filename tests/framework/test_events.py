@@ -18,8 +18,9 @@ import math
 from time import monotonic
 
 import pytest
-from src.pi_lora.drivers.rfm9x_sx127x_modes import StateBits
-from src.pi_lora.framework.events import (
+
+from pi_lora.drivers.rfm9x_sx127x_modes import StateBits
+from pi_lora.framework.events import (
     CommandEvent,
     EventType,
     InterruptEvent,

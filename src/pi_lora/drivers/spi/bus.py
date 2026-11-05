@@ -81,6 +81,15 @@ class SpiBus(Protocol):
         """Set whether chip select is disabled."""
 
 
+class SpiBusError(RuntimeError):
+    """SPI bus operation failed; bus state is explicitly documented in the message.
+
+    Callers MUST call bus.open() before retrying any operation.
+    The bus is left in CLOSED state after this exception is raised.
+    """
+    pass
+
+
 # CONTEXT-LOCAL FLAG: module-level ContextVar for async-context isolation.
 # Process-global patch state, but isolated per async context (task) for parallel
 # test execution (pytest-xdist or concurrent async tasks). A class attribute
@@ -181,11 +190,20 @@ class RealSpiBus:
         self._spidev = spidev.SpiDev()
         self._spidev.open(self.bus_number, self.device_number)
 
+    # PLAN-22 FIX (Item 4): close() now uses try/finally.
+    # Before: If spidev.close() raised, _spidev was not set to None, leaving
+    # bus in inconsistent state (OS handle closed but Python ref held). Next open()
+    # would fail. Now _spidev=None is guaranteed even on exception.
     def close(self) -> None:
-        """Close the SPI bus."""
+        """Close the SPI bus.
+
+        Guarantees _spidev is set to None even if spidev.close() raises.
+        """
         if self._spidev is not None:
-            self._spidev.close()
-            self._spidev = None
+            try:
+                self._spidev.close()
+            finally:
+                self._spidev = None
 
     async def xfer2(self, data: list[int] | bytearray) -> list[int]:
         """Transfer data through the SPI bus.
@@ -227,36 +245,27 @@ class RealSpiBus:
 
         lock = await get_bus_lock(self.bus_number)
         async with lock:
-            # CR-1 FIX: asyncio.wait_for + asyncio.to_thread cannot interrupt a
-            # blocking spidev.xfer2() (C extension). On timeout the worker thread
-            # keeps running, the lock stays held, and hardware may be inconsistent.
-            # Best-effort recovery: close()/open() to reset hardware. If recovery
-            # fails, the original TimeoutError is raised and bus state is
-            # indeterminate. Recovery is exception-safe via try/finally semantics.
+            # PLAN-22 FIX (Item 3): Timeout no longer attempts auto-recovery.
+            # Before: On timeout, close()/open() was attempted; if successful, original
+            # TimeoutError raised but bus state indeterminate. If recovery failed, bus closed.
+            # Now: Timeout ALWAYS closes bus and raises SpiBusError (subclass of RuntimeError).
+            # Caller MUST call bus.open() before retrying. This eliminates indeterminate state.
+            # C1 VERIFIED: No callers catch TimeoutError from xfer2() — blast radius zero.
             try:
                 return await asyncio.wait_for(
                     asyncio.to_thread(self._spidev.xfer2, data),
                     timeout=self._xfer_timeout,
                 )
-            except asyncio.TimeoutError:  # noqa: UP041 — canonical async timeout (plan-19); builtin TimeoutError is equivalent in 3.11+
+            except asyncio.TimeoutError:  # noqa: UP041
                 logger.warning(
-                    "SPI xfer2 timeout on bus %d (%.1fs). Attempting hardware reset.",
+                    "SPI xfer2 timeout on bus %d (%.1fs). Closing bus; caller must reopen.",
                     self.bus_number, self._xfer_timeout,
                 )
-                try:
-                    self.close()
-                    self.open()  # Uses stored bus_number/device_number from __init__
-                except Exception as reset_err:
-                    # Recovery failed — log and raise the original TimeoutError.
-                    # Caller sees TimeoutError; bus may be in closed state.
-                    logger.error(
-                        "SPI hardware reset failed after timeout: %s", reset_err
-                    )
-                raise
-            # ALTERNative (Option C) documented for true interruptibility:
-            # offload SPI to a separate process via multiprocessing; on timeout,
-            # terminate the process. Higher overhead but real isolation. Consider
-            # if timeout-based reset proves insufficient in production.
+                self.close()  # Ensure bus is closed; try/finally in close() guarantees _spidev=None
+                raise SpiBusError(
+                    f"SPI xfer2 timeout on bus {self.bus_number} after {self._xfer_timeout}s. "
+                    f"Bus is now closed. Call bus.open() before retrying."
+                ) from None
 
     # PLAN-20: Restore safe default (Plan-14 regression fix). Factory contract:
     # create() returns unopened bus; properties readable before open(). Return 0/False

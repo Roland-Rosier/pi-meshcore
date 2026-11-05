@@ -14,6 +14,7 @@
 
 """Unit tests for RFM9x/SX127x radio instance configuration."""
 
+import inspect
 from dataclasses import FrozenInstanceError
 
 import pytest
@@ -1024,10 +1025,10 @@ class TestExceptionAttributes:
         assert exc.context["ce_number"] == 0
 
     def test_assembly_not_found_exposes_attributes(self) -> None:
-        """AssemblyNotFoundError exposes module_name and device_key."""
+        """AssemblyNotFoundError exposes assembly_name and device_key."""
         device_key: DeviceIdentity = DeviceIdentity(0, 1)
         exc: AssemblyNotFoundError = AssemblyNotFoundError("RFM95", device_key)
-        assert exc.module_name == "RFM95"
+        assert exc.assembly_name == "RFM95"
         assert exc.device_key == device_key
         assert str(exc.device_key) == "0:1"
         assert exc.context["device_key"] == "0:1"
@@ -1784,6 +1785,28 @@ class TestSyncMigrationPath:
         assert isinstance(result, RadioInstanceConfig)
         assert result.device_name == "RFM95"
         assert result.ce_number == 0
+
+    def test_sync_caller_requires_config(self) -> None:
+        """Sync wrapper requires explicit config — no default/auto-load fallback.
+
+        Item 9: ``create_radio_instance_sync()`` declares ``config`` as a
+        required non-optional positional argument. Omitting it raises
+        ``TypeError`` (missing required positional argument), proving there is
+        no auto-load branch — unlike the async wrapper's ``config is None``
+        handling.
+        """
+        with pytest.raises(TypeError):
+            create_radio_instance_sync(
+                assembly_name="default",
+                spi_device_id=0,
+                ce_number=0,
+            )
+
+    def test_sync_caller_config_signature_has_no_default(self) -> None:
+        """Signature inspection: ``config`` parameter has no default value."""
+        sig: inspect.Signature = inspect.signature(create_radio_instance_sync)
+        config_param: inspect.Parameter = sig.parameters["config"]
+        assert config_param.default is inspect.Parameter.empty
 
     @pytest.mark.asyncio
     async def test_create_radio_instance_async_wrapper(self) -> None:

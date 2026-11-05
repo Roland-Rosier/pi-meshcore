@@ -21,8 +21,9 @@ import warnings
 from unittest.mock import MagicMock, patch
 
 import pytest
-from src.pi_lora.framework.events import EventType
-from src.pi_lora.framework.scheduler import (
+
+from pi_lora.framework.events import EventType
+from pi_lora.framework.scheduler import (
     IdlePacer,
     InterruptBridge,
     Scheduler,
@@ -439,7 +440,7 @@ class TestIdlePacer:
         assert len(small_timestamps) > len(large_timestamps)
 
     def test_idle_pacer_docstring_mentions_breaking_change(self) -> None:
-        import src.pi_lora.framework.scheduler as scheduler_module
+        import pi_lora.framework.scheduler as scheduler_module
 
         doc: str = IdlePacer.__doc__ or ""
         assert "Breaking change" in doc

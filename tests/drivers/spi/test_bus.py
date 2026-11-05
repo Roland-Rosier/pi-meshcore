@@ -14,12 +14,11 @@
 
 """Tests for ``RealSpiBus`` protocol compliance and lifecycle."""
 
-import asyncio
 import time
 
 import pytest
-from src.pi_lora.drivers.spi.bus import SpiBus
 
+from pi_lora.drivers.spi.bus import SpiBus
 from tests.spi.mock import FakeSpiBusKernelFactory, MockSpiBus
 
 
@@ -47,7 +46,7 @@ class TestRealSpiBusLifecycle:
 
     @pytest.mark.asyncio
     async def test_init_without_open_raises_on_xfer2(self) -> None:
-        from src.pi_lora.drivers.spi.bus import RealSpiBus
+        from pi_lora.drivers.spi.bus import RealSpiBus
 
         bus = RealSpiBus(bus_number=0, device_number=0)
         with pytest.raises(RuntimeError, match="SPI bus not opened"):
@@ -109,7 +108,7 @@ class TestRealSpiBusErrorMessage:
     def test_real_spi_bus_error_message(self) -> None:
         from contextvars import ContextVar
 
-        from src.pi_lora.drivers.spi.bus import RealSpiBus, _spidev_patch_active
+        from pi_lora.drivers.spi.bus import RealSpiBus, _spidev_patch_active
 
         patch_active: ContextVar[bool] = _spidev_patch_active
         patch_active.set(False)
@@ -124,7 +123,7 @@ class TestRealSpiBusErrorMessage:
         assert "MockSpiBus" not in message
 
     def test_open_surfaces_real_spi_bus_message(self) -> None:
-        from src.pi_lora.drivers.spi.bus import RealSpiBus, _spidev_patch_active
+        from pi_lora.drivers.spi.bus import RealSpiBus, _spidev_patch_active
 
         _spidev_patch_active.set(False)
 
@@ -148,31 +147,52 @@ class _HangingKernel:
         time.sleep(self._sleep_seconds)
         return [1]
 
+    def close(self) -> None:
+        """Model spidev.SpiDev.close() so the bus recovery path is faithful."""
+        self._closed = True
+
 
 class TestRealSpiBusXferTimeout:
     """M-13 regression: ``RealSpiBus.xfer2`` enforces a ``wait_for`` timeout."""
 
     def test_default_xfer_timeout_is_five(self) -> None:
-        from src.pi_lora.drivers.spi.bus import RealSpiBus
+        from pi_lora.drivers.spi.bus import RealSpiBus
 
         bus = RealSpiBus(bus_number=0, device_number=0)
         assert bus._xfer_timeout == 5.0
 
     def test_custom_xfer_timeout_is_honored(self) -> None:
-        from src.pi_lora.drivers.spi.bus import RealSpiBus
+        from pi_lora.drivers.spi.bus import RealSpiBus
 
         bus = RealSpiBus(bus_number=0, device_number=0, xfer_timeout=0.25)
         assert bus._xfer_timeout == 0.25
 
     @pytest.mark.asyncio
-    async def test_xfer_timeout_raises_timeout_error(self) -> None:
-        from src.pi_lora.drivers.spi.bus import RealSpiBus
+    async def test_xfer_timeout_raises_spi_bus_error(self) -> None:
+        from pi_lora.drivers.spi.bus import RealSpiBus, SpiBusError
 
         bus = RealSpiBus(bus_number=0, device_number=0, xfer_timeout=0.05)
         bus._spidev = _HangingKernel(sleep_seconds=2.0)
 
-        with pytest.raises(asyncio.TimeoutError):
+        with pytest.raises(SpiBusError) as excinfo:
             await bus.xfer2([1, 2, 3])
+
+        assert isinstance(excinfo.value, RuntimeError)
+        assert bus._spidev is None
+
+        # PLAN-22 Section 5, Test Requirement #3: the bus must reopen after the
+        # timeout closes it. ``bus.open()`` performs ``import spidev`` then
+        # ``spidev.SpiDev()``; in a headless test that factory must be patched,
+        # otherwise ``import spidev`` raises ImportError. The repo convention
+        # (mirrored by ``FakeSpiBusKernelFactory``) injects a fake ``spidev``
+        # module via ``spidev_kernel_patch``; reuse it here so ``open()``
+        # succeeds and the bus is confirmed reopened.
+        from tests.fakes import create_fake_spi_dev, spidev_kernel_patch
+
+        with spidev_kernel_patch(create_fake_spi_dev(module_type="rfm95w")):
+            bus.open()
+
+        assert bus._spidev is not None
 
 
 class TestRealSpiBusPropertiesSafeDefaults:
@@ -194,10 +214,40 @@ class TestRealSpiBusPropertiesSafeDefaults:
     }
 
     def test_each_closed_property_returns_safe_default(self) -> None:
-        from src.pi_lora.drivers.spi.bus import RealSpiBus
+        from pi_lora.drivers.spi.bus import RealSpiBus
 
         bus = RealSpiBus(bus_number=0, device_number=0)
         assert bus._spidev is None
 
         for name, expected in self._closed_property_defaults.items():
             assert getattr(bus, name) == expected
+
+
+class _RaisingKernel:
+    """Sync kernel whose ``close()`` raises, modeling a failing ``spidev.SpiDev.close()``."""
+
+    def close(self) -> None:
+        """Model a ``spidev.SpiDev.close()`` that fails, exercising the exception-safe cleanup path."""
+        raise OSError("spidev.close() failed")
+
+
+class TestRealSpiBusCloseExceptionSafe:
+    """PLAN-22 Section 5, Test Requirement #4: ``close()`` sets ``_spidev=None``
+    even when ``spidev.close()`` raises (exception-safe cleanup guarantee).
+
+    The implementation uses ``try/finally`` so the ``_spidev`` reference is always
+    released, preventing a subsequent ``open()`` from failing on a stale handle.
+    The raised exception must propagate out of ``close()`` rather than be masked.
+    """
+
+    def test_close_sets_spidev_none_on_raising_close(self) -> None:
+        from pi_lora.drivers.spi.bus import RealSpiBus
+
+        bus = RealSpiBus(bus_number=0, device_number=0)
+        bus._spidev = _RaisingKernel()
+
+        with pytest.raises(OSError) as exc_info:
+            bus.close()
+
+        assert bus._spidev is None
+        assert str(exc_info.value) == "spidev.close() failed"

@@ -17,12 +17,12 @@
 import dataclasses
 
 import pytest
-from src.pi_lora.drivers.rfm9x_sx127x_handler import (
+
+from pi_lora.drivers.rfm9x_sx127x_handler import (
     FrequencyCalculationConfig,
     Rfm9xSx127xHandler,
 )
-from src.pi_lora.drivers.rfm9x_sx127x_modes import ModeBits
-
+from pi_lora.drivers.rfm9x_sx127x_modes import ModeBits
 from tests.spi.mock import MockSpiBusFactory
 
 
@@ -83,9 +83,9 @@ class TestRfm9xSx127xHandler:
 
     @pytest.mark.asyncio
     async def test_handler_methods_accessible_via_guard(self) -> None:
-        from src.pi_lora.drivers.rfm9x_sx127x_modes import StateBits
-        from src.pi_lora.drivers.rfm9x_sx127x_module import Rfm9xSx127xModule
-        from src.pi_lora.drivers.rfm9x_sx127x_radio_instance import RadioInstanceConfig
+        from pi_lora.drivers.rfm9x_sx127x_modes import StateBits
+        from pi_lora.drivers.rfm9x_sx127x_module import Rfm9xSx127xModule
+        from pi_lora.drivers.rfm9x_sx127x_radio_instance import RadioInstanceConfig
 
         radio_config = RadioInstanceConfig(
             module_name="LoPi4", spi_device_id=0, ce_number=0, device_name="RFM95W",

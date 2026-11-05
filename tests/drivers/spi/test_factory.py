@@ -14,8 +14,8 @@
 
 """Tests for ``RealSpiBusFactory`` and ``MockSpiBusFactory`` behavior."""
 import pytest
-from src.pi_lora.drivers.spi.factory import RealSpiBusFactory, SpiBusFactory
 
+from pi_lora.drivers.spi.factory import RealSpiBusFactory, SpiBusFactory
 from tests.spi.mock import MockSpiBus, MockSpiBusFactory
 
 
@@ -125,7 +125,7 @@ class TestFactorySharedContract:
     """
 
     def test_both_factories_store_params(self) -> None:
-        from src.pi_lora.drivers.spi.factory import RealSpiBusFactory
+        from pi_lora.drivers.spi.factory import RealSpiBusFactory
         real_bus = RealSpiBusFactory().create(bus=5, device=6)
         assert real_bus.bus_number == 5
         assert real_bus.device_number == 6

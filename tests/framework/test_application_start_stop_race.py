@@ -17,8 +17,9 @@
 import asyncio
 
 import pytest
-from src.pi_lora.framework.application import Application
 from tests.spi.mock import MockSpiBusFactory
+
+from pi_lora.framework.application import Application
 
 
 class _TrackModule:

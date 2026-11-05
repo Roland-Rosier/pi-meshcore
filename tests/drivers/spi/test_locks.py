@@ -20,7 +20,8 @@ import inspect
 import types
 
 import pytest
-from src.pi_lora.drivers.spi.locks import SpiLock, get_bus_lock
+
+from pi_lora.drivers.spi.locks import SpiLock, get_bus_lock
 
 
 class TestLockRegistry:

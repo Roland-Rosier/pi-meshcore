@@ -20,7 +20,8 @@ from dataclasses import dataclass
 from typing import Any
 
 import pytest
-from src.pi_lora.framework.command_bus import CommandBus
+
+from pi_lora.framework.command_bus import CommandBus
 
 
 def subclass_from_base(base: type[Any], **kwargs: Any) -> Any:

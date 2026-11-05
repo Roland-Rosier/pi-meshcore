@@ -19,13 +19,12 @@
 complementary test proves the guard lifts once the bus has been closed.
 """
 
-import asyncio
 from typing import Any
 from unittest.mock import MagicMock, patch
 
 import pytest
 
-from pi_lora.drivers.spi.bus import RealSpiBus, _spidev_patch_active
+from pi_lora.drivers.spi.bus import RealSpiBus, SpiBusError, _spidev_patch_active
 from tests.spi.mock import FakeSpiBusKernelFactory
 
 
@@ -74,7 +73,7 @@ class TestRealSpiBusTimeoutRecovery:
 
     @pytest.mark.asyncio
     async def test_spi_bus_timeout_resets_hardware(self) -> None:
-        """On timeout, ``xfer2`` closes and reopens the bus (hardware reset)."""
+        """On timeout, ``xfer2`` closes the bus and raises ``SpiBusError`` with no reopen."""
         bus = RealSpiBus(bus_number=0, device_number=0)
         bus._spidev = MagicMock()
         bus._spidev.xfer2 = MagicMock(return_value=[1, 2, 3])
@@ -82,16 +81,16 @@ class TestRealSpiBusTimeoutRecovery:
         with patch.object(bus, "close") as mock_close, patch.object(
             bus, "open"
         ) as mock_open, patch("asyncio.to_thread", _fake_to_thread), pytest.raises(
-            asyncio.TimeoutError
+            SpiBusError
         ):
             await bus.xfer2([1, 2, 3])
 
         mock_close.assert_called_once()
-        mock_open.assert_called_once()
+        mock_open.assert_not_called()
 
     @pytest.mark.asyncio
     async def test_spi_bus_timeout_recovery_failure(self) -> None:
-        """If reset fails, the original ``asyncio.TimeoutError`` still reaches caller."""
+        """If ``close()`` fails, its ``RuntimeError`` propagates out of ``xfer2`` rather than the timeout."""
         bus = RealSpiBus(bus_number=0, device_number=0)
         bus._spidev = MagicMock()
         bus._spidev.xfer2 = MagicMock(return_value=[1, 2, 3])
@@ -102,7 +101,7 @@ class TestRealSpiBusTimeoutRecovery:
             mock_close.side_effect = RuntimeError("hardware reset failed")
 
             with patch("asyncio.to_thread", _fake_to_thread), pytest.raises(
-                asyncio.TimeoutError
+                RuntimeError
             ) as exc_info:
                 await bus.xfer2([1, 2, 3])
 

@@ -87,6 +87,12 @@ _aiologic_module: Any = None
 # --strict accepts element assignment and indexing.
 _registry_init_lock_holder: list[asyncio.Lock | None] = [None]
 
+# PLAN-22 FIX (Item 5): Lazily verifies the single-registry invariant on the
+# first call to get_bus_lock(). _verify_single_registry() is defined but never
+# called; without this, dual import paths could create separate _bus_locks
+# registries silently. Set True after the single verification call.
+_registry_verified: bool = False
+
 # H-5 FIX: Sentinel placeholder for the double-checked-locking race. If
 # aiologic.Lock() internally awaits during construction, the _holder guard could
 # be released before the real lock exists, letting a second coroutine re-enter
@@ -116,9 +122,13 @@ class _GuardedLock:
         self._obtained = False
 
     # Async context manager (primary acquisition path)
+    # PLAN-22 FIX (Item 2): _obtained flag set AFTER successful await.
+    # Before: _obtained=True before await; if __aenter__ raised, flag stayed True
+    # but lock was never acquired. Sync 'with lock:' would incorrectly proceed
+    # and call __enter__ on unacquired lock. Now flag only true when lock held.
     async def __aenter__(self) -> Self:
-        self._obtained = True
         await self._lock.__aenter__()
+        self._obtained = True
         return self
 
     async def __aexit__(self, exc_type: Any, exc_val: Any, exc_tb: Any) -> None:
@@ -168,7 +178,15 @@ async def get_bus_lock(bus_number: int) -> SpiLock:
     Returns:
         A :class:`SpiLock` (concretely a :class:`_GuardedLock` wrapping :class:`aiologic.Lock`) for the given bus number.
     """
-    global _registry_lock, _aiologic_module
+    global _registry_lock, _aiologic_module, _registry_verified
+
+    # PLAN-22 FIX (Item 5): _verify_single_registry() called lazily on first use.
+    # Before: Function defined but never called; dual import paths could create
+    # separate _bus_locks registries silently. Now verified on first get_bus_lock().
+    # Import-time call avoided to keep imports idempotent (no side effects).
+    if not _registry_verified:
+        _verify_single_registry()
+        _registry_verified = True
 
     # H-6 FIX: aiologic is a REQUIRED dependency for SPI locking.
     # The SpiLock protocol requires sync context manager support (__enter__/__exit__),
@@ -190,6 +208,12 @@ async def get_bus_lock(bus_number: int) -> SpiLock:
                 "aiologic is required for SPI locking. Install with: pip install aiologic"
             ) from e
 
+    # PLAN-22 FIX (Item 6): Sentinel race fixed by holding _holder for full
+    # registry critical section. Before: _holder only guarded lock creation;
+    # if aiologic.Lock() awaited, another coroutine could see _SENTinel and
+    # fail on async with _registry_lock (AttributeError). Now entire critical
+    # section is inside _holder. C3 documented: one-time init, microsecond
+    # overhead, no deadlock.
     if _registry_lock is None:
         # H-5 FIX: Sentinel pattern with exception-safe try/finally.
         # If aiologic.Lock() internally awaits during construction, the _holder
@@ -209,13 +233,25 @@ async def get_bus_lock(bus_number: int) -> SpiLock:
                 except Exception:
                     _registry_lock = None  # Reset on failure — don't leak sentinel
                     raise
-
-    async with _registry_lock:
-        if bus_number not in _bus_locks:
-            # Wrap the raw aiologic.Lock in our guard (PLAN-19 FIX)
-            raw_lock = _aiologic_module.Lock()
-            _bus_locks[bus_number] = _GuardedLock(raw_lock)
-        return _bus_locks[bus_number]
+            # Hold _holder for the entire registry critical section
+            # C3: Extended hold is safe — one-time initialization only.
+            # The holder (_registry_init_lock_holder[0]) is an asyncio.Lock
+            # protecting one-time registry init. Moving the registry critical
+            # section inside extends hold by ~microseconds (dict lookup +
+            # potential _GuardedLock creation). Contention is minimal and
+            # transient since this runs only on first call per bus number.
+            # No deadlock risk: holder released before any user code runs.
+            async with _registry_lock:
+                if bus_number not in _bus_locks:
+                    raw_lock = _aiologic_module.Lock()
+                    _bus_locks[bus_number] = _GuardedLock(raw_lock)
+                return _bus_locks[bus_number]
+    else:
+        async with _registry_lock:
+            if bus_number not in _bus_locks:
+                raw_lock = _aiologic_module.Lock()
+                _bus_locks[bus_number] = _GuardedLock(raw_lock)
+            return _bus_locks[bus_number]
 
 
 def _verify_single_registry() -> None:

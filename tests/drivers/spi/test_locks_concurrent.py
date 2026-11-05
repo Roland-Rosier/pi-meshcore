@@ -29,7 +29,8 @@ from unittest.mock import patch
 
 import aiologic
 import pytest
-from src.pi_lora.drivers.spi import locks
+
+from pi_lora.drivers.spi import locks
 
 
 def _reset_registry() -> None:

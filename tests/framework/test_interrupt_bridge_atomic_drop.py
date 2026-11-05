@@ -29,8 +29,9 @@ from concurrent.futures import ThreadPoolExecutor
 from typing import Any
 
 import pytest
-from src.pi_lora.framework.events import EventType
-from src.pi_lora.framework.scheduler import InterruptBridge
+
+from pi_lora.framework.events import EventType
+from pi_lora.framework.scheduler import InterruptBridge
 
 
 @pytest.mark.asyncio

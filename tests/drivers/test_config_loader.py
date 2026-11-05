@@ -112,6 +112,48 @@ async def test_config_loader_concurrent_import_race() -> None:
 
 
 @pytest.mark.asyncio
+async def test_config_loader_single_shared_lock_guard() -> None:
+    """100 concurrent loads fabricate exactly ONE shared holder lock (Item 7).
+
+    The list-holder ``_init_lock_holder`` must be instantiated a single time even
+    under a 100-way race: no coroutine creates a second guard ``asyncio.Lock``.
+    The cached config remains a singleton and the real ``_config_lock`` is
+    produced under that one shared guard, never under two distinct locks.
+    """
+    _loader._config_cache = None
+    _loader._config_lock = None
+    _loader._aiologic_module = None
+    _loader._init_lock_holder[0] = None
+
+    _lock_creations: list[int] = []
+    _real_lock_cls: type = asyncio.Lock
+
+    def _counting_lock() -> asyncio.Lock:
+        _lock_creations.append(1)
+        return _real_lock_cls()
+
+    _loader.asyncio.Lock = _counting_lock  # type: ignore[assignment]
+    _original_holder: asyncio.Lock | None = _loader._init_lock_holder[0]
+
+    try:
+        results = await asyncio.gather(
+            *(_loader.get_preloaded_config() for _ in range(100))
+        )
+
+        assert len(results) == 100
+        for result in results:
+            assert result is results[0]
+
+        assert len(_lock_creations) == 1
+        assert _loader._init_lock_holder[0] is not None
+        assert _loader._config_lock is not None
+        assert _loader._init_lock_holder[0] is not _loader._config_lock
+    finally:
+        _loader.asyncio.Lock = _real_lock_cls  # type: ignore[assignment]
+        _loader._init_lock_holder[0] = _original_holder
+
+
+@pytest.mark.asyncio
 async def test_config_loader_full_lifecycle() -> None:
     """Default load, force-reload custom, then non-force returns custom (Fix 4)."""
     _original_cache = _loader._config_cache
@@ -153,6 +195,25 @@ def test_config_loader_sync_import() -> None:
     here never raises ``RuntimeError: no running event loop``.
     """
     assert _loader is not None
+    config: Rfm9xSx127xConfig = _loader.load_config()
+    assert isinstance(config, Rfm9xSx127xConfig)
+    assert _device_name(config, "rfm95") == "RFM95"
+
+
+def test_config_loader_importlib_resources_default_path() -> None:
+    """``importlib.resources`` import resolves the default config path (Fix 1).
+
+    Verifies the explicit ``importlib.resources`` submodule import succeeds and
+    that ``_resolve_default_path()`` resolves the built-in default resource
+    (``pi_lora.drivers.configs:rfm9x_sx127x_config.yaml``) to an existing file
+    that loads to the expected device name for ``rfm95`` == ``RFM95``.
+    """
+    import importlib.resources  # noqa: F401  (explicit import required)
+
+    resolved: Path = _loader._resolve_default_path()
+    assert isinstance(resolved, Path)
+    assert resolved.exists()
+
     config: Rfm9xSx127xConfig = _loader.load_config()
     assert isinstance(config, Rfm9xSx127xConfig)
     assert _device_name(config, "rfm95") == "RFM95"

@@ -18,12 +18,13 @@ import asyncio
 from unittest import mock
 
 import pytest
-from src.pi_lora.drivers.rfm9x_sx127x_radio_instance import RadioInstanceConfig
-from src.pi_lora.framework.module_manager import (
+
+from pi_lora.drivers.rfm9x_sx127x_radio_instance import RadioInstanceConfig
+from pi_lora.framework.module_manager import (
     DuplicateDeviceIdentityError,
     ModuleManager,
 )
-from src.pi_lora.framework.scheduler import Scheduler
+from pi_lora.framework.scheduler import Scheduler
 
 
 def _make_test_radio_configs() -> list[RadioInstanceConfig]:
@@ -208,7 +209,7 @@ class TestLoadFromConfig:
             raise RuntimeError("Module construction failed during load")
 
         with mock.patch(
-            "src.pi_lora.framework.module_manager.Rfm9xSx127xModule",
+            "pi_lora.framework.module_manager.Rfm9xSx127xModule",
             side_effect=_force_failure,
         ) as _, pytest.raises(RuntimeError) as exc_info:
             await mm.load_from_config(radio_configs, scheduler)
@@ -237,7 +238,7 @@ class TestLoadFromConfig:
             return module0
 
         with mock.patch(
-            "src.pi_lora.framework.module_manager.Rfm9xSx127xModule",
+            "pi_lora.framework.module_manager.Rfm9xSx127xModule",
             side_effect=_construct,
         ), pytest.raises(RuntimeError):
             await mm.load_from_config(radio_configs, scheduler)
@@ -265,7 +266,7 @@ class TestLoadFromConfig:
             raise RuntimeError("Module construction failed during load")
 
         with mock.patch(
-            "src.pi_lora.framework.module_manager.Rfm9xSx127xModule",
+            "pi_lora.framework.module_manager.Rfm9xSx127xModule",
             side_effect=_force_runtime,
         ), pytest.raises(RuntimeError):
             await mm.load_from_config(radio_configs, scheduler)
@@ -295,7 +296,7 @@ class TestLoadFromConfig:
             return module0
 
         with mock.patch(
-            "src.pi_lora.framework.module_manager.Rfm9xSx127xModule",
+            "pi_lora.framework.module_manager.Rfm9xSx127xModule",
             side_effect=_construct,
         ), pytest.raises(RuntimeError):
             await mm.load_from_config(radio_configs, scheduler)
@@ -334,7 +335,7 @@ class TestLoadFromConfig:
             return module0
 
         with mock.patch(
-            "src.pi_lora.framework.module_manager.Rfm9xSx127xModule",
+            "pi_lora.framework.module_manager.Rfm9xSx127xModule",
             side_effect=_construct,
         ), pytest.raises(asyncio.CancelledError):
             await mm.load_from_config(radio_configs, scheduler)
@@ -371,7 +372,7 @@ class TestLoadFromConfig:
             raise RuntimeError("unregister failed during rollback")
 
         with mock.patch(
-            "src.pi_lora.framework.module_manager.Rfm9xSx127xModule",
+            "pi_lora.framework.module_manager.Rfm9xSx127xModule",
             side_effect=_construct,
         ), mock.patch.object(
             scheduler, "unregister_module", side_effect=_fail_unregister
@@ -414,7 +415,7 @@ class TestLoadFromConfig:
             return module0
 
         with mock.patch(
-            "src.pi_lora.framework.module_manager.Rfm9xSx127xModule",
+            "pi_lora.framework.module_manager.Rfm9xSx127xModule",
             side_effect=_construct,
         ), pytest.raises(RuntimeError) as exc_info:
             await mm.load_from_config(radio_configs, scheduler)
@@ -470,7 +471,7 @@ class TestLoadFromConfig:
             return module0
 
         with mock.patch(
-            "src.pi_lora.framework.module_manager.Rfm9xSx127xModule",
+            "pi_lora.framework.module_manager.Rfm9xSx127xModule",
             side_effect=_construct,
         ), pytest.raises(KeyboardInterrupt):
             await mm.load_from_config(radio_configs, scheduler)
@@ -513,7 +514,7 @@ class TestLoadFromConfig:
             return module0
 
         with mock.patch(
-            "src.pi_lora.framework.module_manager.Rfm9xSx127xModule",
+            "pi_lora.framework.module_manager.Rfm9xSx127xModule",
             side_effect=_construct,
         ), pytest.raises(SystemExit):
             await mm.load_from_config(radio_configs, scheduler)
@@ -555,7 +556,7 @@ class TestLoadFromConfig:
             return module0
 
         with mock.patch(
-            "src.pi_lora.framework.module_manager.Rfm9xSx127xModule",
+            "pi_lora.framework.module_manager.Rfm9xSx127xModule",
             side_effect=_construct,
         ), pytest.raises(asyncio.CancelledError):
             await mm.load_from_config(radio_configs, scheduler)
@@ -601,7 +602,7 @@ class TestLoadFromConfig:
 
         with (
             mock.patch(
-                "src.pi_lora.framework.module_manager.Rfm9xSx127xModule",
+                "pi_lora.framework.module_manager.Rfm9xSx127xModule",
                 side_effect=_construct,
             ),
             mock.patch.object(scheduler, "unregister_module", unregister),
@@ -647,7 +648,7 @@ class TestLoadFromConfig:
 
         with (
             mock.patch(
-                "src.pi_lora.framework.module_manager.Rfm9xSx127xModule",
+                "pi_lora.framework.module_manager.Rfm9xSx127xModule",
                 side_effect=_construct,
             ),
             mock.patch.object(scheduler, "unregister_module", unregister),
@@ -694,7 +695,7 @@ class TestLoadFromConfig:
             scheduler.timer_scheduler._registered.discard(_module)
 
         with mock.patch(
-            "src.pi_lora.framework.module_manager.Rfm9xSx127xModule",
+            "pi_lora.framework.module_manager.Rfm9xSx127xModule",
             side_effect=_construct,
         ), mock.patch.object(
             scheduler, "unregister_module", side_effect=_shielded_unregister

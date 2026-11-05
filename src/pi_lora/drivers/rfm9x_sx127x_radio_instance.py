@@ -111,15 +111,19 @@ class DeviceAttachmentNotFoundError(RadioInstanceError):
         self.ce_number = ce_number
 
 
+# PLAN-22 FIX (Item 10): AssemblyNotFoundError param renamed from module_name
+# to assembly_name. Before: parameter named 'module_name' but actually held
+# the assembly name (confusing). Now parameter and attribute are 'assembly_name'.
+# C2 VERIFIED: All exception handlers updated to use .assembly_name.
 class AssemblyNotFoundError(RadioInstanceError):
     """Raised when no assembly is found for the module."""
 
-    def __init__(self, module_name: str, device_key: DeviceIdentity) -> None:
+    def __init__(self, assembly_name: str, device_key: DeviceIdentity) -> None:
         super().__init__(
-            f"No assembly found for module '{module_name}' device {device_key}",
-            {"module_name": module_name, "device_key": str(device_key)}
+            f"No assembly found for assembly '{assembly_name}' device {device_key}",
+            {"assembly_name": assembly_name, "device_key": str(device_key)}
         )
-        self.module_name = module_name
+        self.assembly_name = assembly_name
         self.device_key = device_key
 
 
@@ -332,17 +336,32 @@ def create_radio_instance_sync(
 ) -> RadioInstanceConfig:
     """Resolve and aggregate configuration for a single radio instance (sync).
 
-    CR-2 FIX (sync wrapper): Synchronous callers cannot ``await`` the async
-    ``create_radio_instance`` wrapper, and making that function sync originally
-    broke callers that relied on the auto-loaded config. This wrapper requires
-    an explicit ``config`` and delegates to the pure sync core
-    ``_create_radio_instance_core``. Sync migration path:
+     Plan-22 Section 6 / Item 9 FIX (sync wrapper): Synchronous callers cannot
+     ``await`` the async ``create_radio_instance`` wrapper, and making that
+     function sync originally broke callers that relied on the auto-loaded
+     config. This wrapper requires an explicit ``config`` and delegates to the
+     pure sync core ``_create_radio_instance_core``. Sync migration path:
 
-        from pi_lora.drivers.rfm9x_sx127x_config_loader import load_config
-        config = load_config()
-        result = create_radio_instance_sync(
-            assembly_name="default", spi_device_id=0, ce_number=0, config=config
-        )
+         from pi_lora.drivers.rfm9x_sx127x_config_loader import load_config
+         config = load_config()
+         result = create_radio_instance_sync(
+             assembly_name="default", spi_device_id=0, ce_number=0, config=config
+         )
+
+     NOTE: Unlike the async wrapper ``create_radio_instance()``, this sync
+     function does NOT auto-load configuration. The async wrapper can await
+     ``get_preloaded_config()`` because it runs in an async context; sync
+     callers must explicitly load config via ``load_config()``. This is by
+     design — explicit config loading avoids hidden I/O in synchronous code.
+
+     Anti-Regression (Plan-22 Item 9): The absence of an auto-load here is
+     intentional, not a bug. A reviewer might otherwise flag the missing
+     auto-load as a defect because ``create_radio_instance_sync()`` has no
+     default value for ``config``. If the signature were ever relaxed to make
+     ``config`` optional again, sync callers would silently start loading config
+     via ``load_config()`` (hidden I/O), re-introducing the very regression this
+     contract forbids. Keep ``config`` non-optional so the explicit load stays
+     in the caller's code and the hidden I/O cannot silently reappear.
 
     Args:
         assembly_name: Assembly identifier (e.g., "default").

@@ -24,10 +24,10 @@ import inspect
 from unittest.mock import MagicMock
 
 import aiologic
-from src.pi_lora.drivers.spi.bus import RealSpiBus, SpiBus
-from src.pi_lora.drivers.spi.factory import RealSpiBusFactory
-from src.pi_lora.drivers.spi.locks import SpiLock
 
+from pi_lora.drivers.spi.bus import RealSpiBus, SpiBus
+from pi_lora.drivers.spi.factory import RealSpiBusFactory
+from pi_lora.drivers.spi.locks import SpiLock
 from tests.fakes import spidev_kernel_patch
 from tests.spi.mock import MockSpiBus, MockSpiBusFactory
 

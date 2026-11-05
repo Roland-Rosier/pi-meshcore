@@ -18,7 +18,8 @@ import asyncio
 from unittest.mock import MagicMock
 
 import pytest
-from src.pi_lora.drivers.rfm9x_sx127x_modes import (
+
+from pi_lora.drivers.rfm9x_sx127x_modes import (
     ErrorState,
     FskOokFsrxState,
     FskOokFstxState,

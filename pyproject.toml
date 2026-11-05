@@ -129,6 +129,11 @@ dev = [
 [project.scripts]
 pi-lora = "pi_lora.cli._entry_points:pi_lora"
 check-hardware = "pi_lora.cli._entry_points:check_hardware"
+# NOTE: Plan-22 Section 6 Anti-Regression Documentation (Item 8).
+# The 'config' console script was renamed to 'pi-lora-config' in Plan-22
+# to avoid namespace conflicts with system 'config' commands. The old name
+# is intentionally NOT aliased — this is a pre-1.0 breaking change documented
+# here so future reviewers don't flag it as an issue.
 pi-lora-config = "pi_lora.cli._entry_points:pi_lora_config"
 pi-lora-test = "pi_lora.cli._entry_points:pi_lora_test"
 

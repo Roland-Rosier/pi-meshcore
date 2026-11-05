@@ -24,6 +24,7 @@ exits cleanly without leaving a coroutine un-awaited.
 
 from __future__ import annotations
 
+import pathlib
 import sys
 import warnings
 from typing import Any
@@ -114,6 +115,90 @@ def test_entry_points_expose_all_four_wrappers() -> None:
 
     for _name in ("pi_lora", "pi_lora_config", "pi_lora_test", "check_hardware"):
         assert hasattr(_ep, _name), f"missing entry-point wrapper {_name}"
+
+
+def _locate_workspace_pyproject() -> pathlib.Path:
+    """Return the workspace-root ``pyproject.toml`` path.
+
+    ``pyproject.toml`` lives at the workspace root as a sibling of the test
+    package, so the helper walks up parents until a directory that itself
+    contains a ``pyproject.toml`` file is found. ``pathlib.Path.parent`` of a
+    root path returns the same path, so the walk terminates without recursion.
+    """
+    _current: pathlib.Path = pathlib.Path(__file__).parent
+    while True:
+        _candidate: pathlib.Path = _current.joinpath("pyproject.toml")
+        if _candidate.exists():
+            return _candidate
+        _parent: pathlib.Path = _current.parent
+        if _parent is _current:
+            return _candidate
+        _current = _parent
+
+
+def _extract_project_scripts_fallback(_raw: str) -> dict[str, str]:
+    """Extract ``[project.scripts]`` via line scanning when ``tomllib`` is absent.
+
+    Robust string extraction: locate the ``[project.scripts]`` header, then read
+    ``key = value`` pairs until a new TOMl table header (``[``) or the end of
+    the file. Inline ``#`` comments and blank lines are skipped; value quotes
+    are stripped. This is the interpreter < 3.11 fallback path only.
+    """
+    _scripts: dict[str, str] = {}
+    _in_block: bool = False
+    for _line in _raw.splitlines():
+        _stripped: str = _line.strip()
+        if not _in_block:
+            _in_block = _stripped == "[project.scripts]"
+            continue
+        if _stripped.startswith("[") and _stripped != "[project.scripts]":
+            break
+        if not _stripped or _stripped.startswith("#"):
+            continue
+        _key, _sep, _value = _line.partition("=")
+        if _sep:
+            _scripts[_key.strip()] = _value.strip().strip('"').strip("'")
+    return _scripts
+
+
+def _read_project_scripts() -> dict[str, str]:
+    """Return the ``[project.scripts]`` mapping from the workspace ``pyproject.toml``.
+
+    Prefers ``tomllib`` (stdlib on a 3.11+ interpreter, which is the current
+    interpreter); falls back to a robust line-scanning extraction when
+    ``tomllib`` is unavailable. The package is not installed (no ``dist``/
+    ``egg-info``), so console scripts cannot be resolved via
+    ``importlib.metadata.scripts`` without first building a wheel — the mapping
+    is therefore verified statically against the TOMl file itself.
+    """
+    _path: pathlib.Path = _locate_workspace_pyproject()
+    with _path.open() as _fh:
+        _raw: str = _fh.read()
+    try:
+        import tomllib
+    except ModuleNotFoundError:
+        return _extract_project_scripts_fallback(_raw)
+    _parsed: dict[str, Any] = tomllib.loads(_raw)
+    _scripts: Any = _parsed.get("project", {}).get("scripts", {})
+    return dict(_scripts)
+
+
+def test_project_scripts_maps_pi_lora_config_and_excludes_config() -> None:
+    """The packaging-level ``[project.scripts]`` maps ``pi-lora-config`` and omits ``config``.
+
+    Item 8 of Plan-22 Section 5: ``pi-lora-config`` is the console entry point
+    (``pi_lora.cli._entry_points:pi_lora_config``) and the old ``config`` name is
+    intentionally NOT aliased. The package is not installed, so the mapping is
+    verified statically against ``pyproject.toml`` via ``tomllib``. The
+    ``pi-lora-config`` entry must resolve to ``pi_lora.cli._entry_points:pi_lora_config``
+    and no ``config`` entry must exist.
+    """
+    _scripts: dict[str, str] = _read_project_scripts()
+
+    assert "pi-lora-config" in _scripts, "pi-lora-config must be a project script"
+    assert _scripts["pi-lora-config"] == "pi_lora.cli._entry_points:pi_lora_config"
+
+    assert "config" not in _scripts, "old 'config' name must not be aliased"
 
 
 if __name__ == "__main__":

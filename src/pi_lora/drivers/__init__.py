@@ -25,6 +25,7 @@ from .rfm9x_sx127x_radio_instance import (
     create_radio_instance,
     create_radio_instance_from_default,
 )
+from .spi.bus import SpiBusError
 
 __all__: list[str] = [
     "RadioInstanceConfig",
@@ -38,5 +39,6 @@ __all__: list[str] = [
     "DeviceSpecNotFoundError",
     "FamilyNotFoundError",
     "ConfigConsistencyError",
+    "SpiBusError",
 ]
 

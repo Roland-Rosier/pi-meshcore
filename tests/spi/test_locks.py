@@ -71,6 +71,47 @@ class _ExceptionLock:
         return self._locked
 
 
+class _NonHoldingLock:
+    """Async context manager that succeeds on entry without holding the lock.
+
+    Used by ``TestGuardedObtainedFlag.test_obtained_allows_sync_enter`` to isolate
+    the ``_GuardedLock.__enter__`` decision (which only inspects ``_obtained``)
+    from an underlying lock's real acquire/release semantics, so a sync ``with``
+    cannot double-acquire a held :class:`aiologic.Lock`. Entry/exit never raise
+    and never report ownership, which is all the guard test needs.
+    """
+
+    async def __aenter__(self) -> "_NonHoldingLock":
+        """Admit entry without acquiring anything."""
+        return self
+
+    async def __aexit__(
+        self,
+        exc_type: type[BaseException] | None,
+        exc_value: BaseException | None,
+        traceback: TracebackType | None,
+    ) -> None:
+        """No-op release."""
+        return None
+
+    def __enter__(self) -> "_NonHoldingLock":
+        """Admit a plain sync ``with`` without raising."""
+        return self
+
+    def __exit__(
+        self,
+        exc_type: type[BaseException] | None,
+        exc_value: BaseException | None,
+        traceback: TracebackType | None,
+    ) -> None:
+        """No-op sync exit."""
+        return None
+
+    def locked(self) -> bool:
+        """Never report ownership."""
+        return False
+
+
 class TestLockRegistry:
     """Tests for ``get_bus_lock`` registry behaviour."""
 
@@ -286,6 +327,128 @@ class TestLockAcquisition:
         sys.modules["src.pi_lora.drivers.spi.locks"] = pi_locks_mod
         assert sys.modules["src.pi_lora.drivers.spi.locks"] is pi_locks_mod
         _verify_single_registry()
+
+    @pytest.mark.asyncio
+    async def test_dual_import_detection_via_get_bus_lock_gate(self) -> None:
+        """Item 5: dual import detection is wired into ``get_bus_lock``'s gate.
+
+        Two *distinct* module objects are registered under the two absolute
+        import paths to simulate a dual import path. The Item-5 contract's
+        detection helper, :func:`_verify_single_registry`, must raise
+        ``RuntimeError`` when both paths resolve to distinct objects -- this is
+        the observable core of the contract.         The public entry point's lazy gate
+        is ``if not _registry_verified: _verify_single_registry();
+        _registry_verified = True``. With the ``global`` declaration present,
+        ``_registry_verified`` is the module-level name, so the gate runs
+        ``_verify_single_registry()`` and raises the injected
+        ``RuntimeError`` (dual-path) here -- not an ``UnboundLocalError``.
+        Together these assert that (a) the detection helper surfaces the
+        conflict as ``RuntimeError`` and (b) the Item-5 gate is wired onto the
+        public ``get_bus_lock`` entry point rather than defined-but-never-called.
+        """
+        import sys
+        from types import ModuleType
+
+        import pi_lora.drivers.spi.locks as pi_locks
+
+        # The shared registry is already verified by earlier tests in the suite,
+        # so reset the sentinel to force the lazy gate to run its verification
+        # and surface the injected dual-path as RuntimeError here.
+        pi_locks._registry_verified = False
+
+        prior = sys.modules.get("src.pi_lora.drivers.spi.locks")
+        fake = ModuleType("src.pi_lora.drivers.spi.locks")
+        fake.__dict__["_bus_locks"] = {}
+        sys.modules["src.pi_lora.drivers.spi.locks"] = fake
+        try:
+            # Item 5 contract core: the detection helper raises in the dual-path.
+            with pytest.raises(
+                RuntimeError,
+                match="Dual import paths detected for spi.locks",
+            ):
+                pi_locks._verify_single_registry()
+
+            # The public entry point's gate has the global declaration for
+            # _registry_verified, so it runs _verify_single_registry() and raises
+            # the injected RuntimeError (dual-path) -- proving the gate wiring
+            # exists on get_bus_lock.
+            with pytest.raises(RuntimeError):
+                await pi_locks.get_bus_lock(0)
+        finally:
+            if prior is None:
+                sys.modules.pop("src.pi_lora.drivers.spi.locks", None)
+            else:
+                sys.modules["src.pi_lora.drivers.spi.locks"] = prior
+
+
+class TestGuardedObtainedFlag:
+    """Item-2 FIX: ``_obtained`` flips True only *after* ``__aenter__`` succeeds.
+
+    The old buggy implementation set ``_obtained`` before awaiting
+    ``__aenter__``, so a failed entry left the flag True and a later sync
+    ``with lock:`` slipped past the guard's ``__enter__`` rejection into
+    ``__enter__`` on an unacquired lock. These tests pin the corrected ordering
+    and are the core Item-2 verifiers (the first test fails on the buggy
+    implementation and passes on the corrected one).
+    """
+
+    @pytest.mark.asyncio
+    async def test_aenter_failure_keeps_obtained_false_and_sync_rejects(self) -> None:
+        """A failed ``__aenter__`` leaves ``_obtained`` False; sync ``with`` rejects.
+
+        Under the old Item-2 bug the flag would stay True after the raising
+        ``_ExceptionLock.__aenter__``, so the subsequent sync ``with guard:``
+        would NOT raise the guard rejection error. On the corrected ordering the
+        flag stays False and the sync ``with`` raises
+        ``RuntimeError("Lock not acquired via get_bus_lock()")``.
+        """
+        guard = _GuardedLock(_ExceptionLock(RuntimeError("lock acquisition cancelled")))
+        with pytest.raises(RuntimeError):
+            await guard.__aenter__()
+        assert guard._obtained is False
+        with pytest.raises(
+            RuntimeError, match="Lock not acquired via get_bus_lock()"
+        ), guard:
+            pass
+
+    @pytest.mark.asyncio
+    async def test_successful_aenter_marks_obtained_true(self) -> None:
+        """A successful ``__aenter__`` flips ``_obtained`` True while held.
+
+        ``_obtained`` is True inside the acquired window (and ``locked()`` is
+        True) and False again after ``__aexit__``. This is the happy-path
+        counterpart to the failure verifier above. A manually constructed
+        ``_GuardedLock`` is used (rather than ``get_bus_lock``) so the test
+        exercises the flag toggling directly and stays independent of the
+        registry.
+        """
+        lock = _GuardedLock(aiologic.Lock())
+        async with lock:
+            assert lock._obtained is True
+            assert lock.locked() is True
+        assert lock._obtained is False
+
+    @pytest.mark.asyncio
+    async def test_obtained_allows_sync_enter(self) -> None:
+        """Once obtained, the guard's ``__enter__`` proceeds instead of rejecting.
+
+        Isolates the guard's ``__enter__`` decision (which only inspects
+        ``_obtained``) from an underlying lock's real acquire semantics by
+        wrapping a ``_NonHoldingLock`` that never holds, so a sync ``with`` cannot
+        double-acquire a held :class:`aiologic.Lock`. After a successful
+        ``__aenter__`` the flag is True and a plain sync ``with guard:`` proceeds
+        cleanly into ``__enter__`` rather than raising the guard rejection error.
+        """
+        guard = _GuardedLock(_NonHoldingLock())
+        await guard.__aenter__()
+        assert guard._obtained is True
+        with guard as ctx:
+            assert ctx is guard
+        # A plain sync ``with`` exercises the sync ``__exit__`` (which does not
+        # reset ``_obtained``); only ``__aexit__`` clears it. The flag therefore
+        # stays True, proving the sync path proceeded through ``__enter__`` rather
+        # than being rejected.
+        assert guard._obtained is True
 
 
 class _BlockingKernel:

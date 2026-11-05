@@ -18,6 +18,17 @@ from __future__ import annotations
 
 import asyncio
 import importlib
+import importlib.resources
+
+# PLAN-22 FIX (Item 1): Anti-regression guard at the import site.
+# Fix rationale: the explicit `import importlib.resources` guarantees that the
+# `resources` submodule is bound, so `importlib.resources.files()` (called in
+# _resolve_default_path()) is always available.
+# Why the issue could regress: a bare `import importlib` does NOT bind the
+# `resources` submodule; relying on implicit submodule import is fragile — a
+# reviewer could remove the explicit import and the `importlib.resources.files()`
+# call would fail. This explicit import protects against that regression.
+# Cross-reference: Plan-22 Section 6, Anti-Regression Documentation for Item 1.
 import types
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
@@ -46,7 +57,11 @@ _DEFAULT_CONFIG_RESOURCE: str = "pi_lora.drivers.configs:rfm9x_sx127x_config.yam
 # - Fix: defer asyncio.Lock() creation to inside get_preloaded_config()'s async guard
 #   (lazy sentinel), so it is only ever constructed while an event loop is running.
 # - This is a deliberate, well-contained exception to the "aiologic-only" rule
-_init_lock: asyncio.Lock | None = None  # Lazy init guard
+# H-7 / Plan-22 FIX: List holder for race-free lazy asyncio.Lock creation.
+# asyncio.Lock() must be created under a running event loop; module-level
+# instantiation breaks sync import (Python 3.10+). The holder pattern
+# mirrors locks.py:_registry_init_lock_holder.
+_init_lock_holder: list[asyncio.Lock | None] = [None]
 _config_cache: Rfm9xSx127xConfig | None = None
 
 if TYPE_CHECKING:
@@ -214,12 +229,15 @@ async def get_preloaded_config(
             ) from e
 
     if _config_lock is None:
-        # H-7 fix: _init_lock is a lazy sentinel (see module comment). asyncio.Lock()
-        # must be created under a running event loop or it raises RuntimeError, so it is
-        # constructed here inside the async guard rather than at module import time.
-        if _init_lock is None:
-            _init_lock = asyncio.Lock()
-        async with _init_lock:  # Race-free guard (covers lock creation only)
+        # PLAN-22 FIX (Item 7): _init_lock race fixed via list-holder pattern.
+        # Before: if _init_lock is None: _init_lock = asyncio.Lock() was not atomic;
+        # two coroutines could create separate locks. Now uses same holder pattern
+        # as locks.py (Item 6) for race-free lazy creation under running event loop.
+        # Plan-22 FIX: Use list holder for race-free lazy asyncio.Lock creation
+        # (same pattern as locks.py:_registry_init_lock_holder).
+        _holder: asyncio.Lock = _init_lock_holder[0] or asyncio.Lock()
+        _init_lock_holder[0] = _holder
+        async with _holder:
             if _config_lock is None:  # Re-check inside lock
                 _config_lock = _aiologic_module.Lock()
 

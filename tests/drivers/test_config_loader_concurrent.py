@@ -29,7 +29,7 @@ async def test_get_preloaded_config_concurrent() -> None:
     ``aiologic.Lock`` (double-checked locking) and every caller must receive the
     same cached instance.
     """
-    import src.pi_lora.drivers.rfm9x_sx127x_config_loader as loader
+    import pi_lora.drivers.rfm9x_sx127x_config_loader as loader
 
     # Reset module-level singletons so the test is deterministic.
     loader._config_cache = None

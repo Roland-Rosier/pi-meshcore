@@ -19,10 +19,11 @@ from dataclasses import dataclass
 from typing import Any
 
 import pytest
-from src.pi_lora.drivers.rfm9x_sx127x_radio_instance import RadioInstanceConfig
-from src.pi_lora.framework.application import Application
-from src.pi_lora.framework.events import EventType
 from tests.spi.mock import MockSpiBusFactory
+
+from pi_lora.drivers.rfm9x_sx127x_radio_instance import RadioInstanceConfig
+from pi_lora.framework.application import Application
+from pi_lora.framework.events import EventType
 
 
 def _make_test_radio_configs() -> list[RadioInstanceConfig]:
@@ -736,7 +737,7 @@ class TestGetAssemblyConfig:
     @pytest.mark.asyncio
     async def test_get_assembly_config_not_found(self) -> None:
         """Verify get_assembly_config raises AssemblyNotFoundError for missing assembly."""
-        from src.pi_lora.framework.exceptions import AssemblyNotFoundError
+        from pi_lora.framework.exceptions import AssemblyNotFoundError
 
         application = Application(config=None)
         application._config = None
@@ -750,7 +751,7 @@ class TestGetAssemblyConfig:
         """Verify get_assembly_config raises DeviceAttachmentNotFoundError for invalid SPI/CE."""
         from unittest.mock import MagicMock, patch
 
-        from src.pi_lora.framework.exceptions import DeviceAttachmentNotFoundError
+        from pi_lora.framework.exceptions import DeviceAttachmentNotFoundError
 
         application = Application(config=None)
         application._config = None
@@ -761,7 +762,7 @@ class TestGetAssemblyConfig:
         mock_radio_config.ce_number = 0
 
         with patch(
-            "src.pi_lora.framework.application.create_radio_instance",
+            "pi_lora.framework.application.create_radio_instance",
             return_value=mock_radio_config,
         ), pytest.raises(DeviceAttachmentNotFoundError):
             await application.get_assembly_config("default", spi_device_id=99, ce_number=99)
