@@ -18,16 +18,28 @@ from __future__ import annotations
 
 import asyncio
 import logging
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 from .scheduler import Scheduler
-from ..drivers.rfm9x_sx127x_module import Rfm9xSx127xModule
 from ..drivers.rfm9x_sx127x_radio_instance import (
     DeviceIdentity,
     RadioInstanceConfig,
     RadioInstanceError,
 )
 from ..types import StateBits
+
+if TYPE_CHECKING:
+    # ISSUE-2 anti-regression: original correct pattern was TYPE_CHECKING + lazy import
+    # (commit c6c86e8). Commit f5a0b9e (2026-10-08) regressed to a module-level import to
+    # fix mypy/ruff failures, creating the circular dependency
+    # rfm9x_sx127x_module -> framework.events -> framework.application ->
+    # framework.module_manager -> rfm9x_sx127x_module.
+    # This fix keeps the import under TYPE_CHECKING (erased at runtime, so no circular
+    # import) and relies on from __future__ import annotations (PEP 563), which makes all
+    # annotations strings at runtime. mypy --strict resolves the names via the
+    # TYPE_CHECKING import, and ruff does not flag unquoted annotations. The class is
+    # instantiated via a lazy local import inside load_from_config().
+    from ..drivers.rfm9x_sx127x_module import Rfm9xSx127xModule
 
 logger = logging.getLogger(__name__)
 
@@ -85,6 +97,8 @@ class ModuleManager:
         ``RadioInstanceConfig``. Uses ``radio_config.dio_gpio_mappings`` for
         ``interrupt_gpio_pins``. Keys modules by ``radio_config.device_id_key`` (DeviceIdentity).
         """
+        from ..drivers.rfm9x_sx127x_module import Rfm9xSx127xModule
+
         # H-13/Plan-16: register-in-scheduler-then-commit-later.
         #
         # WHY register-before-track was dangerous: the previous strategy added a

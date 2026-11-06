@@ -126,6 +126,15 @@ class RealSpiBus:
             factory_owned: True if created by test factory with spidev patch.
         """
         self._xfer_timeout: float = xfer_timeout
+        # PLAN-23 FIX (Issue 3): validate xfer_timeout is positive in __init__.
+        # Root cause: asyncio.wait_for with timeout <= 0 misbehaves (zero is
+        # invalid, negative raises immediately), so an unbounded/incorrect timeout
+        # could hang the event loop or fail instantly.
+        # Why the fix prevents regression: any non-positive value is rejected at
+        # construction with a ValueError, guaranteeing _xfer_timeout is always > 0
+        # before it reaches asyncio.wait_for.
+        if self._xfer_timeout <= 0:
+            raise ValueError(f"xfer_timeout must be positive, got {xfer_timeout}")
         # spidev.SpiDev has no stubs; use Any to suppress attr-defined errors.
         self._spidev: Any | None = None
         self.bus_number: int = bus_number
