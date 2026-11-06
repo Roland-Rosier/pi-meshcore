@@ -201,7 +201,7 @@ async def get_preloaded_config(
     global _config_cache
     global _config_lock
     global _aiologic_module
-    global _init_lock
+    global _init_lock_holder
 
     # PLAN-19 FIX: force_reload=True with config_path now updates _config_cache (docstring contract).
     # Before this, the override path bypassed the cache entirely.
