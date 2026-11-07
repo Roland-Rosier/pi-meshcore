@@ -28,12 +28,21 @@ if TYPE_CHECKING:
 
 from .command_bus import CommandBus
 from .events import StopMode
-from .exceptions import AssemblyNotFoundError, DeviceAttachmentNotFoundError
+from .exceptions import (
+    AssemblyNotFoundError,
+    ConfigLoadError,
+    DeviceAttachmentNotFoundError,
+)
 from .module_manager import ModuleManager
 from .scheduler import Scheduler
 from ..drivers.rfm9x_sx127x_config_loader import get_preloaded_config
 from ..drivers.rfm9x_sx127x_radio_instance import (
+    AssemblyNotFoundError as DriverAssemblyNotFoundError,
+    ConfigConsistencyError,
     DeviceAttachmentNotFoundError as DriverDeviceAttachmentNotFoundError,
+    DeviceSpecNotFoundError,
+    DriverModuleNotFoundError,
+    FamilyNotFoundError,
     RadioInstanceConfig,
     create_radio_instance,
 )
@@ -131,9 +140,12 @@ class Application:
                         self._cleanup_partial_start, exc_to_raise
                     )
                 except Exception as cleanup_exc:
-                    # Preserve original exception as __cause__; cleanup error available via __context__
+                    # FIX-2 (Plan-24): `raise exc_to_raise from cleanup_exc` preserves the
+                    # original exception as __cause__ and the cleanup exception as __context__.
+                    # This already exits the function, so the following bare `raise exc_to_raise`
+                    # was dead/unreachable code (line 136). Removing it prevents a duplicate
+                    # raise. No second raise is needed.
                     raise exc_to_raise from cleanup_exc
-                raise exc_to_raise
 
     async def stop(self) -> None:
         """Gracefully stop all modules and the scheduler.
@@ -272,6 +284,15 @@ class Application:
             # cleanup path). Let it propagate; original_exc is available via
             # __context__.
             raise
+        # FIX-2 (Plan-24): When cleanup completes normally (no exception), the
+        # original exception that triggered cleanup MUST still propagate to the
+        # caller. The pre-fix code returned None here, swallowing the exception
+        # (e.g. a RuntimeError from scheduler.start()) and letting start()
+        # return normally -- exactly the behaviour test_scheduler_started_flag_true_before_scheduler_start
+        # asserts against. Re-raise original_exc verbatim so the caller observes
+        # the cancellation/exception it expected.
+        if original_exc is not None:
+            raise original_exc
 
     async def _cleanup_partial_start(self) -> None:
         """Mirror stop() for partially-started modules on failure.
@@ -492,6 +513,17 @@ class Application:
 
         configs: list[RadioInstanceConfig] = []
         for attachment in module_obj.devices:
+            # Anti-Regression (Plan-24 Fix 3): `create_radio_instance` can raise six
+            # driver exception types. Only `DriverDeviceAttachmentNotFoundError` is a
+            # "skip this attachment" case (the SPI/CE simply does not match this
+            # attachment). The other five — `DriverAssemblyNotFoundError`,
+            # `DriverModuleNotFoundError`, `DeviceSpecNotFoundError`,
+            # `FamilyNotFoundError`, and `ConfigConsistencyError` — indicate config
+            # corruption and MUST be translated to framework exceptions
+            # (`AssemblyNotFoundError`, `ConfigLoadError`) so callers can handle them
+            # appropriately. This mirrors the canonical exception-handling convention
+            # (driver exceptions are internal; framework exceptions are the public
+            # contract surfaced to callers).
             try:
                 radio_config = await create_radio_instance(
                     assembly_name=assembly_name,
@@ -502,6 +534,10 @@ class Application:
                 configs.append(radio_config)
             except DriverDeviceAttachmentNotFoundError:
                 continue
+            except DriverAssemblyNotFoundError as e:
+                raise AssemblyNotFoundError(str(e)) from e
+            except (DriverModuleNotFoundError, DeviceSpecNotFoundError, FamilyNotFoundError, ConfigConsistencyError) as e:
+                raise ConfigLoadError(str(e)) from e
 
         if not configs:
             raise DeviceAttachmentNotFoundError(

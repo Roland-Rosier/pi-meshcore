@@ -31,7 +31,7 @@ import importlib.resources
 # Cross-reference: Plan-22 Section 6, Anti-Regression Documentation for Item 1.
 import types
 from pathlib import Path
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, cast
 
 from ruamel.yaml import YAML
 
@@ -62,6 +62,17 @@ _DEFAULT_CONFIG_RESOURCE: str = "pi_lora.drivers.configs:rfm9x_sx127x_config.yam
 # instantiation breaks sync import (Python 3.10+). The holder pattern
 # mirrors locks.py:_registry_init_lock_holder.
 _init_lock_holder: list[asyncio.Lock | None] = [None]
+
+# H-5 FIX: Sentinel placeholder for the double-checked-locking race. If
+# aiologic.Lock() internally awaits during construction, the _holder guard could
+# be released before the real lock exists, letting a second coroutine re-enter
+# `if _config_lock is None:` before the first coroutine finishes. Assigning
+# _SENTINEL to _config_lock INSIDE the guard marks the slot occupied before
+# awaiting Lock(), closing the race. On failure the sentinel is reset to None
+# (NOT leaked) so a later call can retry — a leaked sentinel would raise
+# AttributeError on subsequent `async with _config_lock:` calls.
+_SENTinel = object()
+
 _config_cache: Rfm9xSx127xConfig | None = None
 
 if TYPE_CHECKING:
@@ -229,17 +240,24 @@ async def get_preloaded_config(
             ) from e
 
     if _config_lock is None:
-        # PLAN-22 FIX (Item 7): _init_lock race fixed via list-holder pattern.
-        # Before: if _init_lock is None: _init_lock = asyncio.Lock() was not atomic;
-        # two coroutines could create separate locks. Now uses same holder pattern
-        # as locks.py (Item 6) for race-free lazy creation under running event loop.
-        # Plan-22 FIX: Use list holder for race-free lazy asyncio.Lock creation
-        # (same pattern as locks.py:_registry_init_lock_holder).
+        # FIX-1 (Plan-24): SENTinel pattern mirroring locks.py (H-5 FIX).
+        # WHY needed: if aiologic.Lock() internally awaits during construction,
+        # the _holder guard could be released before the real lock exists, letting
+        # a second coroutine re-enter `if _config_lock is None:` before the first
+        # coroutine finishes. Assigning _SENTINEL to _config_lock INSIDE the guard
+        # marks the slot occupied before awaiting Lock(). On failure the sentinel
+        # is reset to None (NOT leaked) so a later call can retry — a leaked
+        # sentinel would raise AttributeError on subsequent `async with _config_lock:`.
         _holder: asyncio.Lock = _init_lock_holder[0] or asyncio.Lock()
         _init_lock_holder[0] = _holder
         async with _holder:
             if _config_lock is None:  # Re-check inside lock
-                _config_lock = _aiologic_module.Lock()
+                _config_lock = cast(_ConfigLockType, _SENTinel)  # Placeholder — prevents race if Lock() awaits
+                try:
+                    _config_lock = _aiologic_module.Lock()
+                except Exception:
+                    _config_lock = None  # Reset on failure — don't leak sentinel
+                    raise
 
     async with _config_lock:
         # Double-checked locking: re-verify inside the lock to protect ALL cache mutations.

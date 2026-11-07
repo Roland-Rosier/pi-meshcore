@@ -251,3 +251,19 @@ class TestRealSpiBusCloseExceptionSafe:
 
         assert bus._spidev is None
         assert str(exc_info.value) == "spidev.close() failed"
+
+
+class TestRealSpiBusXferTimeoutValidation:
+    """PLAN-23 FIX (Issue 3): xfer_timeout must be positive."""
+
+    def test_xfer_timeout_rejects_non_positive(self) -> None:
+        from pytest import raises
+
+        from pi_lora.drivers.spi.bus import RealSpiBus
+
+        with raises(ValueError, match="xfer_timeout must be positive"):
+            RealSpiBus(bus_number=0, device_number=0, xfer_timeout=0)
+        with raises(ValueError, match="xfer_timeout must be positive"):
+            RealSpiBus(bus_number=0, device_number=0, xfer_timeout=-1.0)
+        with raises(ValueError, match="xfer_timeout must be positive"):
+            RealSpiBus(bus_number=0, device_number=0, xfer_timeout=-0.001)

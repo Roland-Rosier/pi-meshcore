@@ -208,10 +208,25 @@ class IdlePacer:
         self._min_interval: float = min_interval
 
     def set_idle_enabled(self, module: Rfm9xSx127xModule, enabled: bool) -> None:
+        module_id = id(module)
         if enabled:
             self._idle_enabled_modules.add(module)
         else:
             self._idle_enabled_modules.discard(module)
+            # FIX-4 / Plan-24: on enabled=False the module must be fully released
+            # from _failure_count and _backoff_until, exactly as
+            # TimerScheduler.unregister_module() (lines 91-98) releases
+            # _failure_counts and _last_failure_log. Mirroring that cleanup is
+            # required for two reasons:
+            # 1. Memory leak - stale dict entries keyed by id(module) survive a
+            #    start/stop cycle and keep the module object retained, preventing
+            #    garbage-collection.
+            # 2. Correctness bug - module dicts are keyed by id(module), and a new
+            #    reused module object can receive the same id() (common with object
+            #    reuse). A stale failure count / backoff window would then be
+            #    inherited by the new module, producing spurious backoff.
+            self._failure_count.pop(module_id, None)
+            self._backoff_until.pop(module_id, None)
 
     async def start(self) -> None:
         self._running = True
