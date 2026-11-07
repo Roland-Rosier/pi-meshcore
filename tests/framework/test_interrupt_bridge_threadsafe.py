@@ -83,3 +83,53 @@ async def test_interrupt_threadsafe_delivery() -> None:
     )
 
     await bridge.stop()
+
+
+@pytest.mark.asyncio
+async def test_interrupt_threadsafe_stop_no_loop_race() -> None:
+    """stop() nulling _loop while trigger_interrupt() reads it must not race.
+
+    Fix 10 (Issue 24.12): the _loop read must be atomic with the queue ops under
+    trigger_lock. Hammer triggers from many threads, then stop() the bridge
+    (which nulls _loop at location 5, Plan-18). Remaining triggers after stop()
+    must not crash on the now-None _loop read and must still keep the producer
+    bounded.
+    """
+    bridge = InterruptBridge()
+    await bridge.start()
+
+    registered_pin = 5
+
+    class _MockModule:
+        """Minimal module with an asyncio.Queue event_queue."""
+
+        def __init__(self) -> None:
+            self.event_queue = asyncio.Queue()
+
+    mock_module = _MockModule()
+    bridge.register_interrupt(registered_pin, mock_module)
+
+    def trigger_from_thread() -> None:
+        for _ in range(1000):
+            bridge.trigger_interrupt(registered_pin)
+
+    threads = [threading.Thread(target=trigger_from_thread) for _ in range(10)]
+    for thread in threads:
+        thread.start()
+    for thread in threads:
+        thread.join()
+
+    # stop() nulls _loop. After stop() the drain task is cancelled, so the
+    # producer no longer drains. Verify the read is now atomic (Fix 10) and that
+    # subsequent triggers do not crash on the None _loop.
+    await bridge.stop()
+    assert bridge._loop is None
+
+    threads2 = [threading.Thread(target=trigger_from_thread) for _ in range(10)]
+    for thread in threads2:
+        thread.start()
+    for thread in threads2:
+        thread.join()
+
+    # Producer stays bounded; no crash from the None _loop race (Fix 10).
+    assert 0 <= bridge._trigger_queue.qsize() <= bridge._max_queue_size

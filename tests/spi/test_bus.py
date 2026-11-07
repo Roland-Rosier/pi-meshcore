@@ -19,6 +19,7 @@
 complementary test proves the guard lifts once the bus has been closed.
 """
 
+import asyncio
 from typing import Any
 from unittest.mock import MagicMock, patch
 
@@ -109,6 +110,26 @@ class TestRealSpiBusTimeoutRecovery:
         mock_close.assert_called_once()
         mock_open.assert_not_called()
 
+    @pytest.mark.asyncio
+    async def test_spi_bus_timeout_chains_original_error(self) -> None:
+        """On timeout, the raised ``SpiBusError`` chains the original
+        ``asyncio.TimeoutError`` via ``from err``.
+
+        Verifies the anti-regression fix (Issue 24.2): the timeout traceback is
+        preserved on ``__cause__`` so debuggers see the real hang source instead
+        of a bare ``SpiBusError`` raised with ``from None``.
+        """
+        bus = RealSpiBus(bus_number=0, device_number=0)
+        bus._spidev = MagicMock()
+        bus._spidev.xfer2 = MagicMock(return_value=[1, 2, 3])
+
+        with patch.object(bus, "close"), patch(
+            "asyncio.to_thread", _fake_to_thread
+        ), pytest.raises(SpiBusError) as exc_info:
+            await bus.xfer2([1, 2, 3])
+
+        assert isinstance(exc_info.value.__cause__, asyncio.TimeoutError)
+
 
 class TestRealSpiBusSetters:
     """H-2 Fix: setters raise ``RuntimeError`` on an unopened bus."""
@@ -166,3 +187,38 @@ class TestVerifyPatchActive:
             bus._verify_patch_active()
         finally:
             _spidev_patch_active.reset(token)
+
+
+class TestRealSpiBusOpenResourceLeak:
+    """Issue 24.3 Fix: ``open()`` only assigns ``_spidev`` after a successful open."""
+
+    def test_open_failure_leaves_bus_closed(self) -> None:
+        """If ``spidev.SpiDev().open`` raises, ``_spidev`` stays ``None`` after open()."""
+        with FakeSpiBusKernelFactory().create_bus(bus=0, device=0) as bus:
+            bus.close()
+            with patch("spidev.SpiDev") as mock_spiddev:
+                mock_instance = MagicMock()
+                mock_instance.open.side_effect = RuntimeError("fake open failed")
+                mock_spiddev.return_value = mock_instance
+                with pytest.raises(RuntimeError) as exc_info:
+                    bus.open()
+                # Assignment order: _spidev is only assigned once open() succeeds.
+                assert bus._spidev is None
+                assert "already open" not in str(exc_info.value)
+
+
+class TestRealSpiBusCloseResourceLeak:
+    """Issue 24.4 Fix: ``close()`` raises and chains on failure instead of nulling."""
+
+    def test_close_failure_chains_and_preserves_handle(self) -> None:
+        """If ``spidev.close`` raises, ``SpiBusError`` is chained and ``_spidev`` stays set."""
+        with FakeSpiBusKernelFactory().create_bus(bus=0, device=0) as bus:
+            assert bus._spidev is not None
+            failure = RuntimeError("hardware close failed")
+            with patch.object(
+                bus._spidev, "close", side_effect=failure
+            ), pytest.raises(SpiBusError) as exc_info:
+                bus.close()
+            # State machine: _spidev is NOT nulled on failure — handle preserved.
+            assert bus._spidev is not None
+            assert exc_info.value.__cause__ is failure

@@ -256,13 +256,23 @@ async def get_bus_lock(bus_number: int) -> SpiLock:
                 if bus_number not in _bus_locks:
                     raw_lock = _aiologic_module.Lock()
                     _bus_locks[bus_number] = _GuardedLock(raw_lock)
-                return _bus_locks[bus_number]
+            bus_lock: SpiLock = _bus_locks[bus_number]
+            # PLAN-25 FIX (Fix 5): registry lock protects ONLY the dict mutation
+            # below; it is released (context exit) before returning the bus lock
+            # so the caller never holds the registry lock during bus-lock use.
+            # Cross-reference: code_review-24.1.json finding, locks.py get_bus_lock.
+            return bus_lock
     else:
         async with _registry_lock:
             if bus_number not in _bus_locks:
                 raw_lock = _aiologic_module.Lock()
                 _bus_locks[bus_number] = _GuardedLock(raw_lock)
-            return _bus_locks[bus_number]
+            returned_bus_lock: SpiLock = _bus_locks[bus_number]
+            # PLAN-25 FIX (Fix 5): registry lock protects ONLY the dict mutation
+            # below; it is released (context exit) before returning the bus lock
+            # so the caller never holds the registry lock during bus-lock use.
+            # Cross-reference: code_review-24.1.json finding, locks.py get_bus_lock.
+            return returned_bus_lock
 
 
 def _verify_single_registry() -> None:

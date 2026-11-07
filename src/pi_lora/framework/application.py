@@ -83,7 +83,16 @@ class Application:
         deadlock on a self-held lock.
         """
         exc_to_raise: BaseException | None = None
+        # PLAN-25 FIX (Fix 6, Issue 24.7): double-checked locking. Fast-path read of
+        # self._started outside the lock is a benign read-only optimization (avoid lock
+        # contention on the common already-started case). The authoritative check is the
+        # re-check inside _lifecycle_lock, which serializes the actual startup.
+        # Cross-reference: code_review-24.1.json finding 24.7.
+        already_started: bool = self._started
+        if already_started:
+            return
         async with self._lifecycle_lock:
+            # Re-check inside lock (authoritative)
             if self._started:
                 return
             # CR-2 FIX (Plan-16): Clear ModuleManager tracking state before
@@ -279,10 +288,16 @@ class Application:
             # ExceptionGroup is impossible here (CancelledError is a BaseException
             # in Python 3.13); chaining preserves both facts without TypeError.
             raise original_exc from cleanup_cancelled
-        except Exception:
-            # Cleanup raised an exception (already an ExceptionGroup from the
-            # cleanup path). Let it propagate; original_exc is available via
-            # __context__.
+        except Exception as cleanup_exc:
+            # PLAN-25 FIX (Fix 7, Issue 24.8): cleanup may raise an Exception (possibly an
+            # ExceptionGroup). If original_exc is a shutdown signal — a BaseException that is
+            # NOT an Exception (KeyboardInterrupt, SystemExit, CancelledError) — chain it via
+            # __cause__ so the shutdown signal is preserved as the primary exception and the
+            # cleanup error becomes __cause__. Otherwise let the cleanup exception propagate
+            # (original_exc remains available via __context__).
+            # Cross-reference: code_review-24.1.json finding 24.8.
+            if original_exc is not None and isinstance(original_exc, BaseException) and not isinstance(original_exc, Exception):
+                raise original_exc from cleanup_exc
             raise
         # FIX-2 (Plan-24): When cleanup completes normally (no exception), the
         # original exception that triggered cleanup MUST still propagate to the

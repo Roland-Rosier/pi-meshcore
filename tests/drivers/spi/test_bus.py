@@ -31,12 +31,12 @@ class TestSpiBusProtocol:
 
     def test_protocol_requires_open(self) -> None:
         bus = MockSpiBus()
-        bus.open(bus=0, device=0)
+        bus.open()
         assert bus._opened is True
 
     def test_protocol_requires_close(self) -> None:
         bus = MockSpiBus()
-        bus.open(bus=0, device=0)
+        bus.open()
         bus.close()
         assert bus._opened is False
 
@@ -57,15 +57,15 @@ class TestMockSpiBusOpenClose:
     """Test MockSpiBus open/close lifecycle."""
 
     def test_open_sets_identity(self) -> None:
-        bus = MockSpiBus()
-        bus.open(bus=1, device=3)
+        bus = MockSpiBus(bus_number=1, device_number=3)
+        bus.open()
         assert bus.bus_number == 1
         assert bus.device_number == 3
 
     @pytest.mark.asyncio
     async def test_close_clears_registers(self) -> None:
         bus = MockSpiBus()
-        bus.open(bus=0, device=0)
+        bus.open()
         await bus.xfer2([0x81, 0xFF])
         bus.close()
         assert bus._registers == {}
@@ -83,7 +83,7 @@ class TestXfer2Bytearray:
     @pytest.mark.asyncio
     async def test_xfer2_accepts_bytearray(self) -> None:
         bus = MockSpiBus()
-        bus.open(bus=0, device=0)
+        bus.open()
         result = await bus.xfer2(bytearray([0x81, 0x42]))
         assert isinstance(result, list)
         assert all(isinstance(v, int) for v in result)
@@ -231,26 +231,28 @@ class _RaisingKernel:
         raise OSError("spidev.close() failed")
 
 
-class TestRealSpiBusCloseExceptionSafe:
-    """PLAN-22 Section 5, Test Requirement #4: ``close()`` sets ``_spidev=None``
-    even when ``spidev.close()`` raises (exception-safe cleanup guarantee).
-
-    The implementation uses ``try/finally`` so the ``_spidev`` reference is always
-    released, preventing a subsequent ``open()`` from failing on a stale handle.
-    The raised exception must propagate out of ``close()`` rather than be masked.
+class TestRealSpiBusCloseExceptionChained:
+    """Issue 24.4 Fix: ``close()`` raises ``SpiBusError`` chained to the failure
+    and preserves the ``_spidev`` handle so callers can retry against the same
+    ``spidev`` kernel.
     """
 
-    def test_close_sets_spidev_none_on_raising_close(self) -> None:
-        from pi_lora.drivers.spi.bus import RealSpiBus
+    def test_close_raises_spi_bus_error_preserves_handle(self) -> None:
+        from unittest.mock import patch
+
+        from pi_lora.drivers.spi.bus import RealSpiBus, SpiBusError
 
         bus = RealSpiBus(bus_number=0, device_number=0)
+        failure = OSError("spidev.close() failed")
         bus._spidev = _RaisingKernel()
 
-        with pytest.raises(OSError) as exc_info:
+        with patch.object(
+            bus._spidev, "close", side_effect=failure
+        ), pytest.raises(SpiBusError) as exc_info:
             bus.close()
 
-        assert bus._spidev is None
-        assert str(exc_info.value) == "spidev.close() failed"
+        assert bus._spidev is not None
+        assert exc_info.value.__cause__ is failure
 
 
 class TestRealSpiBusXferTimeoutValidation:

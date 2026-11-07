@@ -1103,6 +1103,181 @@ class TestCancellationSemantics:
         # The scheduler is drained — no dangling module references remain.
         assert app.scheduler.timer_scheduler._registered == set()
 
+    @pytest.mark.asyncio
+    async def test_application_start_cleanup_on_keyboard_interrupt_with_cleanup_failure(
+        self,
+    ) -> None:
+        """PLAN-25 FIX 7 (Issue 24.8): KeyboardInterrupt raised during start() AND a
+        cleanup that raises an Exception (ExceptionGroup via failing close_spi) must
+        preserve the shutdown signal as the primary raised exception with the cleanup
+        error chained via __cause__ — NOT swallowed.
+
+        The pre-fix ``except Exception`` handler did a bare ``raise`` on cleanup
+        failure, losing the KeyboardInterrupt shutdown signal. The fix chains it via
+        ``raise original_exc from cleanup_exc`` so the caller still observes the
+        KeyboardInterrupt (Ctrl+C semantics) with the cleanup ExceptionGroup as
+        __cause__.
+        """
+        app = Application(config=None, spi_factory=MockSpiBusFactory())
+        module = _FailingStartAndCloseModule(ce_number=0, spi_device_id=0)
+
+        async def _instant_assembly(
+            assembly_name: str,
+            spi_device_id: Any = None,
+            ce_number: Any = None,
+            config_path: Any = None,
+        ) -> list[Any]:
+            return []
+
+        async def _load_raises_keyboard(
+            radio_configs: list[Any],
+            scheduler: Any,
+            spi_factory: Any | None = None,
+        ) -> None:
+            scheduler.register_module(
+                module, timer_interval=1.0, idle_enabled=True
+            )
+            app.module_manager.modules.append(module)
+            raise KeyboardInterrupt("Ctrl+C during load")
+
+        def _get_all_modules() -> list[Any]:
+            return [module]
+
+        app.get_assembly_config = _instant_assembly  # type: ignore[assignment]
+        app.module_manager.load_from_config = _load_raises_keyboard  # type: ignore[assignment]
+        app.module_manager.get_all_modules = _get_all_modules  # type: ignore[assignment]
+
+        # KeyboardInterrupt (BaseException, not Exception) is caught by ``except
+        # BaseException`` in start(), which runs _cleanup_partial_start() (which
+        # raises an ExceptionGroup via failing close_spi) then re-raises the
+        # KeyboardInterrupt. _cleanup_and_reraise_cancellation() then chains the
+        # KeyboardInterrupt via __cause__ when the cleanup raises an Exception.
+        with pytest.raises(KeyboardInterrupt) as excinfo:
+            await app.start()
+
+        # The shutdown signal (KeyboardInterrupt) is the primary raised exception.
+        assert isinstance(excinfo.value, KeyboardInterrupt)
+        # The cleanup error is preserved as __cause__ (Fix 7), not swallowed.
+        assert excinfo.value.__cause__ is not None
+        assert isinstance(excinfo.value.__cause__, ExceptionGroup)
+        surfaced = list(excinfo.value.__cause__.exceptions)
+        assert module._close_error in surfaced
+
+        # State flags reset to a clean baseline.
+        assert app._started is False
+        assert app._started_modules == []
+        assert app._scheduler_started is False
+        assert app.scheduler.timer_scheduler._registered == set()
+
+
+class TestDoubleCheckedLocking:
+    """Fix 6 (Issue 24.7): Application.start() uses double-checked locking. A
+    fast-path read of _started outside the lock short-circuits the common
+    already-started case, while the authoritative re-check inside _lifecycle_lock
+    serializes the actual startup. Concurrent start() coroutines must execute the
+    assembly-start side-effect exactly once."""
+
+    @pytest.mark.asyncio
+    async def test_concurrent_start_single_side_effect(self) -> None:
+        """Many concurrent start() coroutines: the assembly-start side-effect
+        (load_from_config) runs exactly once, and only one executes the startup
+        body."""
+        app = Application(config=None, spi_factory=MockSpiBusFactory())
+        module = _RestartControllableModule(ce_number=0, spi_device_id=0)
+        load_calls: list[int] = []
+
+        async def _instant_assembly(
+            assembly_name: str,
+            spi_device_id: Any = None,
+            ce_number: Any = None,
+            config_path: Any = None,
+        ) -> list[Any]:
+            return []
+
+        async def _counting_load(
+            radio_configs: list[Any],
+            scheduler: Any,
+            spi_factory: Any | None = None,
+        ) -> None:
+            load_calls.append(len(load_calls))
+            scheduler.register_module(
+                module, timer_interval=1.0, idle_enabled=True
+            )
+            app.module_manager.modules.append(module)
+            app.module_manager.modules_by_id[(0, 0)] = module
+
+        def _get_all_modules() -> list[Any]:
+            return [module]
+
+        app.get_assembly_config = _instant_assembly  # type: ignore[assignment]
+        app.module_manager.load_from_config = _counting_load  # type: ignore[assignment]
+        app.module_manager.get_all_modules = _get_all_modules  # type: ignore[assignment]
+
+        # Spawn 10 concurrent start() coroutines. The fast-path double-checked
+        # locking plus the authoritative re-check inside the lock guarantees the
+        # load side-effect runs exactly once.
+        results = await asyncio.gather(
+            *[app.start() for _ in range(10)], return_exceptions=True
+        )
+
+        assert load_calls == [0]
+        # At least one start() completes successfully.
+        assert any(not isinstance(r, Exception) for r in results)
+        assert app._started is True
+        assert app._started_modules == app.module_manager.get_all_modules()
+
+        await app.stop()
+        assert app._started is False
+        assert app._started_modules == []
+        assert app._scheduler_started is False
+
+    @pytest.mark.asyncio
+    async def test_fast_path_short_circuits_already_started(self) -> None:
+        """Once _started is True, a subsequent start() short-circuits via the
+        fast-path double-checked locking without re-running the assembly side-effect."""
+        app = Application(config=None, spi_factory=MockSpiBusFactory())
+        module = _RestartControllableModule(ce_number=0, spi_device_id=0)
+        load_calls: list[int] = []
+
+        async def _instant_assembly(
+            assembly_name: str,
+            spi_device_id: Any = None,
+            ce_number: Any = None,
+            config_path: Any = None,
+        ) -> list[Any]:
+            return []
+
+        async def _counting_load(
+            radio_configs: list[Any],
+            scheduler: Any,
+            spi_factory: Any | None = None,
+        ) -> None:
+            load_calls.append(len(load_calls))
+            scheduler.register_module(
+                module, timer_interval=1.0, idle_enabled=True
+            )
+            app.module_manager.modules.append(module)
+            app.module_manager.modules_by_id[(0, 0)] = module
+
+        def _get_all_modules() -> list[Any]:
+            return [module]
+
+        app.get_assembly_config = _instant_assembly  # type: ignore[assignment]
+        app.module_manager.load_from_config = _counting_load  # type: ignore[assignment]
+        app.module_manager.get_all_modules = _get_all_modules  # type: ignore[assignment]
+
+        await app.start()
+        first_count = len(load_calls)
+        assert first_count == 1
+
+        # Second start() hits the fast-path check and returns immediately.
+        await app.start()
+        assert len(load_calls) == first_count
+        assert app._started is True
+
+        await app.stop()
+        assert app._started is False
+
 
 class _RestartControllableModule:
     """Controllable module mirroring the Rfm9xSx127xModule interface for restart tests.

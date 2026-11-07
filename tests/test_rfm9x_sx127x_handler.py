@@ -101,7 +101,7 @@ class TestRfm9xSx127xHandler:
         factory = MockSpiBusFactory()
         bus = factory.create(bus=0, device=0)
         # BUG-5 LSP contract: create() returns an unopened bus; caller owns open().
-        bus.open(bus=0, device=0)
+        bus.open()
         module = MockModule(bus)
         config = FrequencyCalculationConfig(osc_freq_hz=32_000_000)
         result = await Rfm9xSx127xHandler.write_and_verify_frequency_for_khz(module, config, 415000)

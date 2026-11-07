@@ -139,6 +139,12 @@ class CommandBus:
         if self._module_resolver is None:
             raise RuntimeError("Module resolver not set")
         module = self._module_resolver(command)
+        # PLAN-25 FIX (Fix 8, Issue 24.10): module_resolver may return None to signal
+        # "no module found for this command type" — a legitimate case. Guard against None
+        # before dereferencing to avoid an AttributeError and raise a clear ValueError instead.
+        # Cross-reference: code_review-24.1.json finding 24.10.
+        if module is None:
+            raise ValueError(f"No module found for command {type(command).__name__}")
         from .events import CommandEvent, EventType, ModuleEvent
 
         event: ModuleEvent[CommandEvent] = ModuleEvent(

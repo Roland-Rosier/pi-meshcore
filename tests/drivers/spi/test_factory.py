@@ -77,7 +77,7 @@ class TestMockSpiBusFactory:
         bus = factory.create(bus=1, device=2)
         # BUG-5 LSP contract: create() returns an unopened bus; caller owns open().
         assert bus._opened is False
-        bus.open(bus=1, device=2)
+        bus.open()
         assert bus.bus_number == 1
         assert bus.device_number == 2
         assert bus._opened is True

@@ -421,57 +421,55 @@ class InterruptBridge:
         docstring for the rationale). The monitoring threshold still fires an
         early-warning log when the queue depth becomes abnormal.
         """
-        try:
-            self._trigger_queue.put_nowait(gpio_pin)
-        except queue.Full:
-            # Drop oldest to make room for newest (see class docstring rationale).
-            # CRITICAL: compound get+put must be atomic across threads.
-            # Use threading.Lock (NOT aiologic.Lock) because:
-            # - trigger_interrupt() is called from GPIO driver in SYNC thread context
-            # - No event loop guaranteed at call time (interrupt handlers run early)
-            # - Protects queue.Queue which is stdlib thread-safe; threading.Lock is its natural companion
-            # - Precedent: locks.py uses asyncio.Lock for module-level init guard (same rationale)
-            with self._trigger_lock:
+        # PLAN-25 FIX (Fix 9, Issue 24.11): the ENTire put/drop/monitor sequence now
+        # runs inside trigger_lock. The fast-path put_nowait previously ran OUTSIDE
+        # the lock, so on queue.Full another thread could fill the slot before the
+        # drop-oldest fallback ran, breaking atomicity. Now the whole sequence is
+        # serialized: newest wins, producer never exceeds maxsize.
+        # Cross-reference: code_review-24.1.json findings 24.11, 24.12.
+        with self._trigger_lock:
+            try:
+                self._trigger_queue.put_nowait(gpio_pin)
+            except queue.Full:
+                # Drop oldest to make room for newest (see class docstring rationale).
+                # CRITICAL: compound get+put must be atomic across threads.
+                # Use threading.Lock (NOT aiologic.Lock) because:
+                # - trigger_interrupt() is called from GPIO driver in SYNC thread context
+                # - No event loop guaranteed at call time (interrupt handlers run early)
+                # - Protects queue.Queue which is stdlib thread-safe; threading.Lock is its natural companion
+                # - Precedent: locks.py uses asyncio.Lock for module-level init guard (same rationale)
                 try:
                     self._trigger_queue.get_nowait()  # Discard oldest
                     self._trigger_queue.put_nowait(gpio_pin)  # Insert newest
                 except queue.Empty:
                     pass  # Race: queue emptied between full and get; just drop new
                 except queue.Full:
-                    # Race: another thread's unprotected top-level put_nowait
-                    # filled the slot our get_nowait opened; the queue is full
-                    # again, so the newest is dropped. Bounded, no corruption.
-                    pass  # Drop newest; producer stays at maxsize
-            logging.getLogger(__name__).warning(
-                "Interrupt queue full (maxsize=%d); dropped oldest interrupt "
-                "for GPIO %d to make room for newest. Malicious/buggy GPIO driver?",
-                self._max_queue_size,
-                gpio_pin,
-            )
-        # Monitoring threshold unchanged — early warning for operators.
-        if self._trigger_queue.qsize() >= self._monitor_queue_depth_threshold:
-            logging.getLogger(__name__).warning(
-                "Interrupt queue depth %d reached monitoring threshold %d; "
-                "abnormal interrupt rate detected (GPIO %d).",
-                self._trigger_queue.qsize(),
-                self._monitor_queue_depth_threshold,
-                gpio_pin,
-            )
-        # M-21 FIX (Plan-16): signal the drain task that new data is available via
-        # asyncio.Event instead of the drain task busy-waiting with
-        # asyncio.sleep(0.001). trigger_interrupt() runs in a SYNC thread context
-        # (GPIO interrupt callbacks), which is possibly NOT the event loop thread.
-        # loop.call_soon_threadsafe() is the thread-safe way to schedule the Event
-        # set on the running loop. Guarded: if start() has not run yet self._loop is
-        # None (no captured loop), so the signal is skipped; if a loop exists but
-        # has no running loop (called from a GPIO callback before start()),
-        # contextlib.suppress(RuntimeError, AttributeError) absorbs it as a no-op.
-        if self._loop is not None:
-            # H-16-2/Plan-17: Use captured loop from start() instead of
-            # asyncio.get_running_loop() which returns the current thread's loop
-            # (wrong thread for GPIO callbacks).
-            with contextlib.suppress(RuntimeError, AttributeError):
-                self._loop.call_soon_threadsafe(self._drain_event.set)
+                    pass  # Queue still full after get; newest dropped. Bounded, no corruption.
+                logging.getLogger(__name__).warning(
+                    "Interrupt queue full (maxsize=%d); dropped oldest interrupt "
+                    "for GPIO %d to make room for newest. Malicious/buggy GPIO driver?",
+                    self._max_queue_size,
+                    gpio_pin,
+                )
+            # Monitoring threshold check inside lock for consistency (Fix 9).
+            if self._trigger_queue.qsize() >= self._monitor_queue_depth_threshold:
+                logging.getLogger(__name__).warning(
+                    "Interrupt queue depth %d reached monitoring threshold %d; "
+                    "abnormal interrupt rate detected (GPIO %d).",
+                    self._trigger_queue.qsize(),
+                    self._monitor_queue_depth_threshold,
+                    gpio_pin,
+                )
+            # PLAN-25 FIX (Fix 10, Issue 24.12): the _loop read is now atomic with the
+            # queue operations under trigger_lock, so stop() nulling _loop cannot race
+            # between the read and its use.
+            loop = self._loop
+            if loop is not None:
+                # H-16-2/Plan-17: Use captured loop from start() instead of
+                # asyncio.get_running_loop() which returns the current thread's loop
+                # (wrong thread for GPIO callbacks).
+                with contextlib.suppress(RuntimeError, AttributeError):
+                    loop.call_soon_threadsafe(self._drain_event.set)
 
     async def start(self) -> None:
         self._running = True

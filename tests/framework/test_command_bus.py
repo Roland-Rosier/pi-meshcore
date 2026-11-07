@@ -372,6 +372,17 @@ class TestAsyncDispatch:
         with pytest.raises(RuntimeError, match="Module resolver not set"):
             await bus.dispatch(TestCommand())
 
+    @pytest.mark.asyncio
+    async def test_dispatch_resolver_returns_none_raises(self) -> None:
+        bus = CommandBus()
+
+        def resolver(cmd: TestCommand) -> Any:
+            return None
+
+        bus.set_module_resolver(resolver)
+        with pytest.raises(ValueError, match="No module found for command TestCommand"):
+            await bus.dispatch(TestCommand(target=(0, 0)))
+
 
 class TestSyncVsAsyncHandler:
     """Verify both sync and async handlers work."""

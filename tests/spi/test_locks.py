@@ -33,6 +33,7 @@ import pytest
 
 from pi_lora.drivers.spi.bus import RealSpiBus
 from pi_lora.drivers.spi.locks import (
+    SpiLock,
     _GuardedLock,
     _verify_single_registry,
     get_bus_lock,
@@ -169,6 +170,25 @@ class TestLockRegistry:
                 assert per_bus[bus_id] is lock
         assert len(per_bus) == len(bus_numbers)
         assert len({id(v) for v in per_bus.values()}) == len(bus_numbers)
+
+    @pytest.mark.asyncio
+    async def test_registry_lock_not_held_across_returned_lock_use(self) -> None:
+        """Fix 5: the registry lock is released before the bus lock is returned.
+
+        Hold the bus-0 lock, then concurrently request ``get_bus_lock`` for bus 0
+        and bus 1. If the registry lock were still held during the caller's use of
+        the returned lock (the old buggy pattern), the concurrent registry lookups
+        would contend on a lock held by this coroutine and deadlock. With Fix 5 the
+        registry lock is released on return, so both lookups resolve immediately and
+        bus 0 returns the same instance this coroutine holds.
+        """
+        held: SpiLock = await get_bus_lock(0)
+        assert isinstance(held, _GuardedLock)
+        async with held:
+            results = await asyncio.gather(get_bus_lock(0), get_bus_lock(1))
+            assert results[0] is held
+            assert results[1] is not held
+            assert results[1] is not held  # nosemgrep: correctness.common-mistakes.identical-is-comparison
 
     def test_spi_locks_lazy_init_guard_sync_import(self) -> None:
         """PLAN-20 FIX: verifies the lazy-init guard contract in pure sync context.

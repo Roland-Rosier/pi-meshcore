@@ -28,6 +28,8 @@ class MockSpiBus:
 
     def __init__(
         self,
+        bus_number: int = 0,
+        device_number: int = 0,
         max_speed_hz: int = 1000000,
         mode: int = 0,
         lsbfirst: bool = False,
@@ -35,17 +37,20 @@ class MockSpiBus:
     ) -> None:
         """Initialize the mock SPI bus.
 
-        Bus/device identity is set by ``open()`` — matching the underlying
-        ``spidev.SpiDev`` lifecycle (init → open).
+        Bus/device identity is fixed at construction — matching the ``SpiBus``
+        protocol where ``open()`` takes no args and bus/device are set once.
+        Cross-reference: Plan-25 Fix 11 / Issue 24.11 (LSP compliance).
 
         Args:
+            bus_number: The bus identifier.
+            device_number: The device identifier.
             max_speed_hz: Maximum speed in Hertz.
             mode: SPI mode setting.
             lsbfirst: Whether least significant bit comes first.
             no_cs: Whether chip select is disabled.
         """
-        self.bus_number: int = 0
-        self.device_number: int = 0
+        self.bus_number: int = bus_number
+        self.device_number: int = device_number
         self._max_speed_hz: int = max_speed_hz
         self._mode: int = mode
         self._lsbfirst: bool = lsbfirst
@@ -53,19 +58,18 @@ class MockSpiBus:
         self._registers: dict[int, int] = {}
         self._opened: bool = False
 
-    def open(self, bus: int | None = None, device: int | None = None) -> None:
-        """Open the SPI bus for the given device.
+    def open(self) -> None:
+        """Open the SPI bus using bus/device fixed at construction.
 
-        Args:
-            bus: The bus identifier. When ``None`` the stored ``bus_number``
-                is used, mirroring :meth:`RealSpiBus.open`.
-            device: The device identifier. When ``None`` the stored
-                ``device_number`` is used, mirroring :meth:`RealSpiBus.open`.
+        LSP compliance: ``open()`` takes no args, matching the ``SpiBus``
+        protocol ``open(self) -> None``. bus/device are set once at
+        construction (or via :func:`MockSpiBusFactory.create`).
+
+        PLAN-25 FIX (Fix 11, Issue 24.11): LSP compliance — open() takes no
+        args, matching the SpiBus protocol open(self) -> None. bus/device are
+        fixed at construction via MockSpiBusFactory.create().
+        Cross-reference: code_review-24.1.json finding 24.11.
         """
-        if bus is not None:
-            self.bus_number = bus
-        if device is not None:
-            self.device_number = device
         self._opened = True
         self._registers = {}
 
@@ -173,12 +177,19 @@ class MockSpiBusFactory:
         must NOT open the bus so both implementations honor the same
         ``SpiBusFactory`` Liskov contract — callers own the open/close lifecycle
         and must call :meth:`MockSpiBus.open` explicitly after :meth:`create`.
-        Do not call ``open()`` here; reverting this reintroduces the LSP
-        violation that Plan-11 Phase 5 resolves.
+
+        FIX 11 (Issue 24.11, Plan-25): bus/device are passed into the
+        ``MockSpiBus`` constructor so they are fixed at construction, and
+        ``open()`` takes no args to satisfy the ``SpiBus`` protocol.
         """
-        mock_bus = MockSpiBus(max_speed_hz=1000000, mode=0, lsbfirst=False, no_cs=False)
-        mock_bus.bus_number = bus
-        mock_bus.device_number = device
+        mock_bus = MockSpiBus(
+            bus_number=bus,
+            device_number=device,
+            max_speed_hz=1000000,
+            mode=0,
+            lsbfirst=False,
+            no_cs=False,
+        )
         return mock_bus
 
 

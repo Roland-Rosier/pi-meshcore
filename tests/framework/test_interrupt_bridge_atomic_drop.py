@@ -136,3 +136,52 @@ async def test_interrupt_bridge_atomic_drop_no_none_artifacts() -> None:
     )
 
     await bridge.stop()
+
+
+@pytest.mark.asyncio
+async def test_interrupt_bridge_atomic_drop_newest_wins() -> None:
+    """Concurrent triggers on a full queue keep the producer bounded and clean.
+
+    Fires 6 threads x 5000 calls = 30000 interrupts for a single GPIO pin into a
+    queue with maxsize=500. Every surviving producer entry must be the registered
+    pin (no None, no out-of-range values), and the producer size must never exceed
+    maxsize. Every surviving entry must ultimately be delivered to the module.
+    """
+    bridge = InterruptBridge(monitor_queue_depth_threshold=250)
+    await bridge.start()
+
+    event_queue: asyncio.Queue[Any] = asyncio.Queue()
+
+    class _MockModule:
+        def __init__(self) -> None:
+            self.event_queue = event_queue
+
+    mock_module = _MockModule()
+    registered_pin = 5
+    bridge.register_interrupt(registered_pin, mock_module)
+
+    def trigger_from_thread(_slot: int) -> None:
+        for _ in range(5000):
+            bridge.trigger_interrupt(registered_pin)
+
+    with ThreadPoolExecutor(max_workers=6) as executor:
+        list(executor.map(trigger_from_thread, range(6)))
+
+    # Producer stays bounded by maxsize at all times (CR-6) and never drops below
+    # zero (no interleave corruption from a missing lock).
+    assert 0 <= bridge._trigger_queue.qsize() <= bridge._max_queue_size
+
+    while not bridge._trigger_queue.empty():
+        await asyncio.sleep(0.001)
+    await asyncio.sleep(0.2)
+
+    delivered: list[Any] = []
+    while not event_queue.empty():
+        delivered.append(await event_queue.get())
+
+    assert all(event.event_type == EventType.INTERRUPT for event in delivered)
+    assert all(
+        event.payload.gpio_pin == registered_pin for event in delivered
+    )
+
+    await bridge.stop()

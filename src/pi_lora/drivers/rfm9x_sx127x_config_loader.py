@@ -214,16 +214,11 @@ async def get_preloaded_config(
     global _aiologic_module
     global _init_lock_holder
 
-    # PLAN-19 FIX: force_reload=True with config_path now updates _config_cache (docstring contract).
-    # Before this, the override path bypassed the cache entirely.
-    if config_path is not None:
-        config = load_config(config_path=config_path)
-        if force_reload:
-            _config_cache = config  # Update cache when explicitly requested
-        return config
-
-    # Fast path: cache hit and no forced reload.
-    if _config_cache is not None and not force_reload:
+    # PLAN-25 FIX (Issue 24.1): Fast-path cache hit kept OUTSIDE the lock as a benign read-only
+    # optimization (returns existing cached instance, no mutation). All cache mutations AND the
+    # config_path branch are serialized inside the lock.
+    # Cross-reference: code_review-24.1.json finding 24.1, config_loader.py get_preloaded_config.
+    if _config_cache is not None and not force_reload and config_path is None:
         return _config_cache
 
     # Lazy aiologic import and lock initialisation.
@@ -261,7 +256,14 @@ async def get_preloaded_config(
 
     async with _config_lock:
         # Double-checked locking: re-verify inside the lock to protect ALL cache mutations.
-        if _config_cache is not None and not force_reload:
+        if _config_cache is not None and not force_reload and config_path is None:
             return _config_cache
+
+        if config_path is not None:
+            config = load_config(config_path=config_path)
+            if force_reload:
+                _config_cache = config  # Update cache when explicitly requested
+            return config
+
         _config_cache = load_config()
         return _config_cache

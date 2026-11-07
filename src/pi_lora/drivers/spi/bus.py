@@ -196,8 +196,9 @@ class RealSpiBus:
         # Note: spidev is a real python library; do not assume otherwise
         import spidev
 
-        self._spidev = spidev.SpiDev()
-        self._spidev.open(self.bus_number, self.device_number)
+        spidev_instance = spidev.SpiDev()
+        spidev_instance.open(self.bus_number, self.device_number)
+        self._spidev = spidev_instance  # Only assign on success — guarantees _spidev is None until fully opened
 
     # PLAN-22 FIX (Item 4): close() now uses try/finally.
     # Before: If spidev.close() raised, _spidev was not set to None, leaving
@@ -206,13 +207,23 @@ class RealSpiBus:
     def close(self) -> None:
         """Close the SPI bus.
 
-        Guarantees _spidev is set to None even if spidev.close() raises.
+        On success, _spidev is set to None. If spidev.close() raises, the bus is
+        left open (handle preserved) and SpiBusError is raised chained to the
+        failure so callers can retry against the same handle.
         """
         if self._spidev is not None:
             try:
                 self._spidev.close()
-            finally:
-                self._spidev = None
+            except Exception as err:
+                logger.error(
+                    "Failed to close SPI bus %d.%d: %s. Handle preserved for retry.",
+                    self.bus_number, self.device_number, err
+                )
+                raise SpiBusError(
+                    f"Failed to close SPI bus {self.bus_number}.{self.device_number}: {err}"
+                ) from err
+            else:
+                self._spidev = None  # Only null on successful close — state machine: _spidev becomes None only after close succeeds
 
     async def xfer2(self, data: list[int] | bytearray) -> list[int]:
         """Transfer data through the SPI bus.
@@ -265,7 +276,7 @@ class RealSpiBus:
                     asyncio.to_thread(self._spidev.xfer2, data),
                     timeout=self._xfer_timeout,
                 )
-            except asyncio.TimeoutError:  # noqa: UP041
+            except asyncio.TimeoutError as err:  # noqa: UP041
                 logger.warning(
                     "SPI xfer2 timeout on bus %d (%.1fs). Closing bus; caller must reopen.",
                     self.bus_number, self._xfer_timeout,
@@ -274,7 +285,7 @@ class RealSpiBus:
                 raise SpiBusError(
                     f"SPI xfer2 timeout on bus {self.bus_number} after {self._xfer_timeout}s. "
                     f"Bus is now closed. Call bus.open() before retrying."
-                ) from None
+                ) from err  # Preserve original traceback as __cause__ — anti-regression: from None drops the TimeoutError from __cause__, hiding the real hang source; from err keeps it on the chain so debuggers see it
 
     # PLAN-20: Restore safe default (Plan-14 regression fix). Factory contract:
     # create() returns unopened bus; properties readable before open(). Return 0/False

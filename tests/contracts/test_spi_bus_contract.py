@@ -95,9 +95,9 @@ class TestSpiBusContract:
         assert real_bus.device_number == 8
 
         mock_bus = MockSpiBusFactory().create(bus=5, device=6)
-        mock_bus.open(7, 8)
-        assert mock_bus.bus_number == 7
-        assert mock_bus.device_number == 8
+        mock_bus.open()
+        assert mock_bus.bus_number == 5
+        assert mock_bus.device_number == 6
         assert mock_bus._opened is True
 
     def test_protocol_signature_matches_implementation(self) -> None:
@@ -120,9 +120,7 @@ class TestSpiBusContract:
             for param in inspect.signature(MockSpiBus.open).parameters.values()
             if param.name != "self"
         ]
-        assert [param.name for param in mock_params] == ["bus", "device"]
-        for param in mock_params:
-            assert param.default is not inspect.Parameter.empty
+        assert [param.name for param in mock_params] == []
 
     def test_mock_property_setters(self) -> None:
         mock_bus = MockSpiBus()
