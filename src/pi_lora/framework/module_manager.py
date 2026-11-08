@@ -129,19 +129,19 @@ class ModuleManager:
                 )
 
                 # Extract GPIO pins from DIO->GPIO mappings
+                # PLAN-26 FIX (Findings 843, 862): Fail fast on invalid GPIO mappings
+                # instead of silently disabling interrupt handling. Invalid config is
+                # a deployment error that must be caught at load time.
                 gpio_pins: list[int] = []
                 if radio_config.dio_gpio_mappings:
                     for mapping in radio_config.dio_gpio_mappings:
                         parts = mapping.split(":")
                         if len(parts) != 2:
-                            logger.error(
-                                "Unparseable GPIO mapping %r at config index %d "
-                                "(device %r); Interrupt handling DISABLEd for this device",
-                                mapping,
-                                index,
-                                radio_config.device_name,
+                            raise ValueError(
+                                f"Invalid GPIO mapping {mapping!r} at config index {index} "
+                                f"(device {radio_config.device_name!r}): must be in format "
+                                f"'DIO:<GPIO|WPi><pin_number>'"
                             )
-                            continue
                         gpio_str = parts[1]
                         matched_prefix: str | None = None
                         for prefix in ("GPIO", "WPi"):
@@ -149,24 +149,19 @@ class ModuleManager:
                                 matched_prefix = prefix
                                 break
                         if matched_prefix is None:
-                            logger.error(
-                                "Unparseable GPIO mapping %r at config index %d "
-                                "(device %r); Interrupt handling DISABLEd for this device",
-                                mapping,
-                                index,
-                                radio_config.device_name,
+                            raise ValueError(
+                                f"Invalid GPIO mapping {mapping!r} at config index {index} "
+                                f"(device {radio_config.device_name!r}): pin must start with "
+                                f"'GPIO' or 'WPi'"
                             )
-                            continue
                         try:
                             gpio_pins.append(int(gpio_str[len(matched_prefix):]))
-                        except ValueError:
-                            logger.error(
-                                "Unparseable GPIO mapping %r at config index %d "
-                                "(device %r); Interrupt handling DISABLEd for this device",
-                                mapping,
-                                index,
-                                radio_config.device_name,
-                            )
+                        except ValueError as e:
+                            raise ValueError(
+                                f"Invalid GPIO mapping {mapping!r} at config index {index} "
+                                f"(device {radio_config.device_name!r}): pin number must be "
+                                f"an integer"
+                            ) from e
 
                 device_key: DeviceIdentity = radio_config.device_id_key
                 # H-13/Plan-16: a duplicate can live in the main tracking (a prior

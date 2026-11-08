@@ -501,7 +501,15 @@ class InterruptBridge:
         # call_soon_threadsafe() on the stale, possibly-closed loop -> RuntimeError.
         # Setting self._loop = None on stop forces start() to re-capture a fresh
         # loop, guaranteeing restart safety.
-        self._loop = None
+        #
+        # PLAN-26 FIX (Findings 892, 921, 981): Acquire _trigger_lock when clearing
+        # _loop to prevent race with trigger_interrupt() which reads _loop under
+        # the same lock. On non-GIL threads (C extension GPIO drivers), a write
+        # without the lock may not be immediately visible, causing trigger_interrupt()
+        # to call call_soon_threadsafe() on a stale/closed loop.
+        # Cross-reference: code_review-25.3.json findings 892, 921, 981.
+        with self._trigger_lock:
+            self._loop = None
 
     async def _drain_sync_queue(self) -> None:
         """Drain thread-safe producer queue into async consumer queue.
@@ -546,6 +554,15 @@ class InterruptBridge:
                         pass
 
     async def _interrupt_task(self) -> None:
+        # PLAN-26 FIX (Finding 951): Add exponential backoff on queue put failure
+        # to prevent unbounded error logging under sustained high load. Mirrors
+        # IdlePacer (lines 272-281): backoff engages after 5 consecutive failures.
+        # First few failures log immediately with no backoff; sustained failures
+        # apply exponential backoff (min 0.1s, max 60s).
+        # Cross-reference: code_review-25.3.json finding 951.
+        _failure_counts: dict[int, int] = {}
+        _backoff_until: dict[int, float] = {}
+        import time
         while self._running:
             gpio_pin = await self._async_trigger_queue.get()
             module = self._interrupt_map.get(gpio_pin)
@@ -559,12 +576,28 @@ class InterruptBridge:
                     await module.event_queue.put(
                         ModuleEvent(EventType.INTERRUPT, InterruptEvent(gpio_pin))
                     )
+                    # Success — reset failure count and drop any active backoff
+                    _failure_counts[gpio_pin] = 0
+                    _backoff_until.pop(gpio_pin, None)
                 except Exception as exc:
+                    # Failure — increment per-pin failure count
+                    fc = _failure_counts.get(gpio_pin, 0) + 1
+                    _failure_counts[gpio_pin] = fc
+                    now = time.monotonic()
+                    # Check backoff window
+                    if gpio_pin in _backoff_until and now < _backoff_until[gpio_pin]:
+                        # Still in backoff window; silently drop this interrupt
+                        continue
+                    # Log the failure
                     logging.getLogger(__name__).error(
-                        "InterruptBridge: failed to put INTERRUPT event for GPIO %d: %s",
-                        gpio_pin,
-                        exc,
+                        "InterruptBridge: failed to put INTERRUPT event for GPIO %d: %s (failure #%d)",
+                        gpio_pin, exc, fc,
                     )
+                    # Apply backoff after 5 consecutive failures (mirrors IdlePacer)
+                    if fc > 5:
+                        delay = min(0.1 * (2 ** (fc - 5)), 60.0)
+                        _backoff_until[gpio_pin] = now + delay
+                    # First 5 failures: no backoff, retry immediately on next interrupt
 
     def unregister_module(self, module: Rfm9xSx127xModule) -> None:
         """Remove every GPIO pin entry that references *module*."""
@@ -592,9 +625,24 @@ class Scheduler:
         await self.timer_scheduler.stop()
 
     async def unregister_module(self, module: Rfm9xSx127xModule) -> None:
-        await self.timer_scheduler.unregister_module(module)
-        self.idle_pacer.set_idle_enabled(module, False)
-        self.interrupt_bridge.unregister_module(module)
+        # PLAN-26 FIX (Findings 911, 941): Collect all errors and raise ExceptionGroup
+        # so that failures in one scheduler component don't mask failures in others.
+        # Cross-reference: code_review-25.3.json findings 911, 941.
+        errors: list[Exception] = []
+        try:
+            await self.timer_scheduler.unregister_module(module)
+        except Exception as e:
+            errors.append(e)
+        try:
+            self.idle_pacer.set_idle_enabled(module, False)
+        except Exception as e:
+            errors.append(e)
+        try:
+            self.interrupt_bridge.unregister_module(module)
+        except Exception as e:
+            errors.append(e)
+        if errors:
+            raise ExceptionGroup("Errors during Scheduler.unregister_module()", errors)
 
     def register_module(
         self,

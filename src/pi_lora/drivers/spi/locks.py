@@ -16,6 +16,7 @@ from __future__ import annotations
 
 import asyncio
 import sys
+import threading
 from typing import Any, Protocol, Self
 
 
@@ -31,8 +32,10 @@ class SpiLock(Protocol):
     The concrete implementation is an :class:`aiologic.Lock`, a native dual-mode
     lock that *does* support sync ``with lock:`` at runtime — but only *after*
     the instance has been obtained by awaiting :func:`get_bus_lock()`. The
-    sync context manager methods are declared here to satisfy type checkers,
-    but callers MUST NOT use them before awaiting get_bus_lock().
+    sync context manager methods are NOT declared in this protocol because they
+    are only valid after async acquisition; declaring them would imply they can
+    be used directly without awaiting get_bus_lock(), which is not the case.
+    Callers should use ``async with lock:`` or ``await lock.async_acquire()``.
 
     The registry hands back a single shared instance per bus number so that
     transfers on the same bus never interleave.
@@ -40,20 +43,6 @@ class SpiLock(Protocol):
 
     async def __aenter__(self) -> Self: ...
     async def __aexit__(self, exc_type: Any, exc_val: Any, exc_tb: Any) -> None: ...
-
-    # CR-4 FIX: The original SpiLock protocol omitted sync __enter__/__exit__, yet
-    # the concrete aiologic.Lock supports them at runtime. Type checkers (mypy
-    # --strict) could not therefore verify ``with lock:`` in synchronous code,
-    # leaving a static-vs-runtime mismatch. Declaring __enter__/__exit__ here
-    # closes that gap. The acquisition contract stays async-only on purpose: the
-    # sync context managers are only valid AFTER the instance is obtained by
-    # awaiting get_bus_lock(), because the registry hands back a coroutine-bound
-    # instance. Declaring them as directly usable in sync without awaiting
-    # get_bus_lock() first would be a lie (a caller holding a lock never obtained
-    # through the event loop would have no owner), so the docstring explicitly
-    # rejects that alternative and pins validity to post-acquisition.
-    def __enter__(self) -> Self: ...
-    def __exit__(self, exc_type: Any, exc_val: Any, exc_tb: Any) -> None: ...
 
     async def async_acquire(
         self, *, blocking: bool = True, timeout: float | None = None
@@ -86,6 +75,14 @@ _aiologic_module: Any = None
 # state that mypy can verify). The holder is a list[asyncio.Lock | None] so mypy
 # --strict accepts element assignment and indexing.
 _registry_init_lock_holder: list[asyncio.Lock | None] = [None]
+
+# PLAN-26 FIX (Findings 605, 615): Use a threading.Lock for the ONE-TIME holder
+# initialization to avoid the race where two coroutines both create asyncio.Lock()
+# for _registry_init_lock_holder[0]. This lock is only used during the first call
+# to get_bus_lock() and is released before any async code runs. threading.Lock is
+# safe at module level (no running loop required) and avoids the asyncio.Lock
+# import-time issue.
+_registry_holder_init_lock: threading.Lock = threading.Lock()
 
 # PLAN-22 FIX (Item 5): Lazily verifies the single-registry invariant on the
 # first call to get_bus_lock(). _verify_single_registry() is defined but never
@@ -121,6 +118,13 @@ class _GuardedLock:
     Wrapper confines guard to SPI locks only. __getattr__ fallback ensures
     complete delegation to the wrapped lock for any current or future
     aiologic.Lock methods, making the wrapper a transparent proxy.
+
+    PLAN-26 FIX (Finding 548): Sync context manager (__enter__/__exit__) removed.
+    The SpiLock protocol no longer declares them because they are only valid
+    after async acquisition via get_bus_lock(). Callers must use 'async with'
+    or 'await lock.async_acquire()'. The underlying aiologic.Lock still supports
+    sync 'with' at runtime after async acquisition, but the protocol and wrapper
+    no longer expose it to avoid confusion.
     """
 
     __slots__ = ("_lock", "_obtained")
@@ -132,8 +136,7 @@ class _GuardedLock:
     # Async context manager (primary acquisition path)
     # PLAN-22 FIX (Item 2): _obtained flag set AFTER successful await.
     # Before: _obtained=True before await; if __aenter__ raised, flag stayed True
-    # but lock was never acquired. Sync 'with lock:' would incorrectly proceed
-    # and call __enter__ on unacquired lock. Now flag only true when lock held.
+    # but lock was never acquired. Now flag only true when lock held.
     async def __aenter__(self) -> Self:
         await self._lock.__aenter__()
         self._obtained = True
@@ -142,16 +145,6 @@ class _GuardedLock:
     async def __aexit__(self, exc_type: Any, exc_val: Any, exc_tb: Any) -> None:
         await self._lock.__aexit__(exc_type, exc_val, exc_tb)
         self._obtained = False
-
-    # Sync context manager — ONLY valid after async acquisition via get_bus_lock()
-    def __enter__(self) -> Self:
-        if not self._obtained:
-            raise RuntimeError("Lock not acquired via get_bus_lock()")
-        self._lock.__enter__()
-        return self
-
-    def __exit__(self, exc_type: Any, exc_val: Any, exc_tb: Any) -> None:
-        self._lock.__exit__(exc_type, exc_val, exc_tb)
 
     # Delegate known methods explicitly (for type checker)
     async def async_acquire(self, *, blocking: bool = True, timeout: float | None = None) -> bool:
@@ -166,9 +159,33 @@ class _GuardedLock:
     def locked(self) -> bool:
         return self._lock.locked()
 
+    # PLAN-26 FIX (Finding 548): Explicitly block sync context manager to prevent
+    # delegation to underlying aiologic.Lock. Callers must use async with or
+    # async_acquire. This avoids the confusing situation where 'with guard:'
+    # appears to work but bypasses the acquisition guard.
+    def __enter__(self) -> Self:
+        raise RuntimeError(
+            "Sync context manager not supported on _GuardedLock. "
+            "Use 'async with lock:' or 'await lock.async_acquire()' after "
+            "obtaining the lock via get_bus_lock()."
+        )
+
+    def __exit__(self, exc_type: Any, exc_val: Any, exc_tb: Any) -> None:
+        raise RuntimeError(
+            "Sync context manager not supported on _GuardedLock. "
+            "Use 'async with lock:' or 'await lock.async_acquire()' after "
+            "obtaining the lock via get_bus_lock()."
+        )
+
     # PLAN-19 FIX: Fallback delegation for any other aiologic.Lock methods
     # (current or future). Ensures wrapper is a transparent proxy.
     def __getattr__(self, name: str) -> Any:
+        # Block sync context manager delegation
+        if name in ("__enter__", "__exit__"):
+            raise AttributeError(
+                f"'{type(self).__name__}' has no attribute '{name}'. "
+                "Sync context manager not supported; use async methods."
+            )
         return getattr(self._lock, name)
 
 
@@ -199,12 +216,6 @@ async def get_bus_lock(bus_number: int) -> SpiLock:
         _verify_single_registry()
         _registry_verified = True
 
-    # H-6 FIX: aiologic is a REQUIRED dependency for SPI locking.
-    # The SpiLock protocol requires sync context manager support (__enter__/__exit__),
-    # which only aiologic.Lock provides (asyncio.Lock lacks sync `with`).
-    # See pyproject.toml for the declared (required, not optional) dependency.
-    # No sync fallback exists by design; an ImportError here signals the
-    # dependency is uninstalled, not a runtime recoverable condition.
 
     # Lazy aiologic import — outside lock for first call, only imports module,
     # doesn't patch it. Safe because module import is thread-safe in Python (GIL).
@@ -219,59 +230,51 @@ async def get_bus_lock(bus_number: int) -> SpiLock:
                 "aiologic is required for SPI locking. Install with: pip install aiologic"
             ) from e
 
-    # PLAN-22 FIX (Item 6): Sentinel race fixed by holding _holder for full
-    # registry critical section. Before: _holder only guarded lock creation;
-    # if aiologic.Lock() awaited, another coroutine could see _SENTinel and
-    # fail on async with _registry_lock (AttributeError). Now entire critical
-    # section is inside _holder. C3 documented: one-time init, microsecond
-    # overhead, no deadlock.
+    # PLAN-26 FIX (Findings 605, 615): Redesigned initialization to eliminate all
+    # sentinel races. The threading.Lock protects holder creation atomically.
+    # The asyncio.Lock holder protects the ENTIRE registry critical section
+    # (including aiologic.Lock creation and bus lock dict mutation) so no
+    # coroutine can see a partially-initialized _registry_lock or race on
+    # _bus_locks dict mutation.
+    # Cross-reference: code_review-25.3.json findings 548, 578, 605, 615.
     if _registry_lock is None:
-        # H-5 FIX: Sentinel pattern with exception-safe try/finally.
-        # If aiologic.Lock() internally awaits during construction, the _holder
-        # could be released before the lock is built, letting a second coroutine
-        # re-enter `if _registry_lock is None:`. Setting _registry_lock to a
-        # sentinel INSIDE the guard prevents that race: the first coroutine marks
-        # the slot occupied before awaiting Lock(). If Lock() raises, the sentinel
-        # is reset to None (NOT leaked) so a later call can retry — a leaked
-        # sentinel would cause AttributeError on subsequent `async with` calls.
-        _holder: asyncio.Lock = _registry_init_lock_holder[0] or asyncio.Lock()
-        _registry_init_lock_holder[0] = _holder
-        async with _holder:
-            if _registry_lock is None:  # Re-check inside lock
+        # Atomically create or retrieve the asyncio.Lock holder using threading.Lock
+        # for the one-time initialization. This avoids the race where two
+        # coroutines both create asyncio.Lock() for _registry_init_lock_holder[0].
+        with _registry_holder_init_lock:
+            holder: asyncio.Lock | None = _registry_init_lock_holder[0]
+            if holder is None:  # nosemgrep: lazy-lock-without-guard (guarded by threading.Lock)
+                holder = asyncio.Lock()
+                _registry_init_lock_holder[0] = holder
+
+        # Hold the asyncio holder for the ENTIRE critical section including
+        # aiologic.Lock creation and _bus_locks dict mutation. This ensures
+        # no other coroutine can enter this section or the else branch below
+        # until _registry_lock is fully initialized.
+        async with holder:
+            if _registry_lock is None:  # Double-check inside holder
                 _registry_lock = _SENTINEL  # Placeholder — prevents race if Lock() awaits
                 try:
                     _registry_lock = _aiologic_module.Lock()
                 except Exception:
                     _registry_lock = None  # Reset on failure — don't leak sentinel
                     raise
-            # Hold _holder for the entire registry critical section
-            # C3: Extended hold is safe — one-time initialization only.
-            # The holder (_registry_init_lock_holder[0]) is an asyncio.Lock
-            # protecting one-time registry init. Moving the registry critical
-            # section inside extends hold by ~microseconds (dict lookup +
-            # potential _GuardedLock creation). Contention is minimal and
-            # transient since this runs only on first call per bus number.
-            # No deadlock risk: holder released before any user code runs.
+
+            # Now _registry_lock is fully initialized (aiologic.Lock).
+            # Perform the bus lock lookup/creation under the registry lock.
             async with _registry_lock:
                 if bus_number not in _bus_locks:
                     raw_lock = _aiologic_module.Lock()
                     _bus_locks[bus_number] = _GuardedLock(raw_lock)
             bus_lock: SpiLock = _bus_locks[bus_number]
-            # PLAN-25 FIX (Fix 5): registry lock protects ONLY the dict mutation
-            # below; it is released (context exit) before returning the bus lock
-            # so the caller never holds the registry lock during bus-lock use.
-            # Cross-reference: code_review-24.1.json finding, locks.py get_bus_lock.
             return bus_lock
     else:
+        # Registry already initialized — just use the registry lock.
         async with _registry_lock:
             if bus_number not in _bus_locks:
                 raw_lock = _aiologic_module.Lock()
                 _bus_locks[bus_number] = _GuardedLock(raw_lock)
             returned_bus_lock: SpiLock = _bus_locks[bus_number]
-            # PLAN-25 FIX (Fix 5): registry lock protects ONLY the dict mutation
-            # below; it is released (context exit) before returning the bus lock
-            # so the caller never holds the registry lock during bus-lock use.
-            # Cross-reference: code_review-24.1.json finding, locks.py get_bus_lock.
             return returned_bus_lock
 
 

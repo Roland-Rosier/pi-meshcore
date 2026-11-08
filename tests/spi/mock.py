@@ -232,7 +232,7 @@ class FakeSpiBusKernelFactory:
     """
 
     @contextmanager
-    def create_bus(self, bus: int, device: int) -> Iterator[RealSpiBus]:
+    def create_bus(self, bus: int, device: int, module_type: str = "rfm95w") -> Iterator[RealSpiBus]:
         """Yield an opened ``RealSpiBus`` whose ``_spidev`` is a :class:`FakeSpiDev`.
 
         The ``spidev`` patch remains active for the entire duration the bus is
@@ -242,6 +242,8 @@ class FakeSpiBusKernelFactory:
         Args:
             bus: The bus identifier.
             device: The device identifier.
+            module_type: Type of module to simulate ("rfm95w", "rfm98w", "multi_band", "none").
+                Defaults to "rfm95w" for backward compatibility.
 
         Yields:
             An opened ``RealSpiBus`` whose ``_spidev`` is the fake kernel while
@@ -253,7 +255,7 @@ class FakeSpiBusKernelFactory:
         bus_instance: RealSpiBus = RealSpiBus(
             bus_number=bus, device_number=device, factory_owned=True
         )
-        fake_kernel = create_fake_spi_dev(module_type="rfm95w")
+        fake_kernel = create_fake_spi_dev(module_type=module_type)
         with spidev_kernel_patch(fake_kernel):
             bus_instance.open()
             try:

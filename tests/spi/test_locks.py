@@ -294,12 +294,13 @@ class TestLockAcquisition:
 
     @pytest.mark.asyncio
     async def test_spi_locks_wrapper_isolation(self) -> None:
-        """Raw ``aiologic.Lock`` sync-enters cleanly; the guard rejects pre-acquisition.
+        """Raw ``aiologic.Lock`` sync-enters cleanly; the guard has no sync CM.
 
-        The ``_GuardedLock`` wrapper confines the sync ``__enter__`` rejection to
+        The ``_GuardedLock`` wrapper confines the acquisition guard to
         SPI locks only (no global monkey-patch), so a standalone raw lock never
-        raises. A guard built without acquisition raises on a plain sync ``with``;
-        only after ``await get_bus_lock()`` does the async context manager work.
+        raises. A guard built without acquisition has NO sync context manager
+        (``__enter__``/``__exit__`` removed in Plan-26 Finding 548); only
+        ``async with`` or ``await lock.async_acquire()`` are supported.
         The raw sync ``with`` and the acquired async ``with`` stay sequential on
         distinct locks to avoid a double-acquire of a single aiologic.Lock.
         """
@@ -310,10 +311,10 @@ class TestLockAcquisition:
         assert raw.locked() is False
 
         guard = _GuardedLock(aiologic.Lock())
-        with pytest.raises(
-            RuntimeError, match="Lock not acquired via get_bus_lock()"
-        ), guard:
-            pass
+        # _GuardedLock no longer has __enter__/__exit__ (Plan-26 Finding 548).
+        # Attempting sync 'with' raises AttributeError.
+        with pytest.raises(RuntimeError, match="Sync context manager not supported"), guard:
+                pass
 
         obtained = await get_bus_lock(0)
         assert isinstance(obtained, _GuardedLock)
@@ -413,23 +414,20 @@ class TestGuardedObtainedFlag:
     """
 
     @pytest.mark.asyncio
-    async def test_aenter_failure_keeps_obtained_false_and_sync_rejects(self) -> None:
-        """A failed ``__aenter__`` leaves ``_obtained`` False; sync ``with`` rejects.
+    async def test_aenter_failure_keeps_obtained_false(self) -> None:
+        """A failed ``__aenter__`` leaves ``_obtained`` False.
 
         Under the old Item-2 bug the flag would stay True after the raising
-        ``_ExceptionLock.__aenter__``, so the subsequent sync ``with guard:``
-        would NOT raise the guard rejection error. On the corrected ordering the
-        flag stays False and the sync ``with`` raises
-        ``RuntimeError("Lock not acquired via get_bus_lock()")``.
+        ``_ExceptionLock.__aenter__``. On the corrected ordering the flag stays
+        False. The sync context manager was removed in Plan-26 (Finding 548).
         """
         guard = _GuardedLock(_ExceptionLock(RuntimeError("lock acquisition cancelled")))
         with pytest.raises(RuntimeError):
             await guard.__aenter__()
         assert guard._obtained is False
-        with pytest.raises(
-            RuntimeError, match="Lock not acquired via get_bus_lock()"
-        ), guard:
-            pass
+        # _GuardedLock no longer has __enter__/__exit__ (Plan-26 Finding 548).
+        with pytest.raises(RuntimeError, match="Sync context manager not supported"), guard:
+                pass
 
     @pytest.mark.asyncio
     async def test_successful_aenter_marks_obtained_true(self) -> None:
@@ -449,26 +447,25 @@ class TestGuardedObtainedFlag:
         assert lock._obtained is False
 
     @pytest.mark.asyncio
-    async def test_obtained_allows_sync_enter(self) -> None:
-        """Once obtained, the guard's ``__enter__`` proceeds instead of rejecting.
+    async def test_obtained_allows_async_reentry(self) -> None:
+        """Once obtained, async re-entry works; sync CM removed (Plan-26 Finding 548).
 
-        Isolates the guard's ``__enter__`` decision (which only inspects
-        ``_obtained``) from an underlying lock's real acquire semantics by
-        wrapping a ``_NonHoldingLock`` that never holds, so a sync ``with`` cannot
-        double-acquire a held :class:`aiologic.Lock`. After a successful
-        ``__aenter__`` the flag is True and a plain sync ``with guard:`` proceeds
-        cleanly into ``__enter__`` rather than raising the guard rejection error.
+        After a successful ``__aenter__`` the flag is True. The underlying
+        _NonHoldingLock.locked() returns False (it's a mock), but _obtained
+        tracks the guard's state correctly. The sync context manager was removed;
+        callers must use ``async with`` or ``async_acquire``.
         """
         guard = _GuardedLock(_NonHoldingLock())
         await guard.__aenter__()
         assert guard._obtained is True
-        with guard as ctx:
-            assert ctx is guard
-        # A plain sync ``with`` exercises the sync ``__exit__`` (which does not
-        # reset ``_obtained``); only ``__aexit__`` clears it. The flag therefore
-        # stays True, proving the sync path proceeded through ``__enter__`` rather
-        # than being rejected.
+        # _NonHoldingLock.locked() returns False (mock doesn't hold real lock)
+        # but _obtained correctly tracks guard state
         assert guard._obtained is True
+        await guard.__aexit__(None, None, None)
+        assert guard._obtained is False
+        # _GuardedLock no longer has __enter__/__exit__ (Plan-26 Finding 548).
+        with pytest.raises(RuntimeError, match="Sync context manager not supported"), guard:
+                pass
 
 
 class _BlockingKernel:

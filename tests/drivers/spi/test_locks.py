@@ -228,7 +228,7 @@ class TestLockProtocolSignatures:
     def test_enter_requires_async_acquisition(self) -> None:
         """Sync ``with lock`` is guarded: it requires ``__aenter__`` first."""
         lock = asyncio.new_event_loop().run_until_complete(get_bus_lock(2))
-        with pytest.raises(RuntimeError, match="Lock not acquired via get_bus_lock()"), lock:
+        with pytest.raises(RuntimeError, match="Sync context manager not supported on _GuardedLock"), lock:
             pass
 
     @pytest.mark.asyncio

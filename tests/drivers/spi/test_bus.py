@@ -232,12 +232,14 @@ class _RaisingKernel:
 
 
 class TestRealSpiBusCloseExceptionChained:
-    """Issue 24.4 Fix: ``close()`` raises ``SpiBusError`` chained to the failure
-    and preserves the ``_spidev`` handle so callers can retry against the same
-    ``spidev`` kernel.
+    """Issue 24.4 Fix + Plan-26 Finding 484: ``close()`` raises ``SpiBusError``
+    chained to the failure. The ``_spidev`` handle is ALWAYS cleared (set to
+    None) in a finally block so that open() can be called again after a failed
+    close. This fixes the regression where a failed close() left the bus
+    unopenable (stuck with "already open" error).
     """
 
-    def test_close_raises_spi_bus_error_preserves_handle(self) -> None:
+    def test_close_raises_spi_bus_error_clears_handle_for_reopen(self) -> None:
         from unittest.mock import patch
 
         from pi_lora.drivers.spi.bus import RealSpiBus, SpiBusError
@@ -251,8 +253,46 @@ class TestRealSpiBusCloseExceptionChained:
         ), pytest.raises(SpiBusError) as exc_info:
             bus.close()
 
-        assert bus._spidev is not None
+        # PLAN-26 FIX (Finding 484): _spidev is now None even after failed close,
+        # allowing the caller to call open() again.
+        assert bus._spidev is None
         assert exc_info.value.__cause__ is failure
+
+    def test_close_failed_then_open_not_raise_already_open(self) -> None:
+        """After a failed close, open() should not raise 'already open' error.
+
+        This test verifies the fix for Finding 484: a failed close() used to
+        leave _spidev set, causing open() to raise "already open" even though
+        close() had been called. Now _spidev is cleared in a finally block.
+        """
+        from unittest.mock import patch
+
+        from pi_lora.drivers.spi.bus import RealSpiBus, SpiBusError
+
+        bus = RealSpiBus(bus_number=0, device_number=0)
+        failure = OSError("spidev.close() failed")
+        bus._spidev = _RaisingKernel()
+
+        # First close fails
+        with patch.object(
+            bus._spidev, "close", side_effect=failure
+        ), pytest.raises(SpiBusError):
+            bus.close()
+
+        # _spidev should be None now (PLAN-26 FIX: Finding 484)
+        assert bus._spidev is None
+
+        # open() should not raise "already open" RuntimeError since _spidev is None
+        # We can't easily test full open() success without mocking spidev, but
+        # we can verify the "already open" check passes by ensuring no RuntimeError
+        # with that message is raised. The open() will fail later with SpiBusError
+        # due to no real device, but the "already open" check is what we're testing.
+        with pytest.raises(SpiBusError) as exc_info:
+            bus.open()
+
+        # Verify it's NOT the "already open" error
+        assert "already open" not in str(exc_info.value).lower()
+        assert "open failed" in str(exc_info.value).lower()
 
 
 class TestRealSpiBusXferTimeoutValidation:

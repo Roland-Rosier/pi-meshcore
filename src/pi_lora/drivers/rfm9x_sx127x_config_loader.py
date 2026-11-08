@@ -71,7 +71,7 @@ _init_lock_holder: list[asyncio.Lock | None] = [None]
 # awaiting Lock(), closing the race. On failure the sentinel is reset to None
 # (NOT leaked) so a later call can retry — a leaked sentinel would raise
 # AttributeError on subsequent `async with _config_lock:` calls.
-_SENTinel = object()
+_SENTINEL = object()
 
 _config_cache: Rfm9xSx127xConfig | None = None
 
@@ -214,12 +214,14 @@ async def get_preloaded_config(
     global _aiologic_module
     global _init_lock_holder
 
-    # PLAN-25 FIX (Issue 24.1): Fast-path cache hit kept OUTSIDE the lock as a benign read-only
-    # optimization (returns existing cached instance, no mutation). All cache mutations AND the
-    # config_path branch are serialized inside the lock.
-    # Cross-reference: code_review-24.1.json finding 24.1, config_loader.py get_preloaded_config.
-    if _config_cache is not None and not force_reload and config_path is None:
-        return _config_cache
+
+    # PLAN-26 FIX (Finding 308): Fast-path cache hit REMOVED from outside the lock.
+    # The previous "benign read-only optimization" was a race condition: callers with
+    # force_reload=True or config_path provided could be inside the lock reloading while
+    # fast-path callers returned stale cached data. ALL cache reads now go through
+    # _config_lock for correctness. The double-checked locking inside the lock still
+    # avoids redundant loads under contention.
+    # Cross-reference: code_review-25.3.json finding 308, config_loader.py get_preloaded_config.
 
     # Lazy aiologic import and lock initialisation.
     # PLAN-19 FIX: import aiologic FIRST outside the _init_lock guard (module import
@@ -247,7 +249,7 @@ async def get_preloaded_config(
         _init_lock_holder[0] = _holder
         async with _holder:
             if _config_lock is None:  # Re-check inside lock
-                _config_lock = cast(_ConfigLockType, _SENTinel)  # Placeholder — prevents race if Lock() awaits
+                _config_lock = cast(_ConfigLockType, _SENTINEL)  # Placeholder — prevents race if Lock() awaits
                 try:
                     _config_lock = _aiologic_module.Lock()
                 except Exception:

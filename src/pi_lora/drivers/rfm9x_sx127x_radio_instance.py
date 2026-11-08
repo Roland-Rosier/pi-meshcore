@@ -388,7 +388,14 @@ async def create_radio_instance_from_default(
     spi_device_id: int,
     ce_number: int,
 ) -> RadioInstanceConfig:
-    """Convenience wrapper using the preloaded default config."""
-    from pi_lora.drivers.rfm9x_sx127x_config_loader import get_preloaded_config
-    config = await get_preloaded_config()
-    return await create_radio_instance(assembly_name, spi_device_id, ce_number, config)
+    """Convenience wrapper using the preloaded default config.
+
+    PLAN-26 FIX (Finding 376): Simplified from explicit get_preloaded_config() +
+    create_radio_instance(config=...) to single call with config=None. The async
+    wrapper create_radio_instance() already auto-loads the default config when
+    config is None (CR-2 FIX, Plan 21). The previous explicit call was redundant
+    and introduced in Plan 21 when create_radio_instance was split into a sync
+    core + async wrapper but this convenience function was not updated.
+    Cross-reference: code_review-25.3.json finding 376.
+    """
+    return await create_radio_instance(assembly_name, spi_device_id, ce_number, config=None)

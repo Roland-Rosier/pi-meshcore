@@ -158,9 +158,11 @@ class TestLoadFromConfig:
         assert any("rolled back" in msg.lower() for msg in caplog.messages)
 
     @pytest.mark.asyncio
-    async def test_malformed_gpio_mapping_warns(
+    async def test_malformed_gpio_mapping_raises(
         self, caplog: pytest.LogCaptureFixture,
     ) -> None:
+        """PLAN-26 FIX (Findings 843, 862): Invalid GPIO mappings now raise
+        ValueError instead of silently disabling interrupt handling."""
         mm = ModuleManager()
         radio_configs: list[RadioInstanceConfig] = [
             RadioInstanceConfig(
@@ -179,23 +181,10 @@ class TestLoadFromConfig:
             ),
         ]
         scheduler = Scheduler()
-        await mm.load_from_config(radio_configs, scheduler)
-        assert len(mm.modules) == 1
-        assert 6 in scheduler.interrupt_bridge._interrupt_map
-        assert any(
-            "Unparseable GPIO mapping" in msg for msg in caplog.messages
-        )
-        malformed_records = [
-            record
-            for record in caplog.records
-            if "Unparseable GPIO mapping" in record.getMessage()
-        ]
-        assert malformed_records
-        for record in malformed_records:
-            assert record.levelname == "ERROR"
-        assert any(
-            "interrupt handling disabled" in msg.lower() for msg in caplog.messages
-        )
+        with pytest.raises(ValueError, match="Invalid GPIO mapping.*foo"):
+            await mm.load_from_config(radio_configs, scheduler)
+        # Module should not be loaded due to validation failure
+        assert len(mm.modules) == 0
 
     @pytest.mark.asyncio
     async def test_load_failure_rolls_back(

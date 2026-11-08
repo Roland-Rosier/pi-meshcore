@@ -208,10 +208,15 @@ class TestRealSpiBusOpenResourceLeak:
 
 
 class TestRealSpiBusCloseResourceLeak:
-    """Issue 24.4 Fix: ``close()`` raises and chains on failure instead of nulling."""
+    """Issue 24.4 Fix + Plan-26 Finding 484: ``close()`` raises and chains on failure
+    and ALWAYS nulls ``_spidev`` to allow reopening. The old behavior preserved the
+    handle but left the bus unopenable (stuck with "already open" error).
+    """
 
-    def test_close_failure_chains_and_preserves_handle(self) -> None:
-        """If ``spidev.close`` raises, ``SpiBusError`` is chained and ``_spidev`` stays set."""
+    def test_close_failure_chains_and_clears_handle_for_reopen(self) -> None:
+        """If ``spidev.close`` raises, ``SpiBusError`` is chained and ``_spidev`` is
+        cleared to allow reopen (Plan-26 Finding 484).
+        """
         with FakeSpiBusKernelFactory().create_bus(bus=0, device=0) as bus:
             assert bus._spidev is not None
             failure = RuntimeError("hardware close failed")
@@ -219,6 +224,6 @@ class TestRealSpiBusCloseResourceLeak:
                 bus._spidev, "close", side_effect=failure
             ), pytest.raises(SpiBusError) as exc_info:
                 bus.close()
-            # State machine: _spidev is NOT nulled on failure — handle preserved.
-            assert bus._spidev is not None
+            # PLAN-26 FIX (Finding 484): _spidev IS nulled on failure to allow reopen.
+            assert bus._spidev is None
             assert exc_info.value.__cause__ is failure

@@ -95,8 +95,13 @@ class SpiBusError(RuntimeError):
 # test execution (pytest-xdist or concurrent async tasks). A class attribute
 # would be shared across all RealSpiBus instances in the same context (H-1).
 # This is finding H-1: moving it to module level fixes the cross-instance sharing.
-_spidev_patch_active: contextvars.ContextVar[bool] = contextvars.ContextVar(
-    "_spidev_patch_active", default=False
+#
+# PLAN-26 FIX (Finding 1011): Changed from bool to int counter to support
+# nested contexts. Each context increments the counter on entry and decrements
+# on exit. The patch is active when counter > 0. This prevents the inner
+# context's finally from deactivating the outer context's patch.
+_spidev_patch_active: contextvars.ContextVar[int] = contextvars.ContextVar(
+    "_spidev_patch_active", default=0
 )
 
 
@@ -178,6 +183,9 @@ class RealSpiBus:
 
         Raises:
             RuntimeError: If the bus is already open. Call close() before open().
+            SpiBusError: If the bus cannot be opened (device not found, permission
+                denied, spidev not installed). The bus is left closed; call
+                open() again after resolving the underlying issue.
         """
         # PLAN-19 FIX: Prevent resource leak from multiple open() without close().
         if self._spidev is not None:
@@ -194,36 +202,66 @@ class RealSpiBus:
         # checked the wrong (default) bus/device and could pass or fail incorrectly.
         self._verify_patch_active()
         # Note: spidev is a real python library; do not assume otherwise
-        import spidev
+        try:
+            import spidev
+        except ImportError as err:
+            # PLAN-26 FIX (Findings 418, 456, 474): Wrap ImportError in SpiBusError
+            # for consistent error handling with xfer2() and close().
+            # Cross-reference: code_review-25.3.json findings 418, 456, 474.
+            raise SpiBusError(
+                f"SPI bus {self.bus_number}.{self.device_number} open failed: "
+                f"spidev module not available: {err}. Bus is closed."
+            ) from err
 
         spidev_instance = spidev.SpiDev()
-        spidev_instance.open(self.bus_number, self.device_number)
+        try:
+            spidev_instance.open(self.bus_number, self.device_number)
+        except OSError as err:
+            # PLAN-26 FIX (Findings 418, 456): Wrap OSError in SpiBusError for
+            # consistent error handling. Common causes: device not found (ENODEV),
+            # permission denied (EACCES), bus already in use (EBUSY).
+            # Cross-reference: code_review-25.3.json findings 418, 456.
+            raise SpiBusError(
+                f"SPI bus {self.bus_number}.{self.device_number} open failed: "
+                f"{err}. Bus is closed; call open() after resolving the issue."
+            ) from err
         self._spidev = spidev_instance  # Only assign on success — guarantees _spidev is None until fully opened
 
     # PLAN-22 FIX (Item 4): close() now uses try/finally.
     # Before: If spidev.close() raised, _spidev was not set to None, leaving
     # bus in inconsistent state (OS handle closed but Python ref held). Next open()
     # would fail. Now _spidev=None is guaranteed even on exception.
+    #
+    # PLAN-26 FIX (Finding 484): close() failure left _spidev set, so open() would
+    # raise "already open" even though close() had already been attempted. Now we
+    # always set _spidev = None in a finally block so the bus can be reopened.
+    # The original SpiBusError is still raised so callers know the close failed.
     def close(self) -> None:
         """Close the SPI bus.
 
         On success, _spidev is set to None. If spidev.close() raises, the bus is
-        left open (handle preserved) and SpiBusError is raised chained to the
-        failure so callers can retry against the same handle.
+        left in an indeterminate state; _spidev is set to None to allow reopening,
+        and SpiBusError is raised chained to the failure so callers are informed.
         """
         if self._spidev is not None:
+            close_err: Exception | None = None
             try:
                 self._spidev.close()
             except Exception as err:
+                close_err = err
                 logger.error(
-                    "Failed to close SPI bus %d.%d: %s. Handle preserved for retry.",
+                    "Failed to close SPI bus %d.%d: %s. Handle reference cleared to allow reopen.",
                     self.bus_number, self.device_number, err
                 )
+            finally:
+                # PLAN-26 FIX (Finding 484): Always clear _spidev so open() can succeed
+                # after a failed close. The OS handle may be closed or leaked, but we
+                # can't keep the Python reference if close() failed.
+                self._spidev = None
+            if close_err is not None:
                 raise SpiBusError(
-                    f"Failed to close SPI bus {self.bus_number}.{self.device_number}: {err}"
-                ) from err
-            else:
-                self._spidev = None  # Only null on successful close — state machine: _spidev becomes None only after close succeeds
+                    f"Failed to close SPI bus {self.bus_number}.{self.device_number}: {close_err}"
+                ) from close_err
 
     async def xfer2(self, data: list[int] | bytearray) -> list[int]:
         """Transfer data through the SPI bus.
@@ -281,11 +319,23 @@ class RealSpiBus:
                     "SPI xfer2 timeout on bus %d (%.1fs). Closing bus; caller must reopen.",
                     self.bus_number, self._xfer_timeout,
                 )
-                self.close()  # Ensure bus is closed; try/finally in close() guarantees _spidev=None
-                raise SpiBusError(
+                # PLAN-26 FIX (Findings 408, 446, 494): close() can raise SpiBusError (e.g., if
+                # spidev.close() fails). If we let that propagate, the original TimeoutError is
+                # lost. Catch close() failure, log it, then raise the timeout error with the
+                # close failure as __context__ so both are visible to debuggers.
+                # Cross-reference: code_review-25.3.json findings 408, 446, 494.
+                try:
+                    self.close()
+                except SpiBusError as close_err:
+                    logger.error(
+                        "Failed to close SPI bus %d.%d after timeout: %s",
+                        self.bus_number, self.device_number, close_err
+                    )
+                timeout_error = SpiBusError(
                     f"SPI xfer2 timeout on bus {self.bus_number} after {self._xfer_timeout}s. "
                     f"Bus is now closed. Call bus.open() before retrying."
-                ) from err  # Preserve original traceback as __cause__ — anti-regression: from None drops the TimeoutError from __cause__, hiding the real hang source; from err keeps it on the chain so debuggers see it
+                )
+                raise timeout_error from err
 
     # PLAN-20: Restore safe default (Plan-14 regression fix). Factory contract:
     # create() returns unopened bus; properties readable before open(). Return 0/False

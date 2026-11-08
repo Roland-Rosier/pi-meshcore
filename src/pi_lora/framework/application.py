@@ -70,6 +70,10 @@ class Application:
         self._scheduler_started: bool = False
         self._started: bool = False
         self._lifecycle_lock: asyncio.Lock = asyncio.Lock()
+        # PLAN-26 FIX (Findings 744, 754): Lock for config cache to prevent race
+        # between _load_config() and reload_config() when called concurrently with
+        # different config_path values.
+        self._config_lock: asyncio.Lock = asyncio.Lock()
 
     async def start(self, assembly_name: str = "default") -> None:
         """Initialize the application: load modules, register scheduler, start loops.
@@ -133,11 +137,19 @@ class Application:
             # These shutdown signals bypass `except Exception` and would skip cleanup,
             # leaking SPI handles, scheduler tasks, and module registrations.
             # Run cleanup then re-raise verbatim to preserve Ctrl+C / sys.exit semantics.
+            #
+            # PLAN-26 FIX (Findings 645, 684): Catch BaseException (not just Exception)
+            # from cleanup, because a second Ctrl+C during cleanup raises KeyboardInterrupt
+            # (a BaseException). If cleanup is interrupted by another shutdown signal,
+            # re-raise the ORIGINAL shutdown signal to preserve semantics.
             except BaseException as exc:  # KeyboardInterrupt, SystemExit
                 exc_to_raise = exc
                 try:
                     await self._cleanup_partial_start()
-                except Exception as cleanup_exc:
+                except BaseException as cleanup_exc:
+                    # If cleanup is interrupted by another shutdown signal, re-raise
+                    # the original shutdown signal with the cleanup interruption as __cause__.
+                    # If cleanup raises a regular Exception, chain it with the original.
                     raise exc from cleanup_exc
                 raise exc
             # NR-6 FIX: cleanup runs INSIDE the lock so it is mutually exclusive
@@ -440,18 +452,22 @@ class Application:
         Returns:
             The loaded Rfm9xSx127xConfig instance.
         """
-        if config_path is not None:
-            config = await get_preloaded_config(config_path=config_path)
-            self._config_path = config_path
+        # PLAN-26 FIX (Findings 744, 754): Protect config cache with lock to prevent
+        # race between concurrent _load_config/reload_config calls with different
+        # config_path values.
+        async with self._config_lock:
+            if config_path is not None:
+                config = await get_preloaded_config(config_path=config_path)
+                self._config_path = config_path
+                self._config = config
+                return config
+
+            if self._config is not None:
+                return self._config
+
+            config = await get_preloaded_config()
             self._config = config
             return config
-
-        if self._config is not None:
-            return self._config
-
-        config = await get_preloaded_config()
-        self._config = config
-        return config
 
     async def reload_config(self, config_path: Path | None = None) -> "Rfm9xSx127xConfig":
         """Force reload configuration.
@@ -462,10 +478,14 @@ class Application:
         Returns:
             The reloaded Rfm9xSx127xConfig instance.
         """
-        config = await get_preloaded_config(force_reload=True, config_path=config_path)
-        self._config_path = config_path
-        self._config = config
-        return config
+        # PLAN-26 FIX (Findings 744, 754): Protect config cache with lock to prevent
+        # race between concurrent _load_config/reload_config calls with different
+        # config_path values.
+        async with self._config_lock:
+            config = await get_preloaded_config(force_reload=True, config_path=config_path)
+            self._config_path = config_path
+            self._config = config
+            return config
 
     async def list_assemblies(self, verbose: bool = False, config_path: str | Path | None = None) -> list[dict[str, Any]]:
         """Return list of available assemblies.
