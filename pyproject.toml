@@ -19,6 +19,15 @@ requires = ["uv_build>=0.11.25,<0.12"]
 build-backend = "uv_build"
 
 [tool.uv.build-backend]
+# CR-3.4 / Finding 542-549 Anti-Regression guard: this package MUST remain
+# declared under the single import path "pi_lora" only. Never add "src.pi_lora"
+# as a module-name, package, or find_packages() entry. A second importable
+# top-level package name ("src.pi_lora") would create a second module registry
+# for src/pi_lora/drivers/spi/locks.py, silently splitting _bus_locks = {}
+# across two import paths (pi_lora.drivers.spi.locks vs src.pi_lora.drivers.spi.locks)
+# and triggering the dual-import race that the lazy _verify_single_registry()
+# safety net is meant to catch. "src" is a repo-layout directory only; it is
+# NOT a declared package and must never be.
 module-name = "pi_lora"
 package-data = { "pi_lora.drivers" = ["configs/*"] }
 

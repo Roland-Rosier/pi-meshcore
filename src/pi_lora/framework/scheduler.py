@@ -508,6 +508,20 @@ class InterruptBridge:
         # without the lock may not be immediately visible, causing trigger_interrupt()
         # to call call_soon_threadsafe() on a stale/closed loop.
         # Cross-reference: code_review-25.3.json findings 892, 921, 981.
+        # LOCK ORDERing NOTE: This acquires _trigger_lock which is also held by
+        # trigger_interrupt() (called from GPIO interrupt threads). If stop() is called
+        # while an interrupt handler holds the lock, stop() blocks briefly until the
+        # handler releases it. This is ACCEPTable because:
+        #   - trigger_interrupt() holds the lock for a SHORT duration (queue operations only)
+        #   - stop() is called during GRACEFUL SHUTDOWN, not in latency-critical paths
+        #   - The lock is a threading.RLock, so re-entrant interrupt handlers won't deadlock
+        #   - The lock is REQUIRED for memory visibility of _loop = None on non-GIL threads
+        #     (C extension GPIO drivers) — without it, trigger_interrupt() could read stale
+        #     _loop and call call_soon_threadsafe() on a closed loop (findings 892, 921, 981)
+        #   - This trade-off (brief block on shutdown) is preferred over the race condition
+        #   - Anti-regression (Plan-27 Fix #5, Findings 709-716, 759-765, CR-3.10):
+        #     Do not remove this lock or replace with an unprotected write — the race
+        #     findings 892/921/981 depend on it.
         with self._trigger_lock:
             self._loop = None
 

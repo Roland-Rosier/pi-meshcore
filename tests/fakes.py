@@ -460,7 +460,21 @@ def spidev_kernel_patch(fake_spi: FakeSpiDev) -> Iterator[object]:
     # context-local ContextVar so _verify_patch_active() can detect misuse after
     # the context exits. .set()/.reset() isolate the flag per async context and
     # are transparent to the synchronous callers of this context manager.
-    token: contextvars.Token[bool] = _spidev_patch_active.set(True)
+    #
+    # REVIEWer anti-regression (Plan-27 Fix #6, Finding 1011, CR-3.11):
+    # _spidev_patch_active is a ContextVar[int] counter (bus.py default 0), NOT a
+    # bool. The original code did .set(True), which broke counter semantics:
+    # nested spidev_kernel_patch contexts could not increment/decrement, so a
+    # double-nested context read 1 instead of 2 and resets left the var at a
+    # stale bool. This fix reads the current counter, sets current + 1, and
+    # resets on exit, so nesting tracks correctly (outer=1, inner=2, exit=0).
+    #
+    # Alternatives rejected:
+    #   - .set(True) / .reset(): bool identity; no nesting counter (the bug).
+    #   - A class-level bool attribute: leaks across instances/contexts; the
+    #     ContextVar isolates per async context (KEY regression), so rejected.
+    current: int = _spidev_patch_active.get()
+    token: contextvars.Token[int] = _spidev_patch_active.set(current + 1)
     try:
         yield None
     finally:

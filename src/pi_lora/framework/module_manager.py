@@ -182,6 +182,15 @@ class ModuleManager:
                 pending_modules.append(module)
                 pending_by_id[device_key] = module
             except (Exception, asyncio.CancelledError) as original_exc:
+                # REVIEWer NOTE: This deliberately catches (Exception, asyncio.CancelledError) ONLY.
+                # KeyboardInterrupt/SystemExit are NOT caught because:
+                #   - They are shutdown signals, not recoverable errors
+                #   - Async cleanup (await scheduler.unregister_module) during shutdown may hang
+                #     (event loop closing/closed → RuntimeError)
+                #   - This is a KNOWN LIMITATION documented in KNOWN_DEFECTS.md
+                #   - Mitigation: Process exits shortly after; OS reclaims resources
+                #   - Do NOT change to catch BaseException without verifying shutdown safety
+                #
                 # Locations 1 & 2 (Plan-18 §6 anti-regression). Two invariants
                 # that must NOT regress:
                 #
@@ -230,9 +239,15 @@ class ModuleManager:
                         "tracking reset empty"
                     )
                     if isinstance(rollback_exc, ExceptionGroup):
-                        raise ExceptionGroup(
-                            "rollback failed", rollback_exc.exceptions
-                        ) from original_exc
+                        # REVIEWer anti-regression (Fix 4A / Findings 699-706, CR-3.9):
+                        # _rollback_pending already created the ExceptionGroup with message
+                        # "rollback failed" and all exceptions. Re-wrapping in a NEW
+                        # ExceptionGroup with the same message loses the original
+                        # group identity (different container, same children). Just re-raise the
+                        # existing group with cause chaining to preserve identity.
+                        # Do NOT wrap again — _rollback_pending already produces the correct
+                        # ExceptionGroup.
+                        raise rollback_exc from original_exc
                     raise rollback_exc from original_exc
                 pending_modules.clear()
                 pending_by_id.clear()

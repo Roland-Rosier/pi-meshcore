@@ -138,8 +138,25 @@ class RealSpiBus:
         # Why the fix prevents regression: any non-positive value is rejected at
         # construction with a ValueError, guaranteeing _xfer_timeout is always > 0
         # before it reaches asyncio.wait_for.
-        if self._xfer_timeout <= 0:
-            raise ValueError(f"xfer_timeout must be positive, got {xfer_timeout}")
+        #
+        # PLAN-27 FIX #2 (Finding 473-479, CR-3.2): xfer_timeout is declared as
+        # ``float`` but callers may pass ``None`` (e.g. a defaulted/optional value
+        # that was not substituted). ``None <= 0`` raises ``TypeError`` in Python
+        # 3, not ``ValueError``, so the original guard silently swallowed a None
+        # and later passed None to asyncio.wait_for (undefined timeout budget).
+        # The fix rejects None explicitly BEFORE the numeric comparison so the
+        # raised error is always the documented ValueError.
+        # Why the fix works: the short-circuit ``is None`` check catches None
+        # first; only a concrete number reaches ``<= 0``. None is not a valid
+        # timeout because asyncio.wait_for needs a concrete upper bound in seconds.
+        # Alternative rejected: relying on asyncio.wait_for to surface the problem
+        # is unsafe — it would raise TypeError at the call site instead of the
+        # ValueError at construction, and the timeout budget would be unknown.
+        if self._xfer_timeout is None or self._xfer_timeout <= 0:
+            raise ValueError(
+                f"xfer_timeout must be positive; "
+                f"got {xfer_timeout!r} (None is not a valid timeout)"
+            )
         # spidev.SpiDev has no stubs; use Any to suppress attr-defined errors.
         self._spidev: Any | None = None
         self.bus_number: int = bus_number
@@ -300,6 +317,35 @@ class RealSpiBus:
         # accepts a bytearray. This conversion to list[int] is therefore mandatory.
         if isinstance(data, bytearray):
             data = list(data)
+
+        # PLAN-27 FIX #2 (Findings 482-489, 511-519, CR-3.3): validate every
+        # element is a byte in 0-255 before the data reaches the spidev C
+        # extension. The public protocol accepts ``list[int] | bytearray``, but
+        # the Cython ``spidev.SpiDev.xfer2`` API reads raw bytes; an out-of-range
+        # value (e.g. 256, -1, or a non-int) is undefined behavior in the C
+        # extension and can wrap/truncate to an arbitrary byte or crash.
+        #
+        # Why the fix works: this loop enforces the byte range contract in pure
+        # Python at the boundary, so invalid data is rejected with a clear
+        # ValueError (including the offending index) before it ever reaches the
+        # unsafe C call. Placed AFTER the bytearray->list conversion (so mixed
+        # inputs are already homogeneous) and BEFORE the timeout handling, so the
+        # validation cost is never paid on data that would be rejected anyway.
+        #
+        # Why alternatives are rejected:
+        #  - Relying on the C extension to validate is unsafe — its behavior for
+        #    out-of-range values is undefined by contract, so it can silently
+        #    corrupt data instead of failing loudly.
+        #  - A single ``all(0 <= b <= 255 ...)`` comprehension lacks the index in
+        #    the error message, making debugging harder; the explicit enumerate
+        #    loop reports exactly which element is invalid.
+        #  - ``bytearray(data)`` round-trip would not catch non-int elements or
+        #    negatives; the explicit per-element check is the only safe approach.
+        for i, byte in enumerate(data):
+            if not isinstance(byte, int) or byte < 0 or byte > 255:
+                raise ValueError(
+                    f"SPI xfer2 data[{i}] = {byte!r} not a valid byte (0-255)"
+                )
 
         lock = await get_bus_lock(self.bus_number)
         async with lock:

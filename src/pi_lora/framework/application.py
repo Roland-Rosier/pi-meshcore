@@ -155,18 +155,32 @@ class Application:
             # NR-6 FIX: cleanup runs INSIDE the lock so it is mutually exclusive
             # with a concurrent stop(). _cleanup_partial_start() must NOT re-acquire
             # the lock (NR-6 FIX) or asyncio's non-recursive Lock would deadlock.
+            # CR-3 FIX (Findings 562-568, 582-589, CR-3.5): The try/except that wrapped
+            # _cleanup_and_reraise_cancellation() is REMOVED. _cleanup_and_reraise_cancellation()
+            # already performs ALL exception logic itself (see its four-case handler): it
+            # re-raises original_exc verbatim when cleanup succeeds, and chains original_exc
+            # with the cleanup exception when cleanup itself raises. The old try/except was a
+            # workaround for an old bug that is now fixed in the callee.
+            #
+            # BUG (CR-3.5): the old try/except caught the exception re-raised by the callee as
+            # `cleanup_exc` and then did `raise exc_to_raise from cleanup_exc`. Because the callee
+            # already re-raised `exc_to_raise` (the SAME object), this set
+            # `exc_to_raise.__cause__ = exc_to_raise` — a self-referential __cause__ cycle.
+            # A __cause__ that points at itself is invalid and breaks exception chaining/traceback
+            # rendering. Removing the wrapper lets _cleanup_and_reraise_cancellation()'s own
+            # `raise original_exc from cleanup_exc` set __cause__ to the *cleanup* exception (a
+            # distinct object), which is the correct, acyclic chain.
+            #
+            # Alternative rejected: keeping the wrapper but catching only `Exception` — still
+            # cycles when the callee re-raises the same object. Keeping it and catching
+            # `BaseException` — same cycle. The only correct fix is to let the callee own the
+            # raise. The bare call below still returns/reports correctly: if cleanup succeeds,
+            # the callee raises original_exc; if cleanup raises, the callee raises/chains; both
+            # propagate out of start() naturally.
             if exc_to_raise is not None:
-                try:
-                    await self._cleanup_and_reraise_cancellation(
-                        self._cleanup_partial_start, exc_to_raise
-                    )
-                except Exception as cleanup_exc:
-                    # FIX-2 (Plan-24): `raise exc_to_raise from cleanup_exc` preserves the
-                    # original exception as __cause__ and the cleanup exception as __context__.
-                    # This already exits the function, so the following bare `raise exc_to_raise`
-                    # was dead/unreachable code (line 136). Removing it prevents a duplicate
-                    # raise. No second raise is needed.
-                    raise exc_to_raise from cleanup_exc
+                await self._cleanup_and_reraise_cancellation(
+                    self._cleanup_partial_start, exc_to_raise
+                )
 
     async def stop(self) -> None:
         """Gracefully stop all modules and the scheduler.
@@ -181,8 +195,29 @@ class Application:
                 return
             # Explicitly unregister each module from scheduler BEFORE stopping event loops
             # to prevent timer/idle/interrupt tasks from queuing events during shutdown.
+            # CR-3 FIX (Findings 600-608, CR-3.6): scheduler.unregister_module() raises an
+            # ExceptionGroup (Python 3.11+), NOT a single Exception. The pre-fix bare
+            # `await self.scheduler.unregister_module(module)` let that ExceptionGroup
+            # propagate out of stop(), skipping ALL subsequent cleanup (draining event loops,
+            # close_spi, scheduler.stop, state reset) for the remaining modules and the
+            # scheduler — a resource leak and a state-consistency bug.
+            #
+            # FIX: catch the ExceptionGroup and flatten its `.exceptions` into `errors` so the
+            # per-module failures are collected alongside any real Exception, then continue the
+            # cleanup loop for every module. `errors` is declared at the top of stop()
+            # (line 178: `errors: list[Exception] = []`) and is raised as an ExceptionGroup at
+            # the end of stop() — consistent with stop()'s contract.
+            #
+            # Alternative rejected: wrapping in `except Exception` only — an ExceptionGroup is
+            # NOT an Exception (it is a BaseException), so `except Exception` would NOT catch it
+            # and the ExceptionGroup would still propagate. Must catch ExceptionGroup first.
             for module in self.module_manager.get_all_modules():
-                await self.scheduler.unregister_module(module)
+                try:
+                    await self.scheduler.unregister_module(module)
+                except ExceptionGroup as eg:
+                    errors.extend(eg.exceptions)
+                except Exception as exc:
+                    errors.append(exc)
             for module in self.module_manager.get_all_modules():
                 try:
                     await module.stop_event_loop(StopMode.DRAIN)
@@ -230,11 +265,23 @@ class Application:
         """Run cleanup then re-raise the original exception (typically CancelledError).
 
         CR-3 FIX / §1.3 (Plan-17): Centralizes the correct cancellation pattern
-        used by start(), stop(), and _cleanup_partial_start():
-          - Exception: run cleanup, raise (errors already wrapped in ExceptionGroup
-            by the cleanup path).
-          - CancelledError: run cleanup, then re-raise the ORIGINAL CancelledError
-            so asyncio cancellation semantics are preserved for the caller.
+        used by start(), stop(), and _cleanup_partial_start(). The handler set covers
+        EXactly four cases (Exception ⊂ BaseException, so handler ordering is Exception-first):
+
+          Case 1 — Cleanup SUCCEEDS (no exception): the original exception that triggered
+              cleanup MUST still propagate to the caller. The pre-fix returned None here,
+              swallowing the exception; FIX re-raises original_exc verbatim (bottom of body).
+          Case 2 — Cleanup raises CancelledError: chain with original. `raise original_exc
+              from cleanup_cancelled` preserves both the original and the cleanup interruption
+              as __cause__. Valid on Python 3.13 where CancelledError is a BaseException.
+          Case 3 — Cleanup raises a regular Exception (possibly an ExceptionGroup): chain with
+              original ONLY if original_exc is a shutdown signal (a BaseException that is NOT
+              an Exception, e.g. KeyboardInterrupt/SystemExit/CancelledError); otherwise let the
+              cleanup exception propagate (original_exc stays reachable via __context__).
+          Case 4 — Cleanup raises a BaseException other than CancelledError (KeyboardInterrupt,
+              SystemExit, GeneratorExit): chain with original if original_exc is a BaseException;
+              otherwise raise verbatim. This is CR-3.7 FIX; the pre-fix code had NO handler for
+              these and swallowed them.
 
         BUG (CR-3): the pre-fix code caught CancelledError together with generic
         Exception via ``except (Exception, asyncio.CancelledError)`` and then did
@@ -301,14 +348,40 @@ class Application:
             # in Python 3.13); chaining preserves both facts without TypeError.
             raise original_exc from cleanup_cancelled
         except Exception as cleanup_exc:
-            # PLAN-25 FIX (Fix 7, Issue 24.8): cleanup may raise an Exception (possibly an
-            # ExceptionGroup). If original_exc is a shutdown signal — a BaseException that is
-            # NOT an Exception (KeyboardInterrupt, SystemExit, CancelledError) — chain it via
-            # __cause__ so the shutdown signal is preserved as the primary exception and the
-            # cleanup error becomes __cause__. Otherwise let the cleanup exception propagate
-            # (original_exc remains available via __context__).
-            # Cross-reference: code_review-24.1.json finding 24.8.
-            if original_exc is not None and isinstance(original_exc, BaseException) and not isinstance(original_exc, Exception):
+            # C-1 FIX / PLAN-25 FIX (Issue 24.8): cleanup may raise an Exception (possibly an
+            # ExceptionGroup). When original_exc is present, chain it via __cause__ so BOTH
+            # the original failure and the cleanup error are preserved — the original becomes
+            # the primary raised exception and the cleanup error becomes __cause__. This holds
+            # whether original_exc is a shutdown signal (CancelledError, KeyboardInterrupt,
+            # SystemExit) or a regular Exception (e.g. RuntimeError from start_event_loop()),
+            # so neither fact is dropped.
+            # Cross-reference: test_application.py TestCancellationSemantics
+            # test_start_exception_chaining_preserves_cause.
+            if original_exc is not None:
+                raise original_exc from cleanup_exc
+            raise
+        except BaseException as cleanup_exc:  # KeyboardInterrupt, SystemExit, GeneratorExit
+            # CR-3 FIX (Findings 610-617, CR-3.7): Missing `except BaseException` handler.
+            #
+            # BUG (CR-3.7): cleanup could raise a BaseException that is NOT an Exception and NOT
+            # a CancelledError — e.g. KeyboardInterrupt, SystemExit, or GeneratorExit (a second
+            # shutdown signal during cleanup). Because the handler set only covered
+            # `asyncio.CancelledError` and `Exception`, such a BaseException fell through ALL
+            # handlers and was swallowed: the method returned None instead of propagating the
+            # shutdown signal, silently undoing the caller's cancellation/exit semantics.
+            #
+            # FIX: add `except BaseException` AFTER `except Exception`. Exception ⊂ BaseException,
+            # so Python dispatches `Exception` subclasses to the earlier handler and only
+            # non-Exception BaseExceptions (KeyboardInterrupt, SystemExit, GeneratorExit) reach
+            # this one. If the caller passed a shutdown signal (original_exc is a BaseException),
+            # chain it via `from cleanup_exc` so the original shutdown signal is preserved as the
+            # primary exception and the cleanup interruption becomes __cause__. Otherwise raise
+            # the cleanup signal verbatim.
+            #
+            # Alternative rejected: catching BaseException BEFORE Exception — would intercept all
+            # Exceptions too, breaking the Exception handler's __cause__ logic. Must order
+            # Exception first (more specific) then BaseException (catch-all).
+            if original_exc is not None and isinstance(original_exc, BaseException):
                 raise original_exc from cleanup_exc
             raise
         # FIX-2 (Plan-24): When cleanup completes normally (no exception), the
