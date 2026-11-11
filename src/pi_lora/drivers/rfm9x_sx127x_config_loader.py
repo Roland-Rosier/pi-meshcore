@@ -16,10 +16,18 @@
 
 from __future__ import annotations
 
-import asyncio
 import importlib
 import importlib.resources
-import threading
+from pathlib import Path
+
+from ruamel.yaml import YAML
+
+from pi_lora.drivers.rfm9x_sx127x_config_model import (
+    Rfm9xSx127xConfig,
+    Rfm9xSx127xFamilyConfig,
+)
+
+from pi_lora.framework.lazy_async_lock import LazyAsyncLock
 
 # PLAN-22 FIX (Item 1): Anti-regression guard at the import site.
 # Fix rationale: the explicit `import importlib.resources` guarantees that the
@@ -30,90 +38,20 @@ import threading
 # reviewer could remove the explicit import and the `importlib.resources.files()`
 # call would fail. This explicit import protects against that regression.
 # Cross-reference: Plan-22 Section 6, Anti-Regression Documentation for Item 1.
-import types
-from pathlib import Path
-from typing import TYPE_CHECKING, Any, cast
-
-from ruamel.yaml import YAML
-
-from pi_lora.drivers.rfm9x_sx127x_config_model import (
-    Rfm9xSx127xConfig,
-    Rfm9xSx127xFamilyConfig,
-)
 
 # Default config resource path as configuration string (not magic).
 _DEFAULT_CONFIG_RESOURCE: str = "pi_lora.drivers.configs:rfm9x_sx127x_config.yaml"
 
-# GUARD LOCK: Lazy sentinel for ONE-TIME initialization guard ONLY.
+# CONFIG LOCK: LazyAsyncLock wraps aiologic.Lock with a persisted holder guard.
 # Rationale:
-# - This project uses aiologic for ALL runtime synchronization (see locks.py, scheduler.py, application.py)
-# - The guard lock is used ONLY during first call to get_preloaded_config()
-#   to serialize creation of the real aiologic.Lock (_config_lock)
-# - After initialization, the holder is NEVER used again
-# - Creating aiologic.Lock at module level would import aiologic at import time,
-#   breaking BUG-4 fix (sync CLI load_config/load_family_config must work without aiologic)
-# - H-7 (2026-11-02): asyncio.Lock.__init__ calls asyncio.get_running_loop(), which raises
-#   RuntimeError when there is no running event loop (e.g. module import in a sync context
-#   like the check-hardware CLI). A module-level asyncio.Lock() therefore breaks import.
-# - Fix: defer asyncio.Lock() creation to inside get_preloaded_config()'s async guard
-#   (lazy sentinel), so it is only ever constructed while an event loop is running.
-# - This is a deliberate, well-contained exception to the "aiologic-only" rule
-#
-# PLAN-27 FIX #1 (code_review-26.1 Finding 308, sub-findings 306-308, 317-318,
-# 336, 344-346, 374-383): One-time holder initialisation now uses a module-level
-# threading.Lock (_holder_init_lock) instead of the non-atomic list-holder
-# pattern (_init_lock_holder: list[asyncio.Lock | None] = [None]).
-#
-# BUG (root cause, Finding 308):
-# 1. The cache critical section ran OUTSIDE the holder lock: `async with _holder:`
-#    released before `async with _config_lock:` ran, leaving a sentinel race window
-#    where a second coroutine could enter the cache section before the real
-#    aiologic.Lock existed.
-# 2. Holder creation `_init_lock_holder[0] or asyncio.Lock()` was non-atomic — no
-#    threading.Lock guard — so two coroutines could both evaluate `[0] is None` and
-#    both construct an asyncio.Lock(), breaking the singleton guarantee.
-#
-# FIX (why it works):
-# - threading.Lock atomically creates the asyncio.Lock holder (mirrors locks.py's
-#   _registry_holder_init_lock), closing the non-atomic init race.
-# - ALL cache operations were moved INSIDE `async with _holder:` (i.e. inside both
-#   the threading guard and the async holder lock), so no cache read/write can
-#   observe a partially-initialised _config_lock. The sentinel still marks the slot
-#   occupied before awaiting Lock(); on failure it is reset to None (NOT leaked) so
-#   a later call can retry — a leaked sentinel would raise AttributeError on
-#   subsequent `async with _config_lock:` calls.
-#
-# Alternative approaches REJECTED:
-# - Keeping the list-holder pattern alone was non-atomic (no threading.Lock guard);
-#   it did not close the init race.
-# - Moving only the fast-path cache hit inside the lock was insufficient: the
-#   config_path branch and the default-load branch still mutated _config_cache
-#   outside the holder, leaving those mutations inside the sentinel race window.
-_holder_init_lock: threading.Lock = threading.Lock()
-
-# H-5 FIX: Sentinel placeholder for the double-checked-locking race. If
-# aiologic.Lock() internally awaits during construction, the _holder guard could
-# be released before the real lock exists, letting a second coroutine re-enter
-# `if _config_lock is None:` before the first coroutine finishes. Assigning
-# _SENTINEL to _config_lock INSIDE the guard marks the slot occupied before
-# awaiting Lock(), closing the race. On failure the sentinel is reset to None
-# (NOT leaked) so a later call can retry — a leaked sentinel would raise
-# AttributeError on subsequent `async with _config_lock:` calls.
-_SENTINEL = object()
-
+# - LazyAsyncLock handles the aiologic import internally and creates exactly
+#   ONE aiologic.Lock per instance (see framework/lazy_async_lock.py)
+# - No sentinel object → no sentinel race possible
+# - Single code path in get_preloaded_config() — no init/else branches
+# - aiologic import is deferred to the async coroutine, so the sync
+#   load_config/load_family_config paths never import aiologic at import time
+_config_lock: LazyAsyncLock = LazyAsyncLock()
 _config_cache: Rfm9xSx127xConfig | None = None
-
-if TYPE_CHECKING:
-    import aiologic
-
-    _ConfigLockType = aiologic.Lock
-    _AiologicModuleType = types.ModuleType
-else:
-    _ConfigLockType = Any
-    _AiologicModuleType = Any
-
-_config_lock: _ConfigLockType | None = None
-_aiologic_module: _AiologicModuleType | None = None
 
 
 def _resolve_default_path() -> Path:
@@ -238,82 +176,19 @@ async def get_preloaded_config(
         ``force_reload`` return the freshly loaded config.
     """
     global _config_cache
-    global _config_lock
-    global _aiologic_module
 
-    # PLAN-26 FIX (Finding 308): Fast-path cache hit REMOVED from outside the lock.
-    # The previous "benign read-only optimization" was a race condition: callers with
-    # force_reload=True or config_path provided could be inside the lock reloading while
-    # fast-path callers returned stale cached data. ALL cache reads now go through
-    # _config_lock for correctness. The double-checked locking inside the lock still
-    # avoids redundant loads under contention.
-    # Cross-reference: code_review-25.3.json finding 308, config_loader.py get_preloaded_config.
+    config_lock = await _config_lock.acquire()
 
-    # Lazy aiologic import and lock initialisation.
-    # PLAN-19 FIX: import aiologic FIRST outside the _init_lock guard (module import
-    # is thread-safe in CPython — GIL + sys.modules cache); only _config_lock
-    # creation needs the _init_lock guard to be race-free.
-    if _aiologic_module is None:
-        try:
-            import aiologic
-            _aiologic_module = aiologic
-        except ImportError as e:
-            raise ImportError(
-                "aiologic is required for config loading. Install with: pip install aiologic"
-            ) from e
-
-    # PLAN-27 FIX #1 (code_review-26.1 Finding 308, sub-findings 306-308, 317-318,
-    # 336, 344-346, 374-383): The cache critical section now runs INSIDE the holder
-    # lock. Both branches below protect every cache read/write with the async holder
-    # (init path) or the real aiologic.Lock (already-initialised path), so no caller
-    # can observe a partially-initialised _config_lock or race on _config_cache.
-    # Cross-reference: code_review-26.1 Finding 308, config_loader.py
-    # get_preloaded_config; mirrors locks.py get_bus_lock lines 240-278.
-    if _config_lock is None:
-        # Atomically create the asyncio.Lock holder using threading.Lock for the
-        # one-time initialisation (mirrors locks.py's _registry_holder_init_lock).
-        # This closes the non-atomic init race that existed with the list-holder
-        # pattern (`_init_lock_holder[0] or asyncio.Lock()`), where two coroutines
-        # could both evaluate `[0] is None` and both construct a Lock().
-        with _holder_init_lock:
-            _holder: asyncio.Lock = asyncio.Lock()
-        async with _holder:
-            if _config_lock is None:  # Double-check inside holder
-                _config_lock = cast(_ConfigLockType, _SENTINEL)  # Placeholder — prevents race if Lock() awaits
-                try:
-                    _config_lock = _aiologic_module.Lock()
-                except Exception:
-                    _config_lock = None  # Reset on failure — don't leak sentinel
-                    raise
-
-            # Cache operations now INSIDE both the threading guard and the async
-            # holder lock (PLAN-27 FIX #1). This closes the sentinel race window
-            # that previously existed because these reads/writes ran outside
-            # `async with _holder:`.
-            if _config_cache is not None and not force_reload and config_path is None:
-                return _config_cache
-
-            if config_path is not None:
-                config = load_config(config_path=config_path)
-                if force_reload:
-                    _config_cache = config  # Update cache when explicitly requested
-                return config
-
-            _config_cache = load_config()
+    # SINGLE CODE PATH — no init/else branches, no sentinel race possible
+    async with config_lock:
+        if _config_cache is not None and not force_reload and config_path is None:
             return _config_cache
-    else:
-        # Already initialised — protect ALL cache mutations with the real lock.
-        # (PLAN-27 FIX #1: these reads/writes were previously outside the holder
-        # lock in the single shared `async with _config_lock:` block.)
-        async with _config_lock:
-            if _config_cache is not None and not force_reload and config_path is None:
-                return _config_cache
 
-            if config_path is not None:
-                config = load_config(config_path=config_path)
-                if force_reload:
-                    _config_cache = config  # Update cache when explicitly requested
-                return config
+        if config_path is not None:
+            config = load_config(config_path=config_path)
+            if force_reload:
+                _config_cache = config
+            return config
 
-            _config_cache = load_config()
-            return _config_cache
+        _config_cache = load_config()
+        return _config_cache

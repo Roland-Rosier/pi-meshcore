@@ -435,6 +435,8 @@ class Application:
         for module in self.module_manager.get_all_modules():
             try:
                 await self.scheduler.unregister_module(module)
+            except ExceptionGroup as eg:
+                errors.extend(eg.exceptions)
             except Exception as exc:
                 logger.exception(
                     "scheduler.unregister_module failed for SPI device=%s CE=%s",

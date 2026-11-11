@@ -17,6 +17,7 @@ from __future__ import annotations
 import asyncio
 import contextvars
 import logging
+import math
 from typing import Any, Protocol
 
 from .locks import get_bus_lock
@@ -156,6 +157,11 @@ class RealSpiBus:
             raise ValueError(
                 f"xfer_timeout must be positive; "
                 f"got {xfer_timeout!r} (None is not a valid timeout)"
+            )
+        # NEW: Reject infinity, NaN, and excessively large timeouts
+        if not math.isfinite(self._xfer_timeout) or self._xfer_timeout > 3600:
+            raise ValueError(
+                f"xfer_timeout must be finite and <= 3600s; got {self._xfer_timeout!r}"
             )
         # spidev.SpiDev has no stubs; use Any to suppress attr-defined errors.
         self._spidev: Any | None = None
