@@ -14,54 +14,71 @@
 
 """Concurrency tests for LazyAsyncLock — verifies race-free initialization."""
 
+from __future__ import annotations
+
 import asyncio
+
 from pi_lora.framework.lazy_async_lock import LazyAsyncLock
 
 
 def test_single_initialization_under_concurrency() -> None:
     """Verify only ONE aiologic.Lock created under 100 concurrent callers."""
 
-    async def _acquire_and_record() -> object:
-        acquired = await lock.acquire()
-        created.add(id(acquired))
-        return acquired
+    async def _coro() -> set[int]:
+        lock = LazyAsyncLock()
+        created: set[int] = set()
 
-    lock = LazyAsyncLock()
-    created: set[int] = set()
-    asyncio.run(asyncio.gather(*[_acquire_and_record() for _ in range(100)]))
-    assert len(created) == 1, f"Expected 1 lock, got {len(created)}"
+        async def _acquire_and_record() -> object:
+            acquired = await lock.acquire()
+            created.add(id(acquired))
+            return acquired
+
+        await asyncio.gather(*[_acquire_and_record() for _ in range(100)])
+        assert len(created) == 1, f"Expected 1 lock, got {len(created)}"
+        return created
+
+    asyncio.run(_coro())
 
 
 def test_holder_persisted() -> None:
     """Verify holder lock is reused across calls."""
 
-    async def _run() -> None:
+    async def _coro() -> None:
+        lock = LazyAsyncLock()
         await lock.acquire()
         h1 = lock._holder
         await lock.acquire()
         h2 = lock._holder
         assert h1 is h2, "Holder not persisted"
 
-    lock = LazyAsyncLock()
-    asyncio.run(_run())
+    asyncio.run(_coro())
 
 
 def test_no_sentinel_race() -> None:
     """Verify no AttributeError on concurrent init + else-branch access."""
 
-    async def _mixed_access() -> object:
-        return await lock.acquire()
+    async def _coro() -> None:
+        lock = LazyAsyncLock()
 
-    lock = LazyAsyncLock()
-    asyncio.run(asyncio.gather(*[_mixed_access() for _ in range(200)]))
+        async def _mixed_access() -> object:
+            return await lock.acquire()
+
+        await asyncio.gather(*[_mixed_access() for _ in range(200)])
+
+    asyncio.run(_coro())
 
 
 def test_stress_concurrent_access() -> None:
     """Stress test with many concurrent operations."""
 
-    async def _work() -> None:
-        async with await lock.acquire():
-            await asyncio.sleep(0.001)
+    async def _coro() -> None:
+        lock = LazyAsyncLock()
 
-    lock = LazyAsyncLock()
-    asyncio.run(asyncio.gather(*[_work() for _ in range(500)]))
+        async def _work() -> None:
+            acquired = await lock.acquire()
+            async with acquired:
+                await asyncio.sleep(0.001)
+
+        await asyncio.gather(*[_work() for _ in range(500)])
+
+    asyncio.run(_coro())

@@ -1,63 +1,51 @@
 rules:
-  # 1. Detect old sentinel pattern
+  # 1. Detect old sentinel pattern (deprecated in Plan-28)
   - id: sentinel-pattern-deprecated
     languages:
       - python
-    pattern-either:
+    severity: ERROR
+    message: "Sentinel (_SENTINEL) pattern deprecated — use LazyAsyncLock instead"
+    patterns:
       - pattern: _SENTINEL = object()
-      - pattern: $LOCK = _SENTINEL
-    message: "Sentinel pattern deprecated — use LazyAsyncLock instead"
-    severity: ERROR
 
-  # 2. Detect new asyncio.Lock() inside holder (holder persistence bug)
-  - id: holder-not-persisted
+  # 2. Detect lock read in an else-branch outside the guard (sentinel race risk)
+  - id: else-branch-outside-guard
     languages:
       - python
-    pattern: |
-      with $GUARD:
-          $HOLDER: asyncio.Lock = asyncio.Lock()
-    message: "New holder created each call — LazyAsyncLock persists holder"
     severity: ERROR
-
-  # 3. Detect double-checked locking without holder protecting else-branch
-  # Uses pattern-either with explicit init-block variants (semgrep doesn't support '...' wildcards)
-  - id: else-branch-unprotected
-    languages:
-      - python
-    pattern-either:
-      - pattern: |
-          if $LOCK is None:
-            async with $HOLDER:
+    message: "Else-branch reads the lock outside the guard — sentinel race risk. Use LazyAsyncLock."
+    patterns:
+      - pattern-either:
+          - pattern: |
               if $LOCK is None:
-                $LOCK = $Y.Lock()
-            else:
-              async with $LOCK:
-                $BODY
-      - pattern: |
-          if $LOCK is None:
-            with $GUARD:
+                  $LOCK = $Y.Lock()
+              else:
+                  ...
+      - pattern-not-inside: |
+          with $GUARD:
+              ...
               $LOCK = $Y.Lock()
-            else:
-              async with $LOCK:
-                $BODY
-    message: "Else branch outside holder — sentinel race risk. Use LazyAsyncLock."
-    severity: ERROR
+      - pattern-not-inside: |
+          async with $GUARD:
+              ...
+              $LOCK = $Y.Lock()
 
-  # 4. Detect manual double-checked locking (should use LazyAsyncLock)
+  # 3. Detect manual double-checked locking (should use LazyAsyncLock)
   - id: manual-double-checked-locking
     languages:
       - python
-    pattern-either:
-      - pattern: |
-          if $LOCK is None:
-            async with $HOLDER:
-              if $LOCK is None:
-                $LOCK = $Y.Lock()
-      - pattern: |
-          with $INIT_LOCK:
-            $HOLDER = asyncio.Lock()
-          async with $HOLDER:
-            if $LOCK is None:
-              $LOCK = $Y.Lock()
-    message: "Manual double-checked locking — use LazyAsyncLock instead"
     severity: ERROR
+    message: "Manual double-checked locking — use LazyAsyncLock instead"
+    patterns:
+      - pattern-either:
+          - pattern: |
+              if $LOCK is None:
+                  $LOCK = $Y.Lock()
+      - pattern-not-inside: |
+          with $GUARD:
+              ...
+              $LOCK = $Y.Lock()
+      - pattern-not-inside: |
+          async with $GUARD:
+              ...
+              $LOCK = $Y.Lock()

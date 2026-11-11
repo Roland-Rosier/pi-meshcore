@@ -46,8 +46,7 @@ async def test_get_bus_lock_with_aiologic_present() -> None:
     # Real import of aiologic (NOT monkeypatched None) in this test.
     import aiologic
 
-    from pi_lora.drivers.spi.locks import _GuardedLock, get_bus_lock
+    from pi_lora.drivers.spi.locks import get_bus_lock
     lock = await get_bus_lock(0)
-    # get_bus_lock now returns a _GuardedLock wrapper around an aiologic.Lock.
-    assert isinstance(lock, _GuardedLock)
-    assert isinstance(lock._lock, aiologic.Lock)
+    # get_bus_lock now returns a raw aiologic.Lock (no _GuardedLock wrapper).
+    assert isinstance(lock, aiologic.Lock)

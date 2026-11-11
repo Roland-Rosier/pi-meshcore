@@ -12,7 +12,7 @@
 # see the License for the specific language governing permissions and
 # limitations under the License.
 
-"""Concurrency regression test for the config_loader asyncio.Lock guard (NR-1)."""
+"""Concurrency regression test for the config_loader LazyAsyncLock guard (NR-1)."""
 
 import asyncio
 from unittest.mock import patch
@@ -29,23 +29,19 @@ async def test_get_preloaded_config_concurrent() -> None:
     ``aiologic.Lock`` (double-checked locking) and every caller must receive the
     same cached instance.
     """
+    import aiologic
+
     import pi_lora.drivers.rfm9x_sx127x_config_loader as loader
 
-    # Reset module-level singletons so the test is deterministic.
     loader._config_cache = None
-    loader._config_lock = None
-    loader._init_lock = asyncio.Lock()
+    loader._config_lock._lock = None  # force a fresh aiologic.Lock creation
     counter = {"locks": 0}
-    real_lock_cls: type | None = None
+    real_lock_cls: type = aiologic.Lock
 
     def _counting_lock() -> object:
         counter["locks"] += 1
-        assert real_lock_cls is not None
         return real_lock_cls()
 
-    import aiologic
-
-    real_lock_cls = aiologic.Lock
     with patch.object(aiologic, "Lock", _counting_lock):
 
         async def _caller() -> object:

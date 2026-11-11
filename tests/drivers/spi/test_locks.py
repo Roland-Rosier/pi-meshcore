@@ -19,6 +19,7 @@ import concurrent.futures
 import inspect
 import types
 
+import aiologic
 import pytest
 
 from pi_lora.drivers.spi.locks import SpiLock, get_bus_lock
@@ -226,10 +227,10 @@ class TestLockProtocolSignatures:
         assert lock.locked() is False
 
     def test_enter_requires_async_acquisition(self) -> None:
-        """Sync ``with lock`` is guarded: it requires ``__aenter__`` first."""
+        """The returned lock is a raw aiologic.Lock (no _GuardedLock wrapper)."""
         lock = asyncio.new_event_loop().run_until_complete(get_bus_lock(2))
-        with pytest.raises(RuntimeError, match="Sync context manager not supported on _GuardedLock"), lock:
-            pass
+        assert isinstance(lock, aiologic.Lock)
+        assert type(lock).__name__ != "_GuardedLock"
 
     @pytest.mark.asyncio
     async def test_aenter_returns_self(self) -> None:

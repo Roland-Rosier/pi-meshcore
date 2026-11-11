@@ -96,8 +96,6 @@ async def test_config_loader_force_reload_updates_cache() -> None:
 async def test_config_loader_concurrent_import_race() -> None:
     """100 concurrent default loads share one cached object (singleton)."""
     _loader._config_cache = None
-    _loader._config_lock = None
-    _loader._aiologic_module = None
 
     results = await asyncio.gather(
         *(_loader.get_preloaded_config() for _ in range(100))
@@ -108,7 +106,6 @@ async def test_config_loader_concurrent_import_race() -> None:
         assert result is results[0]
 
     assert _is_present(_loader._config_lock)
-    assert _is_present(_loader._aiologic_module)
 
 
 @pytest.mark.asyncio
@@ -116,20 +113,19 @@ async def test_config_loader_single_shared_lock_guard() -> None:
     """100 concurrent loads fabricate exactly ONE real lock (Item 7).
 
     The module-level ``threading.Lock`` guard plus the double-checked lock inside
-    the async holder serialises the one-time real ``aiologic.Lock`` creation so,
-    even under a 100-way race, exactly one real ``_config_lock`` is fabricated and
-    the cached config remains a singleton.
+    the async holder serialises the one-time ``aiologic.Lock`` creation so, even
+    under a 100-way race, exactly one real lock is fabricated and the cached
+    config remains a singleton.
     """
-    import aiologic  # noqa: F401
+    import aiologic
 
-    _loader._aiologic_module = aiologic
     _loader._config_cache = None
-    _loader._config_lock = None
+    _loader._config_lock._lock = None  # force a fresh aiologic.Lock creation
 
     _lock_creations: list[int] = []
-    _real_lock_cls: type = asyncio.Lock
+    _real_lock_cls: type = aiologic.Lock
 
-    def _counting_lock() -> asyncio.Lock:
+    def _counting_lock() -> object:
         _lock_creations.append(1)
         return _real_lock_cls()
 
@@ -149,7 +145,6 @@ async def test_config_loader_single_shared_lock_guard() -> None:
         assert _loader._config_lock is not None
     finally:
         aiologic.Lock = _original_lock_cls  # type: ignore[assignment]
-        _loader._config_lock = None
 
 
 @pytest.mark.asyncio

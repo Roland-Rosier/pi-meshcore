@@ -288,48 +288,31 @@ class TestBug4AiologicLazyImport:
         assert single is results[0]
 
 
-class TestConfigLoaderImportRetry:
-    """H-8 / Plan-15: import failure is separated from lock initialisation.
+class TestConfigLoaderCache:
+    """Plan-28: ``get_preloaded_config`` populates the module-level cache.
 
-    The double-checked locking imports ``aiologic`` FIRST outside the guard so
-    an ``ImportError`` cannot leave ``_config_lock`` uninitialised and cause a
-    re-import on the next call. The module is cached on success and the import
-    guard retries cleanly once ``aiologic`` is available again.
+    ``LazyAsyncLock`` handles the ``aiologic`` import internally, so the old
+    import-cache/``_aiologic_module`` retry mechanism is gone. The observable
+    contract is that ``get_preloaded_config`` returns a validated config and
+    populates ``_config_cache`` for subsequent singleton reads.
     """
 
     @pytest.mark.asyncio
     async def test_normal_path_caches_module(self) -> None:
-        """``get_preloaded_config`` returns a valid config and caches aiologic."""
+        """``get_preloaded_config`` returns a valid config and populates the cache."""
         import pi_lora.drivers.rfm9x_sx127x_config_loader as loader
 
         config = await get_preloaded_config(force_reload=True)
         assert isinstance(config, Rfm9xSx127xConfig)
         assert len(config.devices) > 0
-        assert loader._aiologic_module is not None, (
-            "aiologic module must be cached after a successful run."
-        )
+        assert loader._config_cache is not None
 
     @pytest.mark.asyncio
-    async def test_import_failure_raises_and_retries(self) -> None:
-        """An ``ImportError`` during import is raised; the retry path succeeds."""
-        import sys
-
+    async def test_cache_populated_on_successful_run(self) -> None:
+        """Clearing the cache then loading repopulates it."""
         import pi_lora.drivers.rfm9x_sx127x_config_loader as loader
 
-        original = sys.modules.get("aiologic")
-        try:
-            # Force the import path by clearing the cached module and blocking
-            # the aiologic import so the guard must raise ImportError.
-            loader._aiologic_module = None
-            sys.modules["aiologic"] = None
-            with pytest.raises(ImportError):
-                await get_preloaded_config(force_reload=True)
-        finally:
-            sys.modules["aiologic"] = original
-
-        # aiologic is available again; the cached module was never populated, so
-        # the retry path must import it and return a valid config.
-        loader._aiologic_module = None
+        loader._config_cache = None
         config = await get_preloaded_config(force_reload=True)
         assert isinstance(config, Rfm9xSx127xConfig)
-        assert loader._aiologic_module is not None
+        assert loader._config_cache is not None

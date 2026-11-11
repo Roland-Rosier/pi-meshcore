@@ -26,7 +26,6 @@ from pi_lora.drivers.rfm9x_sx127x_config_model import (
     Rfm9xSx127xConfig,
     Rfm9xSx127xFamilyConfig,
 )
-
 from pi_lora.framework.lazy_async_lock import LazyAsyncLock
 
 # PLAN-22 FIX (Item 1): Anti-regression guard at the import site.
