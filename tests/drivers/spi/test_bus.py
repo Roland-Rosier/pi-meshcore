@@ -282,13 +282,14 @@ class TestRealSpiBusCloseExceptionChained:
         # _spidev should be None now (PLAN-26 FIX: Finding 484)
         assert bus._spidev is None
 
-        # open() should not raise "already open" RuntimeError since _spidev is None
-        # We can't easily test full open() success without mocking spidev, but
-        # we can verify the "already open" check passes by ensuring no RuntimeError
-        # with that message is raised. The open() will fail later with SpiBusError
-        # due to no real device, but the "already open" check is what we're testing.
-        with pytest.raises(SpiBusError) as exc_info:
-            bus.open()
+        # open() must not raise the "already open" RuntimeError (that check passed
+        # because _spidev is None). Make open() fail deterministically with OSError
+        # -> SpiBusError ("open failed"), independent of whether spidev is installed
+        # on this RPi 4, so the gate is environment-independent.
+        with patch("spidev.SpiDev") as _MockSpiDev:
+            _MockSpiDev.return_value.open.side_effect = OSError("spidev.open() failed")
+            with pytest.raises(SpiBusError) as exc_info:
+                bus.open()
 
         # Verify it's NOT the "already open" error
         assert "already open" not in str(exc_info.value).lower()

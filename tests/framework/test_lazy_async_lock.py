@@ -82,3 +82,26 @@ def test_stress_concurrent_access() -> None:
         await asyncio.gather(*[_work() for _ in range(500)])
 
     asyncio.run(_coro())
+
+
+def test_no_direct_context_manager() -> None:
+    """Verify LazyAsyncLock cannot be used directly as async context manager.
+
+    The class is designed for: await lock.acquire(); async with result:
+    Direct usage (async with lock:) fails because __aenter__/__aexit__
+    are intentionally not implemented (removed entirely).
+    """
+    import asyncio
+
+    async def _coro() -> None:
+        lock = LazyAsyncLock()
+        assert not hasattr(lock, "__aenter__"), "__aenter__ must be absent"
+        assert not hasattr(lock, "__aexit__"), "__aexit__ must be absent"
+        try:
+            async with lock:  # type: ignore[attr-defined] — should fail
+                pass
+            raise AssertionError("Expected TypeError for direct async with usage")
+        except TypeError:
+            pass  # Expected — no __aenter__/__aexit__ methods exist
+
+    asyncio.run(_coro())

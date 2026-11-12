@@ -15,13 +15,13 @@
 """
 LazyAsyncLock — Thread-safe, lazy-initialized async lock wrapper.
 
-GUARantees (verified by concurrency tests):
+Guarantees (verified by concurrency tests):
 - Exactly ONE aiologic.Lock is ever created per instance
 - Initialization is atomic (threading.Lock + double-checked locking)
 - NO sentinel object → NO sentinel race possible
 - Holder lock is persisted and reused across all callers
 - Single code path — no separate init/else branches
-- aiologic.Lock() is SYNchronous constructor (hasattr(aiologic.Lock(), 'green_release'))
+- aiologic.Lock() is a synchronous constructor (hasattr(aiologic.Lock(), 'green_release'))
 
 Anti-regression documentation:
 The old patterns (Plans 22-27) failed because:
@@ -33,13 +33,28 @@ The old patterns (Plans 22-27) failed because:
 This utility removes the sentinel entirely (aiologic.Lock() is a synchronous
 constructor, so no await is needed to create it), persists a single holder lock
 guarded by a threading.Lock, and uses one unified code path.
+
+__aenter__/__aexit__ are intentionally absent: exposing them would let callers
+use `async with lock:` directly, which would acquire the holder lock and block
+on it, preventing the underlying aiologic.Lock from being released and creating
+a latent deadlock bug. Use the explicit acquire() pattern instead.
+
+Usage:
+    lock = LazyAsyncLock()
+    aiologic_lock = await lock.acquire()
+    async with aiologic_lock:
+        # critical section
+        ...
 """
 
 from __future__ import annotations
 
 import asyncio
 import threading
-from typing import Any
+from typing import TYPE_CHECKING
+
+if TYPE_CHECKING:
+    import aiologic
 
 
 class LazyAsyncLock:
@@ -54,10 +69,10 @@ class LazyAsyncLock:
     def __init__(self) -> None:
         self._holder_init_lock: threading.Lock = threading.Lock()
         self._holder: asyncio.Lock | None = None
-        self._lock: Any = None
-        self._aiologic_module: Any = None
+        self._lock: aiologic.Lock | None = None
+        self._aiologic_module: aiologic | None = None
 
-    def _ensure_aiologic_imported(self) -> Any:
+    def _ensure_aiologic_imported(self) -> aiologic:
         if self._aiologic_module is None:
             import aiologic
             self._aiologic_module = aiologic
@@ -69,20 +84,14 @@ class LazyAsyncLock:
                 self._holder = asyncio.Lock()
             return self._holder
 
-    async def acquire(self) -> Any:
+    async def acquire(self) -> aiologic.Lock:
         holder = self._get_or_create_holder()
         async with holder:
             if self._lock is None:
-                # aiologic.Lock() is SYNchronous constructor — NO AWAIT, NO SENTINEL NEEDED
+                # aiologic.Lock() is a synchronous constructor — NO AWAIT, NO SENTINEL NEEDED
                 self._lock = self._ensure_aiologic_imported().Lock()
             return self._lock
 
-    async def __aenter__(self) -> Any:
-        return await self.acquire()
-
-    async def __aexit__(self, exc_type: object, exc_val: object, exc_tb: object) -> None:
-        # Caller's async with handles the underlying lock
-        return None
 
     def is_initialized(self) -> bool:
         return self._lock is not None

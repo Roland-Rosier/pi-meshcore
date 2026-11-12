@@ -30,7 +30,7 @@ from pathlib import Path
 from click.testing import CliRunner
 from semgrep.commands.scan import scan
 
-_CONFIG_PATH: str = ".semgrep/rules/custom/lazy-lock-guard.yaml"
+_CONFIG_PATH: str = ".semgrep/rules/custom/lazy-async-lock-guard.yaml"
 
 # Valid double-checked-locking code (CR-1 FIX). Must report ZERO findings.
 _TARGET_FILES: tuple[str, ...] = (
