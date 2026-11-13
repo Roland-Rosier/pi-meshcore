@@ -1072,6 +1072,61 @@ class TestScheduler:
         await sched.stop()
 
     @pytest.mark.asyncio
+    async def test_unregister_module_aggregates_exception_groups(self) -> None:
+        # CR-29-5 FIX: Scheduler.unregister_module() raises an ExceptionGroup at
+        # the end, so it must catch ExceptionGroup (a BaseException, NOT an
+        # Exception) from each component's unregister. An ExceptionGroup raised by
+        # a component would otherwise propagate out of the try block and skip the
+        # remaining components. Match Application.stop() (application.py:217).
+        timer_exc = ExceptionGroup("timer error", [ValueError("timer-1")])
+        idle_exc = ExceptionGroup(
+            "idle error", [KeyError("idle-1"), KeyError("idle-2")]
+        )
+        interrupt_exc = ExceptionGroup(
+            "interrupt error", [RuntimeError("interrupt-1")]
+        )
+
+        async def _timer_raise(module: MagicMock) -> None:
+            raise timer_exc
+
+        def _idle_raise(module: MagicMock, enabled: bool) -> None:
+            raise idle_exc
+
+        def _interrupt_raise(module: MagicMock) -> None:
+            raise interrupt_exc
+
+        sched = Scheduler()
+        sched.timer_scheduler.unregister_module = _timer_raise  # type: ignore[assignment]
+        sched.idle_pacer.set_idle_enabled = _idle_raise  # type: ignore[assignment]
+        sched.interrupt_bridge.unregister_module = _interrupt_raise  # type: ignore[assignment]
+
+        def _flatten(exc: BaseException) -> list[BaseException]:
+            if isinstance(exc, ExceptionGroup):
+                flattened: list[BaseException] = []
+                for sub in exc.exceptions:
+                    flattened.extend(_flatten(sub))
+                return flattened
+            return [exc]
+
+        with pytest.raises(ExceptionGroup) as exc_info:
+            await sched.unregister_module(MagicMock())
+
+        raised = exc_info.value
+        # Final ExceptionGroup must contain every contained exception from all
+        # three components, flattened.
+        contained = _flatten(raised)
+        expected = [
+            ValueError("timer-1"),
+            KeyError("idle-1"),
+            KeyError("idle-2"),
+            RuntimeError("interrupt-1"),
+        ]
+        assert len(contained) == len(expected)
+        for got, want in zip(contained, expected, strict=True):
+            assert type(got) is type(want)
+            assert got.args == want.args
+
+    @pytest.mark.asyncio
     async def test_stop_reverse_order(self) -> None:
         sched = Scheduler()
         order: list[str] = []

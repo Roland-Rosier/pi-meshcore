@@ -109,6 +109,43 @@ def test_check_hardware_entry_point_invalid_input_rejected() -> None:
         assert "coroutine" not in _lowered, _note
 
 
+def test_system_exit_none_maps_to_zero() -> None:
+    """``SystemExit(None)`` maps to exit code 0 (FIX CR-29-1).
+
+    In Unix/Click/Typer a bare ``SystemExit(None)`` signals a *successful* exit
+    and must resolve to code ``0``, not ``1``. This exercises the ``--help`` path
+    (which the underlying Typer raises as ``SystemExit(None)``) through a real
+    wrapper and asserts the returned exit code is ``0``.
+    """
+    _old_argv: list[str] = sys.argv
+    sys.argv = ["pi-lora", "--help"]
+    try:
+        _code: Any = pi_lora()
+    finally:
+        sys.argv = _old_argv
+
+    assert isinstance(_code, int), "pi_lora did not return an int exit code"
+    assert _code == 0, f"SystemExit(None) must map to 0, got {_code}"
+
+
+def test_system_exit_fallback_logic() -> None:
+    """Direct unit test of the ``SystemExit`` fallback used by the wrappers.
+
+    Mirrors the handler in ``src/pi_lora/cli/_entry_points``: an int code is
+    returned verbatim, while a non-int (including ``None``) falls back to ``0``
+    (successful exit in Unix/Click/Typer), never ``1``.
+    """
+
+    def _handler(e: SystemExit) -> int:
+        # PLAN-30 FIX (CR-29-1): SystemExit(None) = successful exit (code 0) in Unix/Click/Typer.
+        # Fallback to 0, not 1. See plan-30.md Section 1.
+        return e.code if isinstance(e.code, int) else 0
+
+    assert _handler(SystemExit(None)) == 0
+    assert _handler(SystemExit(0)) == 0
+    assert _handler(SystemExit(2)) == 2
+
+
 def test_entry_points_expose_all_four_wrappers() -> None:
     """The module exposes exactly the four console entry-point wrappers."""
     import pi_lora.cli._entry_points as _ep

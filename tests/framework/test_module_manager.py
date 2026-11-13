@@ -379,6 +379,60 @@ class TestLoadFromConfig:
         assert any("rolled back" in msg.lower() for msg in caplog.messages)
 
     @pytest.mark.asyncio
+    async def test_module_manager_rollback_catches_exceptiongroup(
+        self, caplog: pytest.LogCaptureFixture,
+    ) -> None:
+        """CR-29-3: rollback catches an ExceptionGroup raised directly by unregister_module().
+
+        ExceptionGroup is a BaseException (not Exception) in Python 3.11+, so the
+        pre-fix ``except Exception`` in ``_rollback_pending`` would let it propagate
+        unhandled. The fix catches ``ExceptionGroup`` first and flattens its
+        ``.exceptions`` into ``rollback_errors``, so the final aggregated
+        ExceptionGroup contains every contained exception.
+        """
+        mm = ModuleManager()
+        radio_configs = _make_test_radio_configs()
+        scheduler = Scheduler()
+
+        module0: object = object()
+        original_exc: BaseException = RuntimeError("Second module construction failed")
+
+        _call_count: int = 0
+
+        def _construct(*_args: object, **_kwargs: object) -> object:
+            nonlocal _call_count
+            _call_count += 1
+            if _call_count >= 2:
+                raise original_exc
+            return module0
+
+        contained: tuple[Exception, ...] = (
+            RuntimeError("unregister timer failed"),
+            RuntimeError("unregister idle failed"),
+        )
+
+        async def _fail_unregister_exceptiongroup(
+            *_args: object, **_kwargs: object,
+        ) -> None:
+            raise ExceptionGroup("unregister errors", contained)
+
+        with mock.patch(
+            "pi_lora.drivers.rfm9x_sx127x_module.Rfm9xSx127xModule",
+            side_effect=_construct,
+        ), mock.patch.object(
+            scheduler, "unregister_module", side_effect=_fail_unregister_exceptiongroup
+        ), pytest.raises(ExceptionGroup) as exc_info:
+            await mm.load_from_config(radio_configs, scheduler)
+
+        # The final ExceptionGroup aggregates both contained exceptions from the
+        # ExceptionGroup raised by unregister_module (CR-29-3).
+        assert any(str(e) == "unregister timer failed" for e in exc_info.value.exceptions)
+        assert any(str(e) == "unregister idle failed" for e in exc_info.value.exceptions)
+        assert len(mm.modules) == 0
+        assert len(mm.modules_by_id) == 0
+        assert any("rolled back" in msg.lower() for msg in caplog.messages)
+
+    @pytest.mark.asyncio
     async def test_module_manager_pending_list_no_dangling_refs(
         self, caplog: pytest.LogCaptureFixture,
     ) -> None:

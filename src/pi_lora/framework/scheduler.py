@@ -643,16 +643,34 @@ class Scheduler:
         # so that failures in one scheduler component don't mask failures in others.
         # Cross-reference: code_review-25.3.json findings 911, 941.
         errors: list[Exception] = []
+        # PLAN-30 FIX (CR-29-5): Catch ExceptionGroup from component unregister.
+        # Match Application.stop() pattern (application.py:217). ExceptionGroup is
+        # BaseException, not Exception. Defensive: components don't currently raise
+        # ExceptionGroup but may in future.
         try:
             await self.timer_scheduler.unregister_module(module)
+        except ExceptionGroup as eg:
+            errors.extend(eg.exceptions)
         except Exception as e:
             errors.append(e)
+        # PLAN-30 FIX (CR-29-5): Catch ExceptionGroup from component unregister.
+        # Match Application.stop() pattern (application.py:217). ExceptionGroup is
+        # BaseException, not Exception. Defensive: components don't currently raise
+        # ExceptionGroup but may in future.
         try:
             self.idle_pacer.set_idle_enabled(module, False)
+        except ExceptionGroup as eg:
+            errors.extend(eg.exceptions)
         except Exception as e:
             errors.append(e)
+        # PLAN-30 FIX (CR-29-5): Catch ExceptionGroup from component unregister.
+        # Match Application.stop() pattern (application.py:217). ExceptionGroup is
+        # BaseException, not Exception. Defensive: components don't currently raise
+        # ExceptionGroup but may in future.
         try:
             self.interrupt_bridge.unregister_module(module)
+        except ExceptionGroup as eg:
+            errors.extend(eg.exceptions)
         except Exception as e:
             errors.append(e)
         if errors:

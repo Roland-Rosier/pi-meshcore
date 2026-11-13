@@ -16,10 +16,18 @@
 
 import contextvars
 import sys
+import threading
 import types
 from collections.abc import Iterator
 from contextlib import contextmanager
 from unittest.mock import MagicMock
+
+# PLAN-30 FIX (CR-29-6): threading.Lock protects process-wide sys.modules from
+# concurrent async task clobbering. contextvars.ContextVar (_spidev_patch_active)
+# isolates the _spidev_patch_active COUNTER per task, but sys.modules is shared. The lock
+# serializes the critical section. threading.Lock (not aiologic.Lock) is required
+# because this is a SYNCHRONOUS @contextmanager with no await points.
+_spidev_patch_lock = threading.Lock()
 
 
 class FakeSpiDev:
@@ -453,36 +461,38 @@ def spidev_kernel_patch(fake_spi: FakeSpiDev) -> Iterator[object]:
     """
     from pi_lora.drivers.spi.bus import _spidev_patch_active
 
-    backup: object | None = sys.modules.get("spidev", None)
-    fake_module: types.SimpleNamespace = types.SimpleNamespace(SpiDev=lambda: fake_spi)
-    sys.modules["spidev"] = fake_module  # type: ignore[assignment]
-    # CR-8 FIX (R-4): mark the injected spidev kernel patch as active via a
-    # context-local ContextVar so _verify_patch_active() can detect misuse after
-    # the context exits. .set()/.reset() isolate the flag per async context and
-    # are transparent to the synchronous callers of this context manager.
-    #
-    # REVIEWer anti-regression (Plan-27 Fix #6, Finding 1011, CR-3.11):
-    # _spidev_patch_active is a ContextVar[int] counter (bus.py default 0), NOT a
-    # bool. The original code did .set(True), which broke counter semantics:
-    # nested spidev_kernel_patch contexts could not increment/decrement, so a
-    # double-nested context read 1 instead of 2 and resets left the var at a
-    # stale bool. This fix reads the current counter, sets current + 1, and
-    # resets on exit, so nesting tracks correctly (outer=1, inner=2, exit=0).
-    #
-    # Alternatives rejected:
-    #   - .set(True) / .reset(): bool identity; no nesting counter (the bug).
-    #   - A class-level bool attribute: leaks across instances/contexts; the
-    #     ContextVar isolates per async context (KEY regression), so rejected.
-    current: int = _spidev_patch_active.get()
-    token: contextvars.Token[int] = _spidev_patch_active.set(current + 1)
+    with _spidev_patch_lock:
+        backup: object | None = sys.modules.get("spidev", None)
+        fake_module: types.SimpleNamespace = types.SimpleNamespace(SpiDev=lambda: fake_spi)
+        sys.modules["spidev"] = fake_module  # type: ignore[assignment]
+        # CR-8 FIX (R-4): mark the injected spidev kernel patch as active via a
+        # context-local ContextVar so _verify_patch_active() can detect misuse after
+        # the context exits. .set()/.reset() isolate the flag per async context and
+        # are transparent to the synchronous callers of this context manager.
+        #
+        # REVIEWer anti-regression (Plan-27 Fix #6, Finding 1011, CR-3.11):
+        # _spidev_patch_active is a ContextVar[int] counter (bus.py default 0), NOT a
+        # bool. The original code did .set(True), which broke counter semantics:
+        # nested spidev_kernel_patch contexts could not increment/decrement, so a
+        # double-nested context read 1 instead of 2 and resets left the var at a
+        # stale bool. This fix reads the current counter, sets current + 1, and
+        # resets on exit, so nesting tracks correctly (outer=1, inner=2, exit=0).
+        #
+        # Alternatives rejected:
+        #   - .set(True) / .reset(): bool identity; no nesting counter (the bug).
+        #   - A class-level bool attribute: leaks across instances/contexts; the
+        #     ContextVar isolates per async context (KEY regression), so rejected.
+        current: int = _spidev_patch_active.get()
+        token: contextvars.Token[int] = _spidev_patch_active.set(current + 1)
     try:
         yield None
     finally:
         _spidev_patch_active.reset(token)
-        if backup is None:
-            sys.modules.pop("spidev", None)
-        else:
-            sys.modules["spidev"] = backup  # type: ignore[assignment]
+        with _spidev_patch_lock:
+            if backup is None:
+                sys.modules.pop("spidev", None)
+            else:
+                sys.modules["spidev"] = backup  # type: ignore[assignment]
 
 
 def verify_frequency_in_range(fake_spi: FakeSpiDev, frequency_khz: int) -> bool:

@@ -13,6 +13,8 @@
 # limitations under the License.
 
 """Tests for ``RealSpiBusFactory`` and ``MockSpiBusFactory`` behavior."""
+from unittest.mock import patch
+
 import pytest
 
 from pi_lora.drivers.spi.factory import RealSpiBusFactory, SpiBusFactory
@@ -52,13 +54,24 @@ class TestRealSpiBusFactory:
         assert _is_spi_bus(bus)
 
     def test_real_spi_bus_factory_create_stores_params(self) -> None:
-        from unittest.mock import patch
-
         factory = RealSpiBusFactory()
         bus = factory.create(bus=2, device=3)
         assert bus.bus_number == 2
         assert bus.device_number == 3
         # open() should use stored values with no args
+        with patch('spidev.SpiDev') as mock_spidev:
+            bus.open()
+            mock_spidev.return_value.open.assert_called_with(2, 3)
+
+    def test_factory_create_passes_bus_device_to_constructor(self) -> None:
+        """Verify RealSpiBusFactory.create() stores bus/device and RealSpiBus.open() uses them."""
+        # PLAN-30 FIX (CR-29-2): Verification test documenting that RealSpiBusFactory.create()
+        # stores bus/device and RealSpiBus.open() uses them (already correct; pins behavior).
+        factory = RealSpiBusFactory()
+        bus = factory.create(bus=2, device=3)
+        assert bus.bus_number == 2
+        assert bus.device_number == 3
+        # Verify open() uses stored values (mocked)
         with patch('spidev.SpiDev') as mock_spidev:
             bus.open()
             mock_spidev.return_value.open.assert_called_with(2, 3)

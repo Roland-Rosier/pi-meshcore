@@ -121,6 +121,17 @@ class CommandBus:
                 type(command).__name__,
             )
             raise exc
+        except ExceptionGroup as eg:
+            # PLAN-30 FIX (CR-29-4): ExceptionGroup is BaseException (not Exception) in Python 3.11+.
+            # Must catch before Exception to prevent uncaught propagation. Log and re-raise verbatim.
+            # PLAN-30 FIX (CR-29-4): Handler raised ExceptionGroup. Log and re-raise verbatim
+            # to preserve all contained exceptions for the caller. Matches CancelledError pattern.
+            logger.warning(
+                "Command '%s' handler raised ExceptionGroup: %r",
+                type(command).__name__,
+                eg,
+            )
+            raise
         except Exception as exc:
             # Sync and async-await exceptions are caught here uniformly so both
             # are logged and re-raised. Option A (wrap the await) was chosen

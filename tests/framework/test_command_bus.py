@@ -470,6 +470,39 @@ class TestSyncVsAsyncHandler:
             "the generic 'raised' message must not be logged for a cancelled handler"
         )
 
+    @pytest.mark.asyncio
+    async def test_command_bus_exceptiongroup_logging(self, caplog) -> None:
+        # PLAN-30 FIX (CR-29-4) regression guard: a handler that raises an
+        # ExceptionGroup (a BaseException, not Exception in Python 3.11+) must be
+        # caught by the new except ExceptionGroup branch BEFORE the generic
+        # except Exception (which would never match a BaseException), logging the
+        # "ExceptionGroup" message, then re-raised verbatim so every contained
+        # exception is preserved for the caller. Raising an ExceptionGroup directly
+        # in the awaited coroutine exercises the exact branch execute() has.
+        bus = CommandBus()
+
+        async def exceptiongroup_handler(_cmd: TestCommand) -> None:
+            raise ExceptionGroup("handler group", [ValueError("inner-a"), KeyError("inner-b")])
+
+        bus.register_handler(TestCommand, exceptiongroup_handler)
+        cmd = TestCommand(action="x")
+        with pytest.raises(ExceptionGroup) as caught:
+            await bus.execute(cmd)
+        assert [(type(e), e.args) for e in caught.value.exceptions] == [
+            (ValueError, ("inner-a",)),
+            (KeyError, ("inner-b",)),
+        ]
+        exceptiongroup_records = [
+            rec
+            for rec in caplog.records
+            if rec.levelno == logging.WARNING
+            and "ExceptionGroup" in rec.message
+            and "TestCommand" in rec.message
+        ]
+        assert exceptiongroup_records, (
+            "expected an 'ExceptionGroup' warning naming the command type"
+        )
+
 
 @dataclass(frozen=True)
 class DiamondBase:

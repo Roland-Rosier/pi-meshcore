@@ -55,9 +55,14 @@ async def _rollback_pending(
     rollback leaves modules registered in the scheduler (resource leak).
     """
     rollback_errors: list[Exception] = []
+    # PLAN-30 FIX (CR-29-3): Catch ExceptionGroup from scheduler.unregister_module()
+    # which raises ExceptionGroup (scheduler.py:659). ExceptionGroup is BaseException,
+    # not Exception. Match Application.stop() pattern (application.py:217).
     for module in reversed(pending_modules):
         try:
             await scheduler.unregister_module(module)
+        except ExceptionGroup as eg:
+            rollback_errors.extend(eg.exceptions)
         except Exception as unregister_err:
             rollback_errors.append(unregister_err)
     if rollback_errors:
@@ -226,7 +231,10 @@ class ModuleManager:
                 # still completes fully — no partial unregister leaves dangling scheduler refs.
                 try:
                     await asyncio.shield(_rollback_pending(pending_modules, scheduler))
-                except Exception as rollback_exc:
+                # PLAN-30 FIX (CR-29-3): Catch ExceptionGroup from scheduler.unregister_module()
+                # which raises ExceptionGroup (scheduler.py:659). ExceptionGroup is BaseException,
+                # not Exception. Match Application.stop() pattern (application.py:217).
+                except (Exception, ExceptionGroup) as rollback_exc:
                     # PLAN-20: when unregister failures aggregate into an ExceptionGroup,
                     # main tracking must still reset and the "rolled back" warning must
                     # still be emitted (H-12 / test_module_manager_rollback_aggregates_errors
