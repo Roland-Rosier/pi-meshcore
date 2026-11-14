@@ -22,3 +22,9 @@ app = AsyncTyper(
 app.add_typer(check_hardware_app, name="check-hardware")
 app.add_typer(config_app, name="config")
 app.add_typer(test_app, name="test")
+
+
+if __name__ == "__main__":
+    import asyncio
+
+    asyncio.run(app())

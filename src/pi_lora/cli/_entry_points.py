@@ -10,7 +10,8 @@ console script exits cleanly without leaving a coroutine un-awaited.
 
 from __future__ import annotations
 
-from typing import cast
+from collections.abc import Callable
+from typing import Any, cast
 
 from pi_lora.cli._logging import setup_logging
 
@@ -20,21 +21,25 @@ from .main import app as main_app
 from .test import app as test_app
 
 
-def pi_lora() -> int:
-    """Entry point for the ``pi-lora`` console script."""
-    # PLAN-23 FIX (Issue 6): setup_logging() moved from cli/main.py module-level
-    # (which ran on import and polluted the test environment) to entry-point-local
-    # setup here, isolating logging configuration to the actual console script run.
-    setup_logging()
-    # PLAN-23 FIX (Issue 5): async_typer.AsyncTyper raises SystemExit on CLI exits
-    # (e.g. --help, invalid args) rather than returning an int. The original
-    # `cast(int, app())` did NOT catch SystemExit, so it propagated. We keep cast
-    # to satisfy mypy --strict (app() returns Any) and add try/except SystemExit
-    # to extract the exit code instead of letting it propagate.
+def _run_app(app_callable: Callable[[], Any]) -> int:
+    """Drive a Typer app and coerce its return / SystemExit into a Click exit code.
+
+    ``app_callable`` returns ``Any`` because ``async_typer.AsyncTyper`` drives the
+    event loop internally and returns a Click exit code on success, but raises
+    ``SystemExit`` on CLI exits (e.g. ``--help``, invalid args). This helper maps
+    every observed outcome onto the canonical three-way mapping documented below:
+
+    SystemExit code mapping (per Click/Typer convention):
+        ``None``          → 0  (successful exit, e.g. ``--help``)
+        ``int`` (0, 1, 2) → that int (explicit exit code)
+        ``str``, ``typer.Exit(code="msg")`` → 1 (failure — non-int codes indicate error)
+
+    Returns the mapped exit code (0, 1, or 2) so the console script exits cleanly.
+    """
     try:
-        return cast(int, main_app())
+        return cast(int, app_callable())
     except SystemExit as e:
-        # P31-2 FIX (CR-29-1 follow-up): SystemExit code mapping per Click/Typer convention:
+        # SystemExit code mapping per Click/Typer convention:
         #   None          → 0 (successful exit, e.g., --help)
         #   int (0, 1, 2) → that int (explicit exit code)
         #   str, typer.Exit(code="msg") → 1 (failure — non-int codes indicate error)
@@ -45,6 +50,18 @@ def pi_lora() -> int:
             return e.code
         else:
             return 1  # String codes (typer.Exit(code="msg"), sys.exit("error")) indicate failure
+
+
+def pi_lora() -> int:
+    """Entry point for the ``pi-lora`` console script."""
+    # PLAN-23 FIX (Issue 6): setup_logging() moved from cli/main.py module-level
+    # (which ran on import and polluted the test environment) to entry-point-local
+    # setup here, isolating logging configuration to the actual console script run.
+    setup_logging()
+    # async_typer.AsyncTyper raises SystemExit on CLI exits (e.g. --help, invalid
+    # args) rather than returning an int; _run_app extracts the exit code instead
+    # of letting it propagate.
+    return _run_app(main_app)
 
 
 def pi_lora_config() -> int:
@@ -53,25 +70,10 @@ def pi_lora_config() -> int:
     # (which ran on import and polluted the test environment) to entry-point-local
     # setup here, isolating logging configuration to the actual console script run.
     setup_logging()
-    # PLAN-23 FIX (Issue 5): async_typer.AsyncTyper raises SystemExit on CLI exits
-    # (e.g. --help, invalid args) rather than returning an int. The original
-    # `cast(int, app())` did NOT catch SystemExit, so it propagated. We keep cast
-    # to satisfy mypy --strict (app() returns Any) and add try/except SystemExit
-    # to extract the exit code instead of letting it propagate.
-    try:
-        return cast(int, config_app())
-    except SystemExit as e:
-        # P31-2 FIX (CR-29-1 follow-up): SystemExit code mapping per Click/Typer convention:
-        #   None          → 0 (successful exit, e.g., --help)
-        #   int (0, 1, 2) → that int (explicit exit code)
-        #   str, typer.Exit(code="msg") → 1 (failure — non-int codes indicate error)
-        # See plan-31.md Section 2.
-        if e.code is None:
-            return 0
-        elif isinstance(e.code, int):
-            return e.code
-        else:
-            return 1  # String codes (typer.Exit(code="msg"), sys.exit("error")) indicate failure
+    # async_typer.AsyncTyper raises SystemExit on CLI exits (e.g. --help, invalid
+    # args) rather than returning an int; _run_app extracts the exit code instead
+    # of letting it propagate.
+    return _run_app(config_app)
 
 
 def pi_lora_test() -> int:
@@ -80,25 +82,10 @@ def pi_lora_test() -> int:
     # (which ran on import and polluted the test environment) to entry-point-local
     # setup here, isolating logging configuration to the actual console script run.
     setup_logging()
-    # PLAN-23 FIX (Issue 5): async_typer.AsyncTyper raises SystemExit on CLI exits
-    # (e.g. --help, invalid args) rather than returning an int. The original
-    # `cast(int, app())` did NOT catch SystemExit, so it propagated. We keep cast
-    # to satisfy mypy --strict (app() returns Any) and add try/except SystemExit
-    # to extract the exit code instead of letting it propagate.
-    try:
-        return cast(int, test_app())
-    except SystemExit as e:
-        # P31-2 FIX (CR-29-1 follow-up): SystemExit code mapping per Click/Typer convention:
-        #   None          → 0 (successful exit, e.g., --help)
-        #   int (0, 1, 2) → that int (explicit exit code)
-        #   str, typer.Exit(code="msg") → 1 (failure — non-int codes indicate error)
-        # See plan-31.md Section 2.
-        if e.code is None:
-            return 0
-        elif isinstance(e.code, int):
-            return e.code
-        else:
-            return 1  # String codes (typer.Exit(code="msg"), sys.exit("error")) indicate failure
+    # async_typer.AsyncTyper raises SystemExit on CLI exits (e.g. --help, invalid
+    # args) rather than returning an int; _run_app extracts the exit code instead
+    # of letting it propagate.
+    return _run_app(test_app)
 
 
 def check_hardware() -> int:
@@ -107,22 +94,7 @@ def check_hardware() -> int:
     # (which ran on import and polluted the test environment) to entry-point-local
     # setup here, isolating logging configuration to the actual console script run.
     setup_logging()
-    # PLAN-23 FIX (Issue 5): async_typer.AsyncTyper raises SystemExit on CLI exits
-    # (e.g. --help, invalid args) rather than returning an int. The original
-    # `cast(int, app())` did NOT catch SystemExit, so it propagated. We keep cast
-    # to satisfy mypy --strict (app() returns Any) and add try/except SystemExit
-    # to extract the exit code instead of letting it propagate.
-    try:
-        return cast(int, check_hardware_app())
-    except SystemExit as e:
-        # P31-2 FIX (CR-29-1 follow-up): SystemExit code mapping per Click/Typer convention:
-        #   None          → 0 (successful exit, e.g., --help)
-        #   int (0, 1, 2) → that int (explicit exit code)
-        #   str, typer.Exit(code="msg") → 1 (failure — non-int codes indicate error)
-        # See plan-31.md Section 2.
-        if e.code is None:
-            return 0
-        elif isinstance(e.code, int):
-            return e.code
-        else:
-            return 1  # String codes (typer.Exit(code="msg"), sys.exit("error")) indicate failure
+    # async_typer.AsyncTyper raises SystemExit on CLI exits (e.g. --help, invalid
+    # args) rather than returning an int; _run_app extracts the exit code instead
+    # of letting it propagate.
+    return _run_app(check_hardware_app)

@@ -32,6 +32,7 @@ from typing import Any
 import pytest
 
 from pi_lora.cli._entry_points import (
+    _run_app,
     check_hardware,
     pi_lora,
     pi_lora_config,
@@ -294,6 +295,44 @@ def test_system_exit_typer_exit_string_maps_to_one() -> None:
     _exc: SystemExit = SystemExit("msg")
     assert isinstance(_exc, SystemExit)
     assert _system_exit_handler(_exc) == 1
+
+
+def test_run_app_returns_int_on_success() -> None:
+    """``_run_app`` returns the int exit code when the app callable succeeds.
+
+    Direct unit test of the shared helper imported from ``pi_lora.cli._entry_points``.
+    The four entry-point wrappers delegate to ``_run_app``; this exercises the
+    ``return cast(int, app_callable())`` success branch with a stub that returns
+    a non-zero exit code.
+    """
+    def _app_returns_two() -> int:
+        return 2
+
+    assert _run_app(_app_returns_two) == 2
+
+
+def test_run_app_maps_system_exit_variants() -> None:
+    """``_run_app`` maps ``SystemExit`` variants via its except branch.
+
+    Direct unit test of the shared ``_run_app`` helper covering all three mapping
+    outcomes: ``SystemExit(None)`` -> 0, an explicit int -> that int, and a
+    non-int (string) -> 1. This confirms the helper the four entry points
+    (``pi_lora``, ``pi_lora_config``, ``pi_lora_test``, ``check_hardware``) all
+    delegate to.
+    """
+
+    def _raises_none() -> None:
+        raise SystemExit(None)
+
+    def _raises_two() -> None:
+        raise SystemExit(2)
+
+    def _raises_str() -> None:
+        raise SystemExit("error")
+
+    assert _run_app(_raises_none) == 0
+    assert _run_app(_raises_two) == 2
+    assert _run_app(_raises_str) == 1
 
 
 if __name__ == "__main__":

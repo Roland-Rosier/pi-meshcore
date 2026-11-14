@@ -176,6 +176,11 @@ async def get_preloaded_config(
     """
     global _config_cache
 
+    # NOT a double-lock. LazyAsyncLock.acquire() returns the underlying aiologic.Lock
+    # WITHOUT acquiring it; the actual acquisition happens here in `async with config_lock:`.
+    # This is the correct pattern from Plan 29. It replaced the buggy version that used
+    # __aenter__/__aexit__ on the holder lock, which DID deadlock by acquiring the holder.
+    # Identical pattern: src/pi_lora/drivers/spi/locks.py:113-114.
     config_lock = await _config_lock.acquire()
 
     # SINGLE CODE PATH — no init/else branches, no sentinel race possible
