@@ -1169,3 +1169,33 @@ class TestScheduler:
         assert sched.timer_scheduler._running is False
         assert sched.idle_pacer._running is False
         assert sched.interrupt_bridge._running is False
+
+    @pytest.mark.asyncio
+    async def test_interrupt_bridge_backoff_requeues_and_sleeps(self) -> None:
+        """During backoff window, interrupts are re-queued and task sleeps — none dropped."""
+        class _AlwaysFailingQueue:
+            def __init__(self, pin: int = 25) -> None:
+                self.put_count = 0
+                self._pin = pin
+            async def put(self, item: object) -> None:
+                self.put_count += 1
+                raise RuntimeError("queue full")
+            async def get(self) -> int:
+                return self._pin
+
+        module = MagicMock()
+        module.event_queue = _AlwaysFailingQueue(pin=25)
+        bridge = InterruptBridge()
+        bridge.register_interrupt(25, module)
+        await bridge.start()
+
+        for _ in range(10):
+            bridge.trigger_interrupt(25)
+
+        await asyncio.sleep(1.0)
+        await bridge.stop()
+
+        assert module.event_queue.put_count > 0
+        # Backoff engages after 5 failures; subsequent attempts are gated by sleep,
+        # so total put attempts stay well below the trigger count.
+        assert module.event_queue.put_count < 10

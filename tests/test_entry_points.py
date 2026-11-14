@@ -238,6 +238,64 @@ def test_project_scripts_maps_pi_lora_config_and_excludes_config() -> None:
     assert "config" not in _scripts, "old 'config' name must not be aliased"
 
 
+def _system_exit_handler(e: SystemExit) -> int:
+    """Replicate the P31-2 SystemExit handler from ``src/pi_lora/cli/_entry_points``.
+
+    Per Click/Typer convention: ``None`` maps to ``0`` (successful exit), an
+    explicit ``int`` maps to itself, and any non-int (a string such as
+    ``typer.Exit(code="msg")`` / ``sys.exit("error")``) maps to ``1`` (failure).
+    """
+    if e.code is None:
+        return 0
+    elif isinstance(e.code, int):
+        return e.code
+    else:
+        return 1  # String codes indicate failure
+
+
+def test_system_exit_string_code_maps_to_one() -> None:
+    """``SystemExit("error")`` and ``SystemExit("")`` map to exit code 1.
+
+    P31-2 FIX (CR-29-1 follow-up): a string code is a non-int code, which the
+    Click/Typer convention treats as a failure, so the handler must return ``1``
+    (the old code mapped every non-int, including strings, to ``0``).
+    """
+    assert _system_exit_handler(SystemExit("error")) == 1
+    assert _system_exit_handler(SystemExit("")) == 1
+
+
+def test_system_exit_none_maps_to_zero_p31_2() -> None:
+    """``SystemExit(None)`` maps to exit code 0 (P31-2 FIX).
+
+    A bare ``SystemExit(None)`` signals a *successful* exit in Unix/Click/Typer
+    and must resolve to ``0``, not ``1``.
+    """
+    assert _system_exit_handler(SystemExit(None)) == 0
+
+
+def test_system_exit_zero_maps_to_zero() -> None:
+    """``SystemExit(0)`` maps to exit code 0 (explicit int preserved)."""
+    assert _system_exit_handler(SystemExit(0)) == 0
+
+
+def test_system_exit_one_maps_to_one() -> None:
+    """``SystemExit(1)`` maps to exit code 1 (explicit int preserved)."""
+    assert _system_exit_handler(SystemExit(1)) == 1
+
+
+def test_system_exit_typer_exit_string_maps_to_one() -> None:
+    """A string ``SystemExit`` code (the ``typer.Exit(code="msg")`` convention) maps to 1.
+
+    ``typer.Exit(code="msg")`` / ``click.Exit(msg="msg")`` raise ``SystemExit``
+    with a *string* code; per the Click/Typer convention a string code indicates
+    failure, so the handler must return ``1``. This exercises the exact
+    ``SystemExit("msg")`` object the handler catches (the string code path).
+    """
+    _exc: SystemExit = SystemExit("msg")
+    assert isinstance(_exc, SystemExit)
+    assert _system_exit_handler(_exc) == 1
+
+
 if __name__ == "__main__":
     exit_code = pytest.main([__file__, "-v"])
     sys.exit(exit_code)

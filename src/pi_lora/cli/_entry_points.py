@@ -34,9 +34,17 @@ def pi_lora() -> int:
     try:
         return cast(int, main_app())
     except SystemExit as e:
-        # PLAN-30 FIX (CR-29-1): SystemExit(None) = successful exit (code 0) in Unix/Click/Typer.
-        # Fallback to 0, not 1. See plan-30.md Section 1.
-        return e.code if isinstance(e.code, int) else 0
+        # P31-2 FIX (CR-29-1 follow-up): SystemExit code mapping per Click/Typer convention:
+        #   None          → 0 (successful exit, e.g., --help)
+        #   int (0, 1, 2) → that int (explicit exit code)
+        #   str, typer.Exit(code="msg") → 1 (failure — non-int codes indicate error)
+        # See plan-31.md Section 2.
+        if e.code is None:
+            return 0
+        elif isinstance(e.code, int):
+            return e.code
+        else:
+            return 1  # String codes (typer.Exit(code="msg"), sys.exit("error")) indicate failure
 
 
 def pi_lora_config() -> int:
@@ -53,9 +61,17 @@ def pi_lora_config() -> int:
     try:
         return cast(int, config_app())
     except SystemExit as e:
-        # PLAN-30 FIX (CR-29-1): SystemExit(None) = successful exit (code 0) in Unix/Click/Typer.
-        # Fallback to 0, not 1. See plan-30.md Section 1.
-        return e.code if isinstance(e.code, int) else 0
+        # P31-2 FIX (CR-29-1 follow-up): SystemExit code mapping per Click/Typer convention:
+        #   None          → 0 (successful exit, e.g., --help)
+        #   int (0, 1, 2) → that int (explicit exit code)
+        #   str, typer.Exit(code="msg") → 1 (failure — non-int codes indicate error)
+        # See plan-31.md Section 2.
+        if e.code is None:
+            return 0
+        elif isinstance(e.code, int):
+            return e.code
+        else:
+            return 1  # String codes (typer.Exit(code="msg"), sys.exit("error")) indicate failure
 
 
 def pi_lora_test() -> int:
@@ -72,9 +88,17 @@ def pi_lora_test() -> int:
     try:
         return cast(int, test_app())
     except SystemExit as e:
-        # PLAN-30 FIX (CR-29-1): SystemExit(None) = successful exit (code 0) in Unix/Click/Typer.
-        # Fallback to 0, not 1. See plan-30.md Section 1.
-        return e.code if isinstance(e.code, int) else 0
+        # P31-2 FIX (CR-29-1 follow-up): SystemExit code mapping per Click/Typer convention:
+        #   None          → 0 (successful exit, e.g., --help)
+        #   int (0, 1, 2) → that int (explicit exit code)
+        #   str, typer.Exit(code="msg") → 1 (failure — non-int codes indicate error)
+        # See plan-31.md Section 2.
+        if e.code is None:
+            return 0
+        elif isinstance(e.code, int):
+            return e.code
+        else:
+            return 1  # String codes (typer.Exit(code="msg"), sys.exit("error")) indicate failure
 
 
 def check_hardware() -> int:
@@ -91,6 +115,14 @@ def check_hardware() -> int:
     try:
         return cast(int, check_hardware_app())
     except SystemExit as e:
-        # PLAN-30 FIX (CR-29-1): SystemExit(None) = successful exit (code 0) in Unix/Click/Typer.
-        # Fallback to 0, not 1. See plan-30.md Section 1.
-        return e.code if isinstance(e.code, int) else 0
+        # P31-2 FIX (CR-29-1 follow-up): SystemExit code mapping per Click/Typer convention:
+        #   None          → 0 (successful exit, e.g., --help)
+        #   int (0, 1, 2) → that int (explicit exit code)
+        #   str, typer.Exit(code="msg") → 1 (failure — non-int codes indicate error)
+        # See plan-31.md Section 2.
+        if e.code is None:
+            return 0
+        elif isinstance(e.code, int):
+            return e.code
+        else:
+            return 1  # String codes (typer.Exit(code="msg"), sys.exit("error")) indicate failure

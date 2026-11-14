@@ -156,3 +156,76 @@ class TestContextVarPatchFlag:
         assert observed_b > 0
         # Both tasks reset their tokens; the main context stays at the default.
         assert _spidev_patch_active.get() == 0
+
+
+class TestPatchConcurrency:
+    """CR-29-6 (Plan-30/Plan-31): ``spidev_kernel_patch`` thread-safety.
+
+    Plan-30 added the ``threading.Lock`` around the ``sys.modules`` swap but no
+    test exercised thread-safety under concurrent ``asyncio.gather``. These tests
+    prove 20 concurrent workers, each with its own :class:`FakeSpiDev` instance,
+    see no cross-contamination of ``sys.modules["spidev"]``.
+    """
+
+    @pytest.mark.asyncio
+    async def test_spidev_kernel_patch_thread_safety_under_concurrency(self) -> None:
+        """Verify spidev_kernel_patch is safe under concurrent asyncio.gather.
+
+        Multiple concurrent tasks using spidev_kernel_patch must not cross-contaminate
+        sys.modules["spidev"]. Each task should see its own FakeSpiDev instance.
+
+        Each worker captures its own :class:`FakeSpiDev` into ``RealSpiBus._spidev``
+        during ``open()`` (before its first ``await``), so even though the patched
+        ``sys.modules["spidev"]`` is process-global and workers interleave on the
+        ``asyncio.to_thread`` boundary inside ``xfer2``, every bus keeps its own
+        device reference. ``threading.Lock`` serializes the global ``sys.modules``
+        swap; the :class:`contextvars.ContextVar` counter isolates the patch flag
+        per task.
+        """
+        from pi_lora.drivers.spi.bus import RealSpiBus
+        from tests.fakes import FakeSpiDev, create_fake_spi_dev, spidev_kernel_patch
+
+        async def worker(worker_id: int) -> str:
+            fake = create_fake_spi_dev(module_type="rfm95w")
+            fake.set_register(FakeSpiDev.REG_OP_MODE, 0x80 | (worker_id & 0x0F))
+            with spidev_kernel_patch(fake):
+                bus = RealSpiBus(bus_number=0, device_number=0)
+                bus.open()
+                # ``bus.xfer2`` is ``async``; ``xfer2([0x01, 0x00])`` is a read of
+                # REG_OP_MODE (0x01), so ``result[1]`` is the OP_MODE register value.
+                result = await bus.xfer2([0x01, 0x00])
+                bus.close()
+                return f"worker-{worker_id}-got-{result[1]:02x}"
+
+        results = await asyncio.gather(*[worker(i) for i in range(20)])
+        for r in results:
+            parts = r.split("-")
+            worker_id = int(parts[1])
+            expected_val = 0x80 | (worker_id & 0x0F)
+            actual_val = int(parts[-1], 16)
+            assert actual_val == expected_val, f"Cross-contamination detected: {r}"
+
+    @pytest.mark.asyncio
+    async def test_spidev_kernel_patch_thread_safety_mocked(self) -> None:
+        """Mock-based variant: each worker sees its own fake via patched sys.modules."""
+        from tests.fakes import FakeSpiDev, create_fake_spi_dev, spidev_kernel_patch
+
+        async def worker(worker_id: int) -> str:
+            fake = create_fake_spi_dev(module_type="rfm95w")
+            fake.set_register(FakeSpiDev.REG_OP_MODE, 0x80 | (worker_id & 0x0F))
+            with spidev_kernel_patch(fake):
+                # The patched sys.modules["spidev"].SpiDev() returns THIS worker's fake
+                import sys
+                assert sys.modules.get("spidev") is not None
+                mock_spi_dev = sys.modules["spidev"].SpiDev()
+                mock_spi_dev.open(0, 0)
+                result = mock_spi_dev.xfer2([0x01, 0x00])
+                return f"worker-{worker_id}-got-{result[1]:02x}"
+
+        results = await asyncio.gather(*[worker(i) for i in range(20)])
+        for r in results:
+            parts = r.split("-")
+            worker_id = int(parts[1])
+            expected_val = 0x80 | (worker_id & 0x0F)
+            actual_val = int(parts[-1], 16)
+            assert actual_val == expected_val, f"Cross-contamination detected: {r}"

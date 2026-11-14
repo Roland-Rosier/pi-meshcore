@@ -29,6 +29,10 @@ from unittest.mock import MagicMock
 # because this is a SYNCHRONOUS @contextmanager with no await points.
 _spidev_patch_lock = threading.Lock()
 
+# P31-4 TEST: tests/drivers/spi/test_spidev_patch_contextvar.py::test_spidev_kernel_patch_thread_safety_under_concurrency
+# Verifies 20 concurrent workers with unique FakeSpiDev instances see no cross-contamination.
+# threading.Lock serializes sys.modules access; ContextVar isolates counter per task.
+
 
 class FakeSpiDev:
     """Simulated SPI device for testing LoRa module detection.

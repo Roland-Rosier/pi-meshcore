@@ -568,16 +568,15 @@ class InterruptBridge:
                         pass
 
     async def _interrupt_task(self) -> None:
-        # PLAN-26 FIX (Finding 951): Add exponential backoff on queue put failure
-        # to prevent unbounded error logging under sustained high load. Mirrors
-        # IdlePacer (lines 272-281): backoff engages after 5 consecutive failures.
-        # First few failures log immediately with no backoff; sustained failures
-        # apply exponential backoff (min 0.1s, max 60s).
-        # Cross-reference: code_review-25.3.json finding 951.
+        # P31-3 FIX: Exponential backoff on queue put failure to prevent unbounded
+        # error logging under sustained high load. Mirrors TimerScheduler._do_tick
+        # (lines ~166-184): on failure, sleep for backoff interval instead of
+        # immediately consuming next interrupt. IdlePacer checks backoff BEFORE processing.
         _failure_counts: dict[int, int] = {}
         _backoff_until: dict[int, float] = {}
         import time
         while self._running:
+            # Get interrupt from queue
             gpio_pin = await self._async_trigger_queue.get()
             module = self._interrupt_map.get(gpio_pin)
             if module is None:
@@ -598,10 +597,20 @@ class InterruptBridge:
                     fc = _failure_counts.get(gpio_pin, 0) + 1
                     _failure_counts[gpio_pin] = fc
                     now = time.monotonic()
-                    # Check backoff window
+
+                    # P31-3 FIX: If in backoff window, RE-QUEUE this interrupt and
+                    # sleep for the remaining backoff duration. This prevents silent
+                    # dropping during backoff (the old bug `continue`d after get(),
+                    # immediately consuming the next interrupt and dropping this one).
                     if gpio_pin in _backoff_until and now < _backoff_until[gpio_pin]:
-                        # Still in backoff window; silently drop this interrupt
+                        # Re-queue this interrupt for later processing
+                        with contextlib.suppress(asyncio.QueueFull):
+                            self._async_trigger_queue.put_nowait(gpio_pin)
+                        # Sleep for remaining backoff duration
+                        remaining = _backoff_until[gpio_pin] - now
+                        await asyncio.sleep(remaining)
                         continue
+
                     # Log the failure
                     logging.getLogger(__name__).error(
                         "InterruptBridge: failed to put INTERRUPT event for GPIO %d: %s (failure #%d)",

@@ -49,3 +49,8 @@ rules:
           async with $GUARD:
               ...
               $LOCK = $Y.Lock()
+      # P31-1 FIX: Exclude LazyAsyncLock class — this IS the correct implementation
+      # that the rule was designed to REPLACE. The old buggy patterns (Plans 22-27)
+      # used sentinel + holder + else-branch race. LazyAsyncLock uses threading.Lock
+      # + single code path + persisted holder. See lazy_async_lock.py docstring.
+      - pattern-not-inside: "class LazyAsyncLock:"

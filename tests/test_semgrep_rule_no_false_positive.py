@@ -113,3 +113,23 @@ def test_semgrep_rule_no_false_positive() -> None:
 
     probe_path = _write_probe()
     assert _semgrep_findings(_CONFIG_PATH, probe_path) >= 1
+
+
+# Anti-regression (P31-1): `manual-double-checked-locking` (Rule 3) targets the
+# OLD buggy sentinel+holder+else-branch race (Plans 22-27). It must NOT flag the
+# correct LazyAsyncLock implementation. The YAML config suppresses it via a
+# `pattern-not-inside: "class LazyAsyncLock:"` exclusion (see
+# .semgrep/rules/custom/lazy-async-lock-guard.yaml) so acquire() runs inside the
+# guarded class body. This test locks in that suppression: acquire() stays at 0
+# findings while a genuinely unguarded double-checked-locking probe still fires.
+def test_semgrep_rule_no_false_positive_on_lazy_async_lock() -> None:
+    """P31-1: LazyAsyncLock.acquire() must NOT trigger Rule 3 (0 findings)."""
+    assert _semgrep_findings(
+        _CONFIG_PATH, "src/pi_lora/framework/lazy_async_lock.py"
+    ) == 0
+
+    # The unguarded probe is the exact buggy shape the rule was designed to flag;
+    # it must still report > 0 findings so the exclusion cannot regress to a
+    # false-negative on real buggy patterns.
+    probe_path = _write_probe()
+    assert _semgrep_findings(_CONFIG_PATH, probe_path) >= 1
