@@ -27,4 +27,10 @@ app.add_typer(test_app, name="test")
 if __name__ == "__main__":
     import asyncio
 
+    from pi_lora.cli._logging import setup_logging
+
+    # P33-2: setup_logging() added to __main__ for consistency with entry points.
+    # See plan-33.md Section 2.2. Do NOT move this to module level (Plan-23 removed
+    # module-level setup_logging() to avoid test pollution).
+    setup_logging()
     asyncio.run(app())

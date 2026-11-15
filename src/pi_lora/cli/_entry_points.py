@@ -22,12 +22,14 @@ from .test import app as test_app
 
 
 def _run_app(app_callable: Callable[[], Any]) -> int:
+    # P33-1: Corrected docstring to reflect actual AsyncTyper return value (None on success).
+    # See plan-33.md Section 2.1.
     """Drive a Typer app and coerce its return / SystemExit into a Click exit code.
 
     ``app_callable`` returns ``Any`` because ``async_typer.AsyncTyper`` drives the
-    event loop internally and returns a Click exit code on success, but raises
-    ``SystemExit`` on CLI exits (e.g. ``--help``, invalid args). This helper maps
-    every observed outcome onto the canonical three-way mapping documented below:
+    event loop internally and returns ``None`` on successful command completion,
+    but raises ``SystemExit`` on CLI exits (e.g. ``--help``, invalid args). This
+    helper maps every observed outcome onto the canonical three-way mapping:
 
     SystemExit code mapping (per Click/Typer convention):
         ``None``          → 0  (successful exit, e.g. ``--help``)
@@ -37,7 +39,12 @@ def _run_app(app_callable: Callable[[], Any]) -> int:
     Returns the mapped exit code (0, 1, or 2) so the console script exits cleanly.
     """
     try:
-        return cast(int, app_callable())
+        # P33-1: async_typer.AsyncTyper returns None on successful command completion;
+        # map None -> exit code 0 explicitly. See plan-33.md Section 2.1.
+        result = app_callable()
+        if result is None:
+            return 0
+        return cast(int, result)
     except SystemExit as e:
         # SystemExit code mapping per Click/Typer convention:
         #   None          → 0 (successful exit, e.g., --help)

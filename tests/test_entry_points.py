@@ -311,6 +311,21 @@ def test_run_app_returns_int_on_success() -> None:
     assert _run_app(_app_returns_two) == 2
 
 
+def test_run_app_returns_zero_on_success() -> None:
+    """``_run_app`` returns 0 when app callable returns None (successful command).
+
+    Direct unit test of the shared helper imported from ``pi_lora.cli._entry_points``.
+    ``async_typer.AsyncTyper`` returns ``None`` on successful command completion;
+    this exercises the success branch where ``app_callable()`` returns ``None``
+    and verifies it maps to exit code ``0``.
+    """
+    # P33-3: Test _run_app handles None return from AsyncTyper. See plan-33.md Section 2.3.
+    def _app_returns_none() -> None:
+        return None
+
+    assert _run_app(_app_returns_none) == 0
+
+
 def test_run_app_maps_system_exit_variants() -> None:
     """``_run_app`` maps ``SystemExit`` variants via its except branch.
 
