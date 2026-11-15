@@ -9,6 +9,7 @@
 mkdir -p /tmp/sandbox/semgrep_tmp
 TMPDIR=$(TMPDIR=/tmp/sandbox/semgrep_tmp mktemp -d)
 uv run semgrep scan --verbose \
+   --disable-version-check \
    --config=".semgrep/rules/security/" \
    --config=".semgrep/rules/best-practice/" \
    --config=".semgrep/rules/correctness/" \

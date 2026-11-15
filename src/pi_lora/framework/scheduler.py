@@ -400,6 +400,14 @@ class InterruptBridge:
         # AttributeError) so early init before start() (no captured loop yet) is a
         # no-op.
         self._loop: asyncio.AbstractEventLoop | None = None
+        # CR-33.8 / Plan-34 FIX: failure tracking for exponential backoff must live
+        # on the instance (mirrors TimerScheduler._failure_counts and IdlePacer's
+        # _failure_count / _backoff_until pattern, lines 56, 204-205). Local dicts
+        # in _interrupt_task() became stale on unregister: a new module reusing the
+        # same GPIO pin would inherit a stale failure count / backoff window and
+        # produce spurious backoff. Instance state is released in unregister_module().
+        self._failure_counts: dict[int, int] = {}
+        self._backoff_until: dict[int, float] = {}
 
     def register_interrupt(self, gpio_pin: int, module: Rfm9xSx127xModule) -> None:
         if gpio_pin in self._interrupt_map:
@@ -572,9 +580,10 @@ class InterruptBridge:
         # error logging under sustained high load. Mirrors TimerScheduler._do_tick
         # (lines ~166-184): on failure, sleep for backoff interval instead of
         # immediately consuming next interrupt. IdlePacer checks backoff BEFORE processing.
-        _failure_counts: dict[int, int] = {}
-        _backoff_until: dict[int, float] = {}
-        import time
+        # CR-33.8 / Plan-34 FIX: use the instance dicts (self._failure_counts /
+        # self._backoff_until) instead of locals. Local dicts were stale across
+        # unregister: a new module reusing the same GPIO pin would inherit stale
+        # failure tracking. Instance state is released in unregister_module().
         while self._running:
             # Get interrupt from queue
             gpio_pin = await self._async_trigger_queue.get()
@@ -590,24 +599,24 @@ class InterruptBridge:
                         ModuleEvent(EventType.INTERRUPT, InterruptEvent(gpio_pin))
                     )
                     # Success — reset failure count and drop any active backoff
-                    _failure_counts[gpio_pin] = 0
-                    _backoff_until.pop(gpio_pin, None)
+                    self._failure_counts[gpio_pin] = 0
+                    self._backoff_until.pop(gpio_pin, None)
                 except Exception as exc:
                     # Failure — increment per-pin failure count
-                    fc = _failure_counts.get(gpio_pin, 0) + 1
-                    _failure_counts[gpio_pin] = fc
+                    fc = self._failure_counts.get(gpio_pin, 0) + 1
+                    self._failure_counts[gpio_pin] = fc
                     now = time.monotonic()
 
                     # P31-3 FIX: If in backoff window, RE-QUEUE this interrupt and
                     # sleep for the remaining backoff duration. This prevents silent
                     # dropping during backoff (the old bug `continue`d after get(),
                     # immediately consuming the next interrupt and dropping this one).
-                    if gpio_pin in _backoff_until and now < _backoff_until[gpio_pin]:
+                    if gpio_pin in self._backoff_until and now < self._backoff_until[gpio_pin]:
                         # Re-queue this interrupt for later processing
                         with contextlib.suppress(asyncio.QueueFull):
                             self._async_trigger_queue.put_nowait(gpio_pin)
                         # Sleep for remaining backoff duration
-                        remaining = _backoff_until[gpio_pin] - now
+                        remaining = self._backoff_until[gpio_pin] - now
                         await asyncio.sleep(remaining)
                         continue
 
@@ -619,7 +628,7 @@ class InterruptBridge:
                     # Apply backoff after 5 consecutive failures (mirrors IdlePacer)
                     if fc > 5:
                         delay = min(0.1 * (2 ** (fc - 5)), 60.0)
-                        _backoff_until[gpio_pin] = now + delay
+                        self._backoff_until[gpio_pin] = now + delay
                     # First 5 failures: no backoff, retry immediately on next interrupt
 
     def unregister_module(self, module: Rfm9xSx127xModule) -> None:
@@ -627,6 +636,16 @@ class InterruptBridge:
         for gpio_pin, m in list(self._interrupt_map.items()):
             if m is module:
                 del self._interrupt_map[gpio_pin]
+                # CR-33.8 / Plan-34 FIX: release failure tracking for this GPIO pin
+                # on unregister. Mirrors TimerScheduler.unregister_module() (lines
+                # 97-98) releasing _failure_counts and _last_failure_log, and
+                # IdlePacer.set_idle_enabled() (lines 228-229) releasing
+                # _failure_count / _backoff_until. Without this cleanup, stale
+                # entries survive a start/stop cycle and a new module reusing the
+                # same GPIO pin inherits the stale failure count / backoff window,
+                # producing spurious backoff. Unregister must fully release state.
+                self._failure_counts.pop(gpio_pin, None)
+                self._backoff_until.pop(gpio_pin, None)
 
 
 class Scheduler:

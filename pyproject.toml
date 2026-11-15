@@ -226,6 +226,14 @@ ignore_missing_imports = true
 module = ["typer"]
 ignore_missing_imports = true
 
+# pi_lora.cli.main builds the composite CLI app via add_typer(); async_typer has no
+# type stubs, so mypy resolves app as the "missing" type (...) and emits has-type on
+# app.add_typer(). Silenced for this thin assembly module only — the public apps are
+# exercised at runtime by the entry-point tests.
+[[tool.mypy.overrides]]
+module = ["pi_lora.cli.main"]
+disable_error_code = ["has-type"]
+
 # First-party internal modules — mypy can't resolve them as stubs.
 [[tool.mypy.overrides]]
 module = ["pi_lora.drivers.spi.bus", "pi_lora.drivers.spi.factory", "pi_lora.drivers.spi.locks"]

@@ -150,8 +150,19 @@ async def main_callback(ctx: typer.Context) -> None:
         raise typer.Exit(code=0)
 
 
+# FIX CR-33.2 (Plan-34): the bare ``app()`` call was inconsistent with the other
+# console entry points. ``app`` is an ``async_typer.AsyncTyper`` that drives the
+# event loop internally and may raise ``SystemExit`` (or return ``None``); calling
+# it bare leaves the coroutine-handling and exit-code coercion to typer, so the
+# resulting exit code becomes non-deterministic across entry points.
+#
+# ``_run_app`` in ``src/pi_lora/cli/_entry_points.py`` is the canonical pattern
+# used by all 4 console entry points (see code_review-33.1.json): it coerces the
+# ``SystemExit``/return value into a uniform Click exit code. Delegate to it here
+# to keep this CLI consistent with the rest.
 if __name__ == "__main__":
-    app()
+    from pi_lora.cli._entry_points import _run_app
+    raise SystemExit(_run_app(app))
 
 
 

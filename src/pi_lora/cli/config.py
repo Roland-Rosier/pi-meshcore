@@ -206,4 +206,11 @@ async def show_config(
 
 
 if __name__ == "__main__":
-    app()
+    # CR-33.3 / Plan-34: bare `app()` was inconsistent with the other 3 console
+    # entry points. `app` is an AsyncTyper that drives the event loop internally
+    # and raises SystemExit; calling it bare leaves coroutine handling to typer.
+    # `_run_app` (src/pi_lora/cli/_entry_points.py) is the canonical pattern that
+    # coerces SystemExit (or a None return) into a Click exit code consistently.
+    # See code_review-33.1.json.
+    from pi_lora.cli._entry_points import _run_app
+    raise SystemExit(_run_app(app))

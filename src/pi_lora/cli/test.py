@@ -43,6 +43,13 @@ async def test_hardware_impl(
     custom_path: Path | None = Path(config_file) if config_file else None
     application = Application(config=None)
 
+    # CR-33.4 / Plan-34: the whole body is wrapped in a single try whose finally
+    # always calls application.stop(), so clean shutdown runs on every path -- the
+    # AssemblyNotFoundError/DeviceAttachmentNotFoundError catch (which raises
+    # typer.Exit before start()) and any exception raised by start(). The narrow
+    # inner try/except only catches the two legitimate "not-found" errors;
+    # KeyboardInterrupt/SystemExit/GeneratorExit (PEP 3134) and any Exception from
+    # start() propagate through the finally uncaught. See code_review-33.1.json.
     try:
         try:
             radio_configs = await application.get_assembly_config(
@@ -66,7 +73,7 @@ async def test_hardware_impl(
             raise typer.Exit(code=1)
 
         # Start application (creates modules, starts event loops, registers scheduler).
-        # start() lives inside an outer try whose finally always calls application.stop(),
+        # start() is followed by a finally that always calls application.stop(),
         # guaranteeing clean shutdown even when start() fails.
         await application.start(assembly_name=assembly_name)
 
@@ -106,17 +113,14 @@ async def test_hardware_impl(
                 raise typer.Exit(code=1)
 
         console.print("[green]✓[/green] All modules transitioned to RESET_STATE successfully")
-    except Exception:
-        raise
+        raise typer.Exit(code=0)
     finally:
-        # Clean shutdown via Application — the finally always runs, regardless of
-        # the exception type. ``except Exception`` deliberately does NOT catch
-        # ``KeyboardInterrupt``/``SystemExit``/``GeneratorExit`` (PEP 3134
-        # control-flow signals), so those propagate to the interpreter instead of
-        # being suppressed; ``application.stop()`` still executes here.
+        # Clean shutdown via Application -- the finally always runs, regardless of
+        # the exception type. ``finally`` (not a redundant ``except Exception`` catch)
+        # lets ``KeyboardInterrupt``/``SystemExit``/``GeneratorExit`` (PEP 3134
+        # control-flow signals) propagate to the interpreter instead of being
+        # suppressed; ``application.stop()`` still executes here.
         await application.stop()
-
-    raise typer.Exit(code=0)
 
 
 @app.command("hardware")
@@ -138,4 +142,10 @@ async def test_hardware(
 
 
 if __name__ == "__main__":
-    app()
+    # CR-33.4 / Plan-34: ``app`` is an AsyncTyper that drives its own event loop and raises
+    # SystemExit internally. Calling ``app()`` bare defers coroutine handling to typer; the
+    # canonical ``_run_app`` helper (used by all 4 console entry points in
+    # ``src/pi_lora/cli/_entry_points.py``) coerces the SystemExit/None return into a
+    # consistent Click exit code. See code_review-33.1.json.
+    from pi_lora.cli._entry_points import _run_app
+    raise SystemExit(_run_app(app))

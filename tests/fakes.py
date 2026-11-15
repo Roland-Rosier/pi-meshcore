@@ -22,6 +22,13 @@ from collections.abc import Iterator
 from contextlib import contextmanager
 from unittest.mock import MagicMock
 
+# PLAN-34 FIX (CR-33.6): module-level import to eliminate the circular-import risk.
+# The original code imported `_spidev_patch_active` at RUNTIME inside the context
+# manager body (a code smell: runtime import hides a circular dependency between
+# tests/fakes.py and pi_lora.drivers.spi.bus). Pulling it to module-level makes the
+# import explicit and resolvable at import time. See code_review-33.1.json, CR-33.6.
+from pi_lora.drivers.spi.bus import _spidev_patch_active
+
 # PLAN-30 FIX (CR-29-6): threading.Lock protects process-wide sys.modules from
 # concurrent async task clobbering. contextvars.ContextVar (_spidev_patch_active)
 # isolates the _spidev_patch_active COUNTER per task, but sys.modules is shared. The lock
@@ -463,8 +470,6 @@ def spidev_kernel_patch(fake_spi: FakeSpiDev) -> Iterator[object]:
     :param fake_spi: The FakeSpiDev kernel to expose as ``spidev.SpiDev``.
     :yield: None. The injected fake spidev module is not consumed by callers.
     """
-    from pi_lora.drivers.spi.bus import _spidev_patch_active
-
     with _spidev_patch_lock:
         backup: object | None = sys.modules.get("spidev", None)
         fake_module: types.SimpleNamespace = types.SimpleNamespace(SpiDev=lambda: fake_spi)
@@ -491,12 +496,23 @@ def spidev_kernel_patch(fake_spi: FakeSpiDev) -> Iterator[object]:
     try:
         yield None
     finally:
-        _spidev_patch_active.reset(token)
         with _spidev_patch_lock:
             if backup is None:
                 sys.modules.pop("spidev", None)
             else:
                 sys.modules["spidev"] = backup  # type: ignore[assignment]
+            # CR-33.5 FIX (Plan-34, code_review-33.1.json): reset the ContextVar INSIDE
+            # the lock so the counter returns to 0 after the context exits; without this
+            # the counter stays > 0 and _verify_patch_active() never fires, so a retained
+            # bus reference silently reaches import spidev instead of raising RuntimeError.
+            _spidev_patch_active.reset(token)
+            # the lock. The original code called _spidev_patch_active.reset(token) OUTSIDE
+            # the lock, then re-acquired the lock to restore sys.modules. Between the reset
+            # and the sys.modules restore, another worker could read an inconsistent state
+            # (counter already decremented but sys.modules still pointing at the injected
+            # fake module) -- a race window. Keeping the reset inside the same lock that
+            # guards sys.modules maintains the invariant that the counter and sys.modules
+            # state are always consistent.
 
 
 def verify_frequency_in_range(fake_spi: FakeSpiDev, frequency_khz: int) -> bool:

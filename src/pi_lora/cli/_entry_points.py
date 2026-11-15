@@ -11,7 +11,7 @@ console script exits cleanly without leaving a coroutine un-awaited.
 from __future__ import annotations
 
 from collections.abc import Callable
-from typing import Any, cast
+from typing import Any
 
 from pi_lora.cli._logging import setup_logging
 
@@ -44,7 +44,16 @@ def _run_app(app_callable: Callable[[], Any]) -> int:
         result = app_callable()
         if result is None:
             return 0
-        return cast(int, result)
+        # CR-33.7 (Plan-34, code_review-33.1.json): `cast(int, result)` is a
+        # static-only assertion and hides a runtime non-int return. If
+        # AsyncTyper.__call__ ever returns a non-int (it currently only raises
+        # SystemExit on completion), the bug would be invisible at runtime. The
+        # defensive isinstance check catches that and treats any non-int as a
+        # failure exit code. Overhead is negligible vs. the async loop call.
+        if isinstance(result, int):
+            return result
+        # Non-int return values indicate an unexpected state; treat as failure.
+        return 1
     except SystemExit as e:
         # SystemExit code mapping per Click/Typer convention:
         #   None          → 0 (successful exit, e.g., --help)
