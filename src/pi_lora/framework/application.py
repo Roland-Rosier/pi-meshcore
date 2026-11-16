@@ -129,20 +129,24 @@ class Application:
                     self._started_modules.append(module)
                     await module.start_event_loop()
                 self._started = True
+            # CR-34.3-3 / Plan-35 FIX: restructure to 4-case handler matching
+            # _cleanup_and_reraise_cancellation (lines 260-395). Exception ⊂ BaseException,
+            # so handler ordering is critical: CancelledError first, then Exception,
+            # then ExceptionGroup (BaseException in 3.11+), then BaseException (shutdown).
+            # This handles all exception categories explicitly with documented rationale.
             except asyncio.CancelledError as exc:
                 exc_to_raise = exc
             except Exception as exc:
                 exc_to_raise = exc
-            # PLAN-20: Handle KeyboardInterrupt/SystemExit (BaseException) explicitly.
-            # These shutdown signals bypass `except Exception` and would skip cleanup,
-            # leaking SPI handles, scheduler tasks, and module registrations.
-            # Run cleanup then re-raise verbatim to preserve Ctrl+C / sys.exit semantics.
-            #
-            # PLAN-26 FIX (Findings 645, 684): Catch BaseException (not just Exception)
-            # from cleanup, because a second Ctrl+C during cleanup raises KeyboardInterrupt
-            # (a BaseException). If cleanup is interrupted by another shutdown signal,
-            # re-raise the ORIGINAL shutdown signal to preserve semantics.
-            except BaseException as exc:  # KeyboardInterrupt, SystemExit
+            except ExceptionGroup as exc:
+                # ExceptionGroup is BaseException in Python 3.11+. Must catch before
+                # BaseException handler. Treat as regular exception for cleanup purposes.
+                exc_to_raise = exc
+            except BaseException as exc:  # KeyboardInterrupt, SystemExit, GeneratorExit
+                # PLAN-26 FIX (Findings 645, 684): Catch BaseException (not just Exception)
+                # from cleanup, because a second Ctrl+C during cleanup raises KeyboardInterrupt
+                # (a BaseException). If cleanup is interrupted by another shutdown signal,
+                # re-raise the ORIGINAL shutdown signal to preserve semantics.
                 exc_to_raise = exc
                 try:
                     await self._cleanup_partial_start()

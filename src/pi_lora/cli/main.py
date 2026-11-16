@@ -25,18 +25,12 @@ app.add_typer(test_app, name="test")
 
 
 if __name__ == "__main__":
-    from pi_lora.cli._entry_points import _run_app
-    from pi_lora.cli._logging import setup_logging
-
-    # P33-2: setup_logging() added to __main__ for consistency with entry points.
-    # See plan-33.md Section 2.2. Do NOT move this to module level (Plan-23 removed
-    # module-level setup_logging() to avoid test pollution).
-    setup_logging()
-    # CR-33.1 / Plan-34 FIX (Issue 1): asyncio.run(app()) worked only by accident.
-    # async_typer.AsyncTyper drives the event loop internally and raises SystemExit
-    # on CLI exits rather than returning a coroutine; app() raises SystemExit before
-    # asyncio.run() ever executes, so the await was never actually reached. The
-    # _run_app helper is the canonical pattern used by all 4 console entry points
-    # in cli/_entry_points.py, so it drives the loop and coerces the SystemExit
-    # (or None return) into a Click exit code instead of leaving a coroutine un-awaited.
-    raise SystemExit(_run_app(app))
+    # CR-34.3.5 / Plan-35 FIX: delegate to the canonical entry point function
+    # in _entry_points.py instead of duplicating setup_logging() + _run_app() logic.
+    # This ensures:
+    # - Single source of truth for entry point behavior (Plan-23 architecture)
+    # - Dev workflow (python -m pi_lora.cli.main) gets logging automatically
+    # - No double setup_logging() call (entry point handles it)
+    # - Consistent with how console scripts (pi-lora) are invoked
+    from pi_lora.cli._entry_points import pi_lora
+    raise SystemExit(pi_lora())

@@ -469,6 +469,24 @@ def spidev_kernel_patch(fake_spi: FakeSpiDev) -> Iterator[object]:
 
     :param fake_spi: The FakeSpiDev kernel to expose as ``spidev.SpiDev``.
     :yield: None. The injected fake spidev module is not consumed by callers.
+
+    .. warning:: CONCURRENCY LIMITation: The lock protecting ``sys.modules`` and
+       the ``_spidev_patch_active`` ContextVar is released during the ``yield``
+       (user code execution). If multiple async tasks in the SAME process use
+       this context manager concurrently with different ``fake_spi`` instances,
+       they will overwrite each other's ``sys.modules["spidev"]`` patch. This is
+       a fundamental limitation of the ``@contextmanager`` pattern for
+       process-global namespace patching.
+
+       Mitigation: Test infrastructure uses this in controlled patterns:
+       - Sequential test execution (default pytest behavior)
+       - Isolated fixtures per test
+       - Multi-process parallelism (``pytest-xdist``) is SAFE since each worker
+         has its own ``sys.modules``
+
+       For true concurrent safety within a process, a callback-based API would
+       be required (breaking change). This limitation is accepted for the
+       controlled test usage patterns in this codebase.
     """
     with _spidev_patch_lock:
         backup: object | None = sys.modules.get("spidev", None)

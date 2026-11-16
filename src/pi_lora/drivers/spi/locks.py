@@ -15,6 +15,7 @@
 from __future__ import annotations
 
 import sys
+import threading
 from typing import Any, Protocol, Self
 
 from pi_lora.framework.lazy_async_lock import LazyAsyncLock
@@ -81,6 +82,7 @@ _bus_locks: dict[int, Any] = {}
 # which time both import paths are typically loaded. If get_bus_lock() is never
 # called, the SPI bus is never used and dual imports cannot cause harm.
 _registry_verified: bool = False
+_registry_verified_lock: threading.Lock = threading.Lock()
 
 
 async def get_bus_lock(bus_number: int) -> SpiLock:
@@ -99,9 +101,21 @@ async def get_bus_lock(bus_number: int) -> SpiLock:
     """
     global _registry, _aiologic_module, _registry_verified
 
-    if not _registry_verified:
-        _verify_single_registry()
-        _registry_verified = True
+    # CR-34.3-2 / Plan-35 FIX: atomic check-and-set for the lazy verification flag.
+    # Historical: Plan-22 introduced _verify_single_registry() as a lazy first-call
+    # guard; Plan-23 justified the lazy check for import hygiene. The original
+    # `if not _registry_verified:` block had a race (CR-34.3-2): multiple concurrent
+    # get_bus_lock() callers could all read the flag as False before any set it True,
+    # so _verify_single_registry() ran several times. Protecting the check-and-set
+    # with a threading.Lock closes that window (only one first-call verifies).
+    # Uses threading.Lock, NOT asyncio.Lock, because this section is synchronous
+    # (no await between check and set) — an asyncio.Lock would be overkill and
+    # unnecessary to acquire/release here. The lock is released before the
+    # await _registry.acquire() below, so it never blocks the async path.
+    with _registry_verified_lock:
+        if not _registry_verified:
+            _verify_single_registry()
+            _registry_verified = True
 
     if _aiologic_module is None:
         try:

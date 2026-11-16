@@ -91,6 +91,13 @@ async def test_hardware_impl(
             if (m.get_spi_device_id(), m.get_ce_number()) in target_set
         ]
 
+        # CR-34.3-1 / Plan-35 FIX: empty modules list means no targets matched the
+        # SPI/CE filter. This is a user error (wrong assembly name or filter), not
+        # success. Exit with error instead of silently succeeding. See code_review-34.3.json.
+        if not modules:
+            console.print("[red]Error:[/red] No modules match the given SPI/CE filters")
+            raise typer.Exit(code=1)
+
         # Send STATE_CHANGE to RESET_STATE
         reset_event = ModuleEvent[StateChangeEvent](
             event_type=EventType.STATE_CHANGE,

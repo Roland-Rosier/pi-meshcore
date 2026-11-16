@@ -68,8 +68,14 @@ dependencies = [
     "spidev>=3.8",
     "gpiod>=2.4",
     # CLI framework (Typer, with Click/Rich/Shellingame extras)
+    # PLAN-16 M-5 / PLAN-35: Exact pins for BOTH typer and async-typer are REQUIRED.
+    # async-typer is a thin wrapper around typer; they MUST be the same version
+    # to avoid API incompatibility. Do NOT use ~= or upper bounds — upgrading one
+    # without the other breaks the CLI. Upgrade both together in a coordinated way.
     "typer[all]==0.27.2",
     # Async CLI framework (migrate from typer to async-typer for async entry points)
+    # PLAN-16 M-5 / PLAN-35: Exact pins REQUIRED (see above). async-typer==0.27.2
+    # must match typer==0.27.2 exactly. Upgrade both together.
     "async-typer==0.27.2",
     # Configuration system — Pydantic models + YAML parsing
     "pydantic>=2.8",
