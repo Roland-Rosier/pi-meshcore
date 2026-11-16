@@ -26,7 +26,6 @@ from async_typer import AsyncTyper
 from rich.console import Console
 from rich.table import Table
 
-import pi_lora.cli._logging
 from pi_lora.drivers.rfm9x_sx127x_radio_instance import RadioInstanceConfig
 from pi_lora.framework.application import Application
 from pi_lora.framework.exceptions import (
@@ -104,8 +103,6 @@ async def list_assemblies_impl(
 ) -> None:
     """List available assemblies."""
 
-    pi_lora.cli._logging.setup_logging()
-
     custom_path: Path | None = Path(config_file) if config_file else None
 
     application = Application(config=None)
@@ -139,7 +136,6 @@ async def list_assemblies(
     config_file: str | None = typer.Option(None, "--config", "-c", help="Custom config file path"),
 ) -> None:
     """List available assemblies."""
-    pi_lora.cli._logging.setup_logging()
     await list_assemblies_impl(
         verbose=verbose,
         json_output=json_output,
@@ -155,7 +151,6 @@ async def show_config_impl(
     config_file: str | None = None,
 ) -> None:
     """Show configuration for an assembly."""
-    pi_lora.cli._logging.setup_logging()
 
     custom_path: Path | None = Path(config_file) if config_file else None
 
@@ -172,6 +167,9 @@ async def show_config_impl(
         typer.echo(f"Error: {e}", file=sys.stderr)
         raise typer.Exit(code=1) from None
     except DeviceAttachmentNotFoundError as e:
+        typer.echo(f"Error: {e}", file=sys.stderr)
+        raise typer.Exit(code=1) from None
+    except Exception as e:
         typer.echo(f"Error: {e}", file=sys.stderr)
         raise typer.Exit(code=1) from None
 
@@ -195,7 +193,6 @@ async def show_config(
     config_file: str | None = typer.Option(None, "--config", "-c", help="Custom config file path"),
 ) -> None:
     """Show configuration for an assembly."""
-    pi_lora.cli._logging.setup_logging()
     await show_config_impl(
         assembly_name=assembly_name,
         spi=spi,

@@ -38,6 +38,7 @@ def _run_app(app_callable: Callable[[], Any]) -> int:
 
     Returns the mapped exit code (0, 1, or 2) so the console script exits cleanly.
     """
+    setup_logging()
     try:
         # P33-1: async_typer.AsyncTyper returns None on successful command completion;
         # map None -> exit code 0 explicitly. See plan-33.md Section 2.1.

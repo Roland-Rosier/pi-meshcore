@@ -91,6 +91,11 @@ class Application:
         # self._started outside the lock is a benign read-only optimization (avoid lock
         # contention on the common already-started case). The authoritative check is the
         # re-check inside _lifecycle_lock, which serializes the actual startup.
+        #
+        # NOTE: This pattern relies on CPython's GIL for memory visibility of the
+        # _started flag. The re-check inside the lock is the authoritative guard.
+        # On free-threaded builds or non-x86, a stale read is possible but harmless
+        # (causes unnecessary lock acquisition, not incorrect behavior).
         # Cross-reference: code_review-24.1.json finding 24.7.
         already_started: bool = self._started
         if already_started:
@@ -130,9 +135,11 @@ class Application:
                     await module.start_event_loop()
                 self._started = True
             # CR-34.3-3 / Plan-35 FIX: restructure to 4-case handler matching
-            # _cleanup_and_reraise_cancellation (lines 260-395). Exception ⊂ BaseException,
-            # so handler ordering is critical: CancelledError first, then Exception,
-            # then ExceptionGroup (BaseException in 3.11+), then BaseException (shutdown).
+            # _cleanup_and_reraise_cancellation. Exception ⊂ BaseException,
+            # so handler ordering is critical:
+            #   start(): CancelledError, Exception, ExceptionGroup, BaseException (4 explicit)
+            #   _cleanup_and_reraise_cancellation(): CancelledError, Exception, BaseException
+            #       (3 explicit — ExceptionGroup caught by BaseException in Python 3.11+)
             # This handles all exception categories explicitly with documented rationale.
             except asyncio.CancelledError as exc:
                 exc_to_raise = exc

@@ -19,7 +19,6 @@ from typing import Literal, cast
 import typer
 from async_typer import AsyncTyper
 
-import pi_lora.cli._logging
 from pi_lora.drivers.lora_detection import (
     LoRaModuleConfig,
     LoRaModuleDetector,
@@ -97,8 +96,6 @@ async def detect_modules(
     ),
 ) -> None:
     """Scan hardware and optionally validate against an expected configuration."""
-    pi_lora.cli._logging.setup_logging()
-
     detector = LoRaModuleDetector(ce_pins=[0, 1])
 
     results = detector.detect_modules(extended=extended)
@@ -141,8 +138,6 @@ async def main_callback(ctx: typer.Context) -> None:
     """MeshCore hardware check utility — show help when invoked without subcommand."""
     # ``async`` is retained for AsyncTyper API consistency (the ``app`` is an
     # ``async_typer.AsyncTyper``); no ``await`` is required and behaviour is unchanged.
-    pi_lora.cli._logging.setup_logging()
-
     if ctx.invoked_subcommand is None:
         typer.echo("Usage: check-hardware [command]")
         typer.echo("Available commands:")

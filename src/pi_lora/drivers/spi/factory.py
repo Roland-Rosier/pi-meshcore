@@ -22,7 +22,9 @@ from .bus import SpiBus
 class SpiBusFactory(Protocol):
     """Protocol defining SPI bus factory interface."""
 
-    def create(self, bus: int, device: int) -> SpiBus:
+    def create(
+        self, bus: int, device: int, *, xfer_timeout: float = 5.0, factory_owned: bool = False
+    ) -> SpiBus:
         """Create an unopened SpiBus instance.
 
         The returned bus is UNOPENED: it has not been opened and must not be
@@ -34,6 +36,8 @@ class SpiBusFactory(Protocol):
         Args:
             bus: The bus identifier.
             device: The device identifier.
+            xfer_timeout: Upper bound in seconds for a single xfer2 transfer.
+            factory_owned: True if created by test factory with spidev patch.
 
         Returns:
             An unopened SpiBus implementation.
@@ -43,7 +47,9 @@ class SpiBusFactory(Protocol):
 class RealSpiBusFactory:
     """Real implementation of SpiBusFactory."""
 
-    def create(self, bus: int, device: int) -> SpiBus:
+    def create(
+        self, bus: int, device: int, *, xfer_timeout: float = 5.0, factory_owned: bool = False
+    ) -> SpiBus:
         """Create an unopened RealSpiBus instance.
 
         The returned bus is UNOPENED: it has not been opened and must not be
@@ -55,10 +61,17 @@ class RealSpiBusFactory:
         Args:
             bus: The bus identifier.
             device: The device identifier.
+            xfer_timeout: Upper bound in seconds for a single xfer2 transfer.
+            factory_owned: True if created by test factory with spidev patch.
 
         Returns:
             An unopened RealSpiBus instance.
         """
         from .bus import RealSpiBus
 
-        return RealSpiBus(bus_number=bus, device_number=device)
+        return RealSpiBus(
+            bus_number=bus,
+            device_number=device,
+            xfer_timeout=xfer_timeout,
+            factory_owned=factory_owned,
+        )

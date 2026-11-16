@@ -9,7 +9,6 @@ import typer
 from async_typer import AsyncTyper
 from rich.console import Console
 
-import pi_lora.cli._logging
 from pi_lora.drivers.rfm9x_sx127x_radio_instance import RadioInstanceConfig
 from pi_lora.framework.application import Application
 from pi_lora.framework.events import (
@@ -62,6 +61,9 @@ async def test_hardware_impl(
             console.print(f"[red]Error:[/red] {e}")
             raise typer.Exit(code=1) from None
         except DeviceAttachmentNotFoundError as e:
+            console.print(f"[red]Error:[/red] {e}")
+            raise typer.Exit(code=1) from None
+        except Exception as e:
             console.print(f"[red]Error:[/red] {e}")
             raise typer.Exit(code=1) from None
 
@@ -138,7 +140,6 @@ async def test_hardware(
     config_file: str | None = typer.Option(None, "--config", "-c", help="Custom config file path"),
 ) -> None:
     """Test hardware by transitioning modules to RESET_STATE."""
-    pi_lora.cli._logging.setup_logging()
 
     await test_hardware_impl(
         assembly_name=assembly_name,

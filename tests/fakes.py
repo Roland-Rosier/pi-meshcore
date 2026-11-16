@@ -487,7 +487,8 @@ def spidev_kernel_patch(fake_spi: FakeSpiDev) -> Iterator[object]:
        For true concurrent safety within a process, a callback-based API would
        be required (breaking change). This limitation is accepted for the
        controlled test usage patterns in this codebase.
-    """
+     """
+    token: contextvars.Token[int] | None = None
     with _spidev_patch_lock:
         backup: object | None = sys.modules.get("spidev", None)
         fake_module: types.SimpleNamespace = types.SimpleNamespace(SpiDev=lambda: fake_spi)
@@ -523,7 +524,8 @@ def spidev_kernel_patch(fake_spi: FakeSpiDev) -> Iterator[object]:
             # the lock so the counter returns to 0 after the context exits; without this
             # the counter stays > 0 and _verify_patch_active() never fires, so a retained
             # bus reference silently reaches import spidev instead of raising RuntimeError.
-            _spidev_patch_active.reset(token)
+            if token is not None:
+                _spidev_patch_active.reset(token)
             # the lock. The original code called _spidev_patch_active.reset(token) OUTSIDE
             # the lock, then re-acquired the lock to restore sys.modules. Between the reset
             # and the sys.modules restore, another worker could read an inconsistent state

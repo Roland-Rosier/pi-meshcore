@@ -26,8 +26,13 @@ class SpiLock(Protocol):
 
     Acquisition is async-only: callers must obtain the lock instance by awaiting
     :func:`get_bus_lock`, which is an async function requiring a running event
-    loop. In synchronous code that path is ``asyncio.run(get_bus_lock(...))`` or
-    similar. The returned instance supports ``async with lock:`` and
+    loop.
+
+    .. warning:: Do NOT use ``asyncio.run(get_bus_lock(...))`` — this creates a
+       NEW event loop each call, breaking subsequent lock acquisition. The lock
+       registry is bound to the first event loop used. Sync callers MUST refactor
+       to run within an existing event loop or use a dedicated sync wrapper.
+    The returned instance supports ``async with lock:`` and
     ``await lock.async_acquire()`` for the async context.
 
     The concrete implementation is an :class:`aiologic.Lock`, a native dual-mode
@@ -90,10 +95,14 @@ async def get_bus_lock(bus_number: int) -> SpiLock:
 
     The returned lock is the same instance for a given bus number across every
     caller, guaranteeing per-bus mutual exclusion. Acquisition is guarded by the
-    lazily-initialized :class:`LazyAsyncLock` registry so the registry dict
-    mutation is race-free without blocking the asyncio event loop.
+     lazily-initialized :class:`LazyAsyncLock` registry so the registry dict
+     mutation is race-free without blocking the asyncio event loop.
 
-    Args:
+     .. warning:: This function MUST be awaited from within a running event loop.
+        Using ``asyncio.run(get_bus_lock(...))`` is NOT supported — it creates
+        a new event loop each call, breaking the shared lock registry.
+
+     Args:
         bus_number: The bus identifier to lock.
 
     Returns:

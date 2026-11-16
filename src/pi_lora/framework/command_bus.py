@@ -138,6 +138,13 @@ class CommandBus:
                     "Command '%s' handler cancelled (via ExceptionGroup)",
                     type(command).__name__,
                 )
+                for suppressed in eg.exceptions:
+                    if not any(suppressed is e for e in cancelled_excs):
+                        logger.warning(
+                            "Command '%s' handler suppressed exception: %r",
+                            type(command).__name__,
+                            suppressed,
+                        )
                 # Re-raise the first CancelledError verbatim to preserve cancellation
                 # semantics. Chain from `eg` as __cause__ so the originating handler
                 # error is not lost (B904 compliance: explicit `from` in an except clause).

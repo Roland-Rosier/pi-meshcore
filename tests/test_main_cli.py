@@ -184,13 +184,13 @@ class TestSharedLogging:
         _shared.setup_logging()
 
     @pytest.mark.asyncio
-    async def test_check_hardware_detect_modules_calls_setup_logging(self) -> None:
-        """``check_hardware.detect_modules`` must call ``setup_logging`` exactly once.
+    async def test_check_hardware_detect_modules_delegates_logging(self) -> None:
+        """``check_hardware.detect_modules`` no self-manages logging (Fix #1).
 
-        ``_ensure_logged`` was removed (Fix #2.17); the CLI call site now calls
-        ``pi_lora.cli._logging.setup_logging`` directly. Patch both the detector
+        Logging is centralized in ``_entry_points._run_app`` and runs exactly
+        once per CLI invocation, not once per command body. Patch the detector
         and ``setup_logging`` and invoke ``detect_modules`` with all-None
-        defaults, then assert ``setup_logging`` ran exactly once. ``detect_modules``
+        defaults, then assert ``setup_logging`` is NOT called. ``detect_modules``
         is an async command body (FIX CR-7), so it is awaited here.
         """
         import pi_lora.cli._logging as _shared
@@ -200,7 +200,7 @@ class TestSharedLogging:
             _shared, "setup_logging", autospec=True
         ) as _spy:
             await _ch.detect_modules(ce0=None, ce1=None, extended=False)
-            _spy.assert_called_once()
+            _spy.assert_not_called()
 
 
 # ---------------------------------------------------------------------------

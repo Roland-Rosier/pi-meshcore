@@ -669,12 +669,18 @@ class TestDetectModulesExtendedFlag:
 # ---------------------------------------------------------------------------
 
 class TestLoggingAndSysPath:
-    """Phase 3 & 4: the sys.path side-effect block is gone and
-    ``detect_modules`` configures logging when invoked directly."""
+    """Phase 3 & 4: the sys.path side-effect block is gone and logging is
+    centralized in the entry point (Fix #1), not per-command."""
 
     @pytest.mark.asyncio
-    async def test_detect_modules_configures_logging_when_called_directly(self) -> None:
-        """Calling ``detect_modules`` directly must configure logging first."""
+    async def test_detect_modules_delegates_logging_to_entry_point(self) -> None:
+        """``detect_modules`` no self-manages logging (Fix #1).
+
+        Logging is centralized in ``_entry_points._run_app`` and runs exactly
+        once per CLI invocation, not once per command body. Calling
+        ``detect_modules`` directly must therefore NOT call ``setup_logging``;
+        the entry point does.
+        """
         import pi_lora.cli.check_hardware as _ch
 
         mock_detector = _build_mock_detector(
@@ -691,7 +697,7 @@ class TestLoggingAndSysPath:
         ) as _spy:
             await _ch.detect_modules(ce0=None, ce1=None, extended=False)
 
-        _spy.assert_called_once()
+        _spy.assert_not_called()
 
     def test_no_syspath_side_effect_in_output(self) -> None:
         """The old ``Added project root to sys.path`` side effect must never appear."""
