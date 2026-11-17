@@ -128,6 +128,10 @@ def _build_mock_detector(
     detector_mock = MagicMock()
     detector_mock.modules = modules
     detector_mock.ce_pins = ce_pins
+    # CR-37: LoRaModuleDetector.__enter__ returns self; mirror that on the mock so
+    # `with detector_mock as detector` yields the wired detector (not a fresh MagicMock
+    # whose detect_modules/validate_config are un-wired). Faithful to the real contract.
+    detector_mock.__enter__.return_value = detector_mock
 
     def _detect_modules(
         config: Any | None = None,

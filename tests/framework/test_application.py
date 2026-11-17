@@ -214,7 +214,7 @@ class TestApplicationLifecycle:
 
     @pytest.mark.asyncio
     async def test_start_loads_from_assembly_config(self) -> None:
-        app = Application(config=None, spi_factory=MockSpiBusFactory())
+        app = Application(spi_factory=MockSpiBusFactory())
         await app.start()
         assert len(app.module_manager.get_all_modules()) >= 1
         for mod in app.module_manager.get_all_modules():
@@ -223,7 +223,7 @@ class TestApplicationLifecycle:
 
     @pytest.mark.asyncio
     async def test_start_creates_modules(self) -> None:
-        app = Application(config=None, spi_factory=MockSpiBusFactory())
+        app = Application(spi_factory=MockSpiBusFactory())
         await app.start()
         assert len(app.module_manager.get_all_modules()) >= 1
         mod = app.module_manager.get_module(0, 0)
@@ -232,7 +232,7 @@ class TestApplicationLifecycle:
 
     @pytest.mark.asyncio
     async def test_stop_cleans_up(self) -> None:
-        app = Application(config=None, spi_factory=MockSpiBusFactory())
+        app = Application(spi_factory=MockSpiBusFactory())
         await app.start()
         await app.stop()
         assert app.scheduler.timer_scheduler._running is False
@@ -241,7 +241,7 @@ class TestApplicationLifecycle:
 
     @pytest.mark.asyncio
     async def test_get_status_returns_snapshot(self) -> None:
-        app = Application(config=None, spi_factory=MockSpiBusFactory())
+        app = Application(spi_factory=MockSpiBusFactory())
         await app.start()
         status = app.get_status()
         assert "modules" in status
@@ -258,7 +258,7 @@ class TestApplicationLifecycle:
 
     @pytest.mark.asyncio
     async def test_run_blocking_command(self) -> None:
-        app = Application(config=None, spi_factory=MockSpiBusFactory())
+        app = Application(spi_factory=MockSpiBusFactory())
         await app.start()
 
         results: list[SimpleCommand] = []
@@ -277,7 +277,7 @@ class TestApplicationLifecycle:
 
     @pytest.mark.asyncio
     async def test_run_async_command_posts_to_queue(self) -> None:
-        app = Application(config=None, spi_factory=MockSpiBusFactory())
+        app = Application(spi_factory=MockSpiBusFactory())
         await app.start()
 
         cmd = SimpleCommand(action="async_cmd")
@@ -293,7 +293,7 @@ class TestApplicationLifecycle:
 
     @pytest.mark.asyncio
     async def test_resolve_all_target(self) -> None:
-        app = Application(config=None, spi_factory=MockSpiBusFactory())
+        app = Application(spi_factory=MockSpiBusFactory())
         await app.start()
 
         broadcast = SimpleCommand(action="broadcast", target="all")
@@ -306,7 +306,7 @@ class TestApplicationLifecycle:
 
     @pytest.mark.asyncio
     async def test_resolve_missing_target_raises(self) -> None:
-        app = Application(config=None, spi_factory=MockSpiBusFactory())
+        app = Application(spi_factory=MockSpiBusFactory())
         await app.start()
 
         bad_cmd = SimpleCommand(action="bad", target=(99, 99))
@@ -316,7 +316,7 @@ class TestApplicationLifecycle:
 
     @pytest.mark.asyncio
     async def test_start_reentrancy_prevents_duplication(self) -> None:
-        app = Application(config=None, spi_factory=MockSpiBusFactory())
+        app = Application(spi_factory=MockSpiBusFactory())
         results = await asyncio.gather(
             *[app.start() for _ in range(10)], return_exceptions=True
         )
@@ -333,7 +333,7 @@ class TestApplicationLifecycle:
 
     @pytest.mark.asyncio
     async def test_start_stop_no_interleave(self) -> None:
-        app = Application(config=None, spi_factory=MockSpiBusFactory())
+        app = Application(spi_factory=MockSpiBusFactory())
         await app.start()
         assert app._started is True
         tasks = [app.start() for _ in range(5)] + [app.stop() for _ in range(5)]
@@ -350,7 +350,7 @@ class TestApplicationLifecycle:
 
     @pytest.mark.asyncio
     async def test_stop_reentrancy_prevents_error(self) -> None:
-        app = Application(config=None, spi_factory=MockSpiBusFactory())
+        app = Application(spi_factory=MockSpiBusFactory())
         await app.start()
         results = await asyncio.gather(
             *[app.stop() for _ in range(5)], return_exceptions=True
@@ -365,7 +365,7 @@ class TestApplicationLifecycle:
     @pytest.mark.asyncio
     async def test_stop_success_does_not_raise(self) -> None:
         """A clean stop() must not raise an ExceptionGroup (no errors collected)."""
-        app = Application(config=None, spi_factory=MockSpiBusFactory())
+        app = Application(spi_factory=MockSpiBusFactory())
         await app.start()
         await app.stop()
         assert app._started is False
@@ -378,7 +378,7 @@ class TestApplicationLifecycle:
         _cleanup_partial_start(). The lifecycle lock serialises the unregister/cleanup
         body, so under interleaved start()/stop() calls cleanup unregisters modules
         correctly and every state flag resets cleanly to a clean baseline."""
-        app = Application(config=None, spi_factory=MockSpiBusFactory())
+        app = Application(spi_factory=MockSpiBusFactory())
         await app.start()
 
         tasks = [app.start() for _ in range(10)] + [app.stop() for _ in range(10)]
@@ -402,7 +402,7 @@ class TestApplicationLifecycle:
         """CR-2 FIX: many concurrent start() calls that each get cancelled must not
         race against _cleanup_partial_start(). Every cancellation path acquires the
         lifecycle lock, so state flags reset cleanly and no module is left tracked."""
-        app = Application(config=None, spi_factory=MockSpiBusFactory())
+        app = Application(spi_factory=MockSpiBusFactory())
         ctrl = _CancellationModule()
 
         async def _instant_assembly(
@@ -449,7 +449,7 @@ class TestApplicationLifecycle:
     async def test_stop_surfaces_failures_as_exceptiongroup(self) -> None:
         """app.stop() surfaces drained failures as an ExceptionGroup containing the
         exact error, and state flags reset to a clean baseline regardless."""
-        app = Application(config=None, spi_factory=MockSpiBusFactory())
+        app = Application(spi_factory=MockSpiBusFactory())
         await app.start()
 
         failing = _FailingStopModule()
@@ -479,7 +479,7 @@ class TestApplicationLifecycle:
     @pytest.mark.asyncio
     async def test_scheduler_started_flag_true_before_scheduler_start(self) -> None:
         """_scheduler_started must be False when scheduler.start() is entered; the flag is set only after start succeeds."""
-        app = Application(config=None, spi_factory=MockSpiBusFactory())
+        app = Application(spi_factory=MockSpiBusFactory())
         entries: list[bool] = []
 
         async def failing_start() -> None:
@@ -499,7 +499,7 @@ class TestApplicationLifecycle:
     @pytest.mark.asyncio
     async def test_start_scheduler_started_flag_after_start(self) -> None:
         """_scheduler_started becomes True only after scheduler.start() succeeds, and resets on stop()."""
-        app = Application(config=None, spi_factory=MockSpiBusFactory())
+        app = Application(spi_factory=MockSpiBusFactory())
         await app.start()
         assert app._scheduler_started is True
         await app.stop()
@@ -509,7 +509,7 @@ class TestApplicationLifecycle:
     async def test_partial_scheduler_failure_no_cleanup_stop(self) -> None:
         """A scheduler that never started must not have stop() called during cleanup;
         _scheduler_started is False when scheduler.start() fails, so no spurious stop()."""
-        app = Application(config=None, spi_factory=MockSpiBusFactory())
+        app = Application(spi_factory=MockSpiBusFactory())
         stop_calls: list[int] = []
 
         async def counting_stop() -> None:
@@ -532,7 +532,7 @@ class TestApplicationLifecycle:
     @pytest.mark.asyncio
     async def test_scheduler_started_flag_true_after_successful_start(self) -> None:
         """Flag remains True after a successful start and resets on stop()."""
-        app = Application(config=None, spi_factory=MockSpiBusFactory())
+        app = Application(spi_factory=MockSpiBusFactory())
         await app.start()
         assert app._scheduler_started is True
         await app.stop()
@@ -547,7 +547,7 @@ class TestApplicationLifecycle:
         init_spi_bus() failed is stop_event_loop()'d and close_spi()'d -- the
         caller owns defensive cleanup after any exception.
         """
-        app = Application(config=None, spi_factory=MockSpiBusFactory())
+        app = Application(spi_factory=MockSpiBusFactory())
 
         failing = _FailingInitModule()
 
@@ -570,7 +570,7 @@ class TestApplicationLifecycle:
         """A module whose init_spi_bus() succeeds but whose start_event_loop() raises
         IS tracked (append happens after init succeeds), so _cleanup_partial_start()
         must drain and close_spi() it even though start() failed."""
-        app = Application(config=None, spi_factory=MockSpiBusFactory())
+        app = Application(spi_factory=MockSpiBusFactory())
 
         failing = _FailingStartEventLoopModule()
 
@@ -592,7 +592,7 @@ class TestApplicationLifecycle:
     @pytest.mark.asyncio
     async def test_start_modules_appended_after_init_success(self) -> None:
         """Every module is added to _started_modules only after init_spi_bus() and start_event_loop() succeed; on stop() the list clears."""
-        app = Application(config=None, spi_factory=MockSpiBusFactory())
+        app = Application(spi_factory=MockSpiBusFactory())
         await app.start()
         started = app._started_modules
         all_mods = app.module_manager.get_all_modules()
@@ -604,7 +604,7 @@ class TestApplicationLifecycle:
 
     @pytest.mark.asyncio
     async def test_stop_unregisters_modules_before_draining(self) -> None:
-        app = Application(config=None, spi_factory=MockSpiBusFactory())
+        app = Application(spi_factory=MockSpiBusFactory())
         await app.start()
         modules = app.module_manager.get_all_modules()
         assert any(m in app.scheduler.timer_scheduler._registered for m in modules)
@@ -621,7 +621,7 @@ class TestApplicationLifecycle:
         scheduler by ``_cleanup_partial_start()``, so no dangling scheduler tasks
         remain. The module is also in get_all_modules(), so loop 2 drains and closes
         it via the defensive cleanup."""
-        app = Application(config=None, spi_factory=MockSpiBusFactory())
+        app = Application(spi_factory=MockSpiBusFactory())
 
         failing = _FailingInitModule()
 
@@ -662,7 +662,7 @@ class TestEmptyConfig:
 
     @pytest.mark.asyncio
     async def test_start_empty_config(self) -> None:
-        app = Application(config=None, spi_factory=MockSpiBusFactory())
+        app = Application(spi_factory=MockSpiBusFactory())
         await app.start()
         status = app.get_status()
         assert "modules" in status
@@ -675,7 +675,7 @@ class TestListAssemblies:
     @pytest.mark.asyncio
     async def test_list_assemblies_basic(self) -> None:
         """Verify list_assemblies returns assembly names."""
-        application = Application(config=None)
+        application = Application()
         application._config = None
         application._config_path = None
 
@@ -687,7 +687,7 @@ class TestListAssemblies:
     @pytest.mark.asyncio
     async def test_list_assemblies_verbose(self) -> None:
         """Verify list_assemblies verbose includes module_name and device_count."""
-        application = Application(config=None)
+        application = Application()
         application._config = None
         application._config_path = None
 
@@ -701,7 +701,7 @@ class TestListAssemblies:
     @pytest.mark.asyncio
     async def test_list_assemblies_json_format(self) -> None:
         """Verify list_assemblies returns dict format suitable for JSON."""
-        application = Application(config=None)
+        application = Application()
         application._config = None
         application._config_path = None
 
@@ -717,7 +717,7 @@ class TestGetAssemblyConfig:
     @pytest.mark.asyncio
     async def test_get_assembly_config_all_devices(self) -> None:
         """Verify get_assembly_config returns config for default assembly."""
-        application = Application(config=None)
+        application = Application()
         application._config = None
         application._config_path = None
 
@@ -727,7 +727,7 @@ class TestGetAssemblyConfig:
     @pytest.mark.asyncio
     async def test_get_assembly_config_single_device(self) -> None:
         """Verify get_assembly_config returns config for a specific SPI/CE slot."""
-        application = Application(config=None)
+        application = Application()
         application._config = None
         application._config_path = None
 
@@ -739,7 +739,7 @@ class TestGetAssemblyConfig:
         """Verify get_assembly_config raises AssemblyNotFoundError for missing assembly."""
         from pi_lora.framework.exceptions import AssemblyNotFoundError
 
-        application = Application(config=None)
+        application = Application()
         application._config = None
         application._config_path = None
 
@@ -753,7 +753,7 @@ class TestGetAssemblyConfig:
 
         from pi_lora.framework.exceptions import DeviceAttachmentNotFoundError
 
-        application = Application(config=None)
+        application = Application()
         application._config = None
         application._config_path = None
 
@@ -770,7 +770,7 @@ class TestGetAssemblyConfig:
     @pytest.mark.asyncio
     async def test_get_assembly_config_validation_error_propagates(self) -> None:
         """Verify get_assembly_config returns config without raising ConfigConsistencyError."""
-        application = Application(config=None)
+        application = Application()
         application._config = None
         application._config_path = None
 
@@ -784,7 +784,7 @@ class TestConfigLoading:
     @pytest.mark.asyncio
     async def test_lazy_load(self) -> None:
         """Verify config is only loaded on first query."""
-        application = Application(config=None)
+        application = Application()
         application._config = None
         application._config_path = None
 
@@ -796,7 +796,7 @@ class TestConfigLoading:
     @pytest.mark.asyncio
     async def test_reload_config(self) -> None:
         """Verify reload_config forces reload."""
-        application = Application(config=None)
+        application = Application()
         application._config = None
         application._config_path = None
 
@@ -813,7 +813,7 @@ class TestCancellationSemantics:
         """When start()'s awaitable path is cancelled, the CancelledError must be
         re-raised (not swallowed) after ``_cleanup_partial_start()`` drains the
         tracked module, so asyncio cancellation semantics are preserved."""
-        app = Application(config=None, spi_factory=MockSpiBusFactory())
+        app = Application(spi_factory=MockSpiBusFactory())
         ctrl = _CancellationModule()
 
         async def _instant_assembly(
@@ -855,7 +855,7 @@ class TestCancellationSemantics:
     ) -> None:
         """The utility runs the cleanup coroutine then re-raises a CancelledError
         so asyncio cancellation semantics are preserved for the caller."""
-        app = Application(config=None, spi_factory=MockSpiBusFactory())
+        app = Application(spi_factory=MockSpiBusFactory())
         ran = False
 
         async def _coro_raises_cancelled() -> None:
@@ -876,7 +876,7 @@ class TestCancellationSemantics:
         original exception is supplied, the ORIGINAL exception is re-raised (not
         the cleanup CancelledError) so the caller observes the correct
         cancellation and the outer CancelledError is not lost."""
-        app = Application(config=None, spi_factory=MockSpiBusFactory())
+        app = Application(spi_factory=MockSpiBusFactory())
         original = asyncio.CancelledError("start() was cancelled")
         cleanup_cancelled = asyncio.CancelledError("cleanup was cancelled")
         ran = False
@@ -903,7 +903,7 @@ class TestCancellationSemantics:
     ) -> None:
         """The utility runs the cleanup coroutine then surfaces whatever it raised
         (a generic Exception, already wrapped in an ExceptionGroup by the path)."""
-        app = Application(config=None, spi_factory=MockSpiBusFactory())
+        app = Application(spi_factory=MockSpiBusFactory())
         raised = RuntimeError("cleanup failed")
 
         async def _coro_raises_exception() -> None:
@@ -920,7 +920,7 @@ class TestCancellationSemantics:
         path surfaces an ``ExceptionGroup`` (via a failing ``close_spi()``), the
         finally-raised RuntimeError must chain the cleanup exception via
         ``__cause__`` so neither the original nor the cleanup error is dropped."""
-        app = Application(config=None, spi_factory=MockSpiBusFactory())
+        app = Application(spi_factory=MockSpiBusFactory())
         failing = _FailingStartAndCloseModule()
 
         async def _register_module(
@@ -968,7 +968,7 @@ class TestCancellationSemantics:
         in ``module_manager.modules`` (registered in the scheduler), so Application must
         drain every module returned by ``get_all_modules()``.
         """
-        app = Application(config=None, spi_factory=MockSpiBusFactory())
+        app = Application(spi_factory=MockSpiBusFactory())
         module = _RestartControllableModule(ce_number=0, spi_device_id=0)
 
         async def _instant_assembly(
@@ -1021,7 +1021,7 @@ class TestCancellationSemantics:
         observes the original RuntimeError, and cleanup_cancelled is recorded as
         __cause__ so the fact that cleanup was interrupted is not lost.
         """
-        app = Application(config=None, spi_factory=MockSpiBusFactory())
+        app = Application(spi_factory=MockSpiBusFactory())
         original: Exception = RuntimeError("start_event_loop() failed")
         cleanup_cancelled: asyncio.CancelledError = asyncio.CancelledError(
             "cleanup was cancelled"
@@ -1056,7 +1056,7 @@ class TestCancellationSemantics:
         scheduler via unregister_module) and then re-raises the KeyboardInterrupt
         verbatim to preserve Ctrl+C semantics — preventing the SPI handle leak that
         previously occurred when cleanup was skipped for BaseExceptions."""
-        app = Application(config=None, spi_factory=MockSpiBusFactory())
+        app = Application(spi_factory=MockSpiBusFactory())
         module = _FailingInitModule(ce_number=0, spi_device_id=0)
 
         async def _instant_assembly(
@@ -1118,7 +1118,7 @@ class TestCancellationSemantics:
         KeyboardInterrupt (Ctrl+C semantics) with the cleanup ExceptionGroup as
         __cause__.
         """
-        app = Application(config=None, spi_factory=MockSpiBusFactory())
+        app = Application(spi_factory=MockSpiBusFactory())
         module = _FailingStartAndCloseModule(ce_number=0, spi_device_id=0)
 
         async def _instant_assembly(
@@ -1182,7 +1182,7 @@ class TestDoubleCheckedLocking:
         """Many concurrent start() coroutines: the assembly-start side-effect
         (load_from_config) runs exactly once, and only one executes the startup
         body."""
-        app = Application(config=None, spi_factory=MockSpiBusFactory())
+        app = Application(spi_factory=MockSpiBusFactory())
         module = _RestartControllableModule(ce_number=0, spi_device_id=0)
         load_calls: list[int] = []
 
@@ -1235,7 +1235,7 @@ class TestDoubleCheckedLocking:
     async def test_fast_path_short_circuits_already_started(self) -> None:
         """Once _started is True, a subsequent start() short-circuits via the
         fast-path double-checked locking without re-running the assembly side-effect."""
-        app = Application(config=None, spi_factory=MockSpiBusFactory())
+        app = Application(spi_factory=MockSpiBusFactory())
         module = _RestartControllableModule(ce_number=0, spi_device_id=0)
         load_calls: list[int] = []
 
@@ -1334,7 +1334,7 @@ class TestApplicationRestart:
 
     @pytest.mark.asyncio
     async def test_application_restart_after_failed_start(self) -> None:
-        app = Application(config=None, spi_factory=MockSpiBusFactory())
+        app = Application(spi_factory=MockSpiBusFactory())
         load_calls: list[int] = []
 
         async def _load(
@@ -1377,7 +1377,7 @@ class TestApplicationRestart:
 
     @pytest.mark.asyncio
     async def test_application_restart_after_stop(self) -> None:
-        app = Application(config=None, spi_factory=MockSpiBusFactory())
+        app = Application(spi_factory=MockSpiBusFactory())
         load_calls: list[int] = []
 
         async def _load(

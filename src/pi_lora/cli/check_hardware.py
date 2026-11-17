@@ -96,41 +96,47 @@ async def detect_modules(
     ),
 ) -> None:
     """Scan hardware and optionally validate against an expected configuration."""
-    detector = LoRaModuleDetector(ce_pins=[0, 1])
+    # CR-37 FIX (Plan-37 Fix 2.4, code_review-36.1 finding 9.2.1, P1). The detector is
+    # now wrapped in a context manager so SPI devices opened by LoRaModule.__init__ are
+    # deterministically closed via __exit__ even if detect_modules() raises. The
+    # detection sequence itself (Init SPI -> Return status) stays strictly read-only;
+    # closing happens only after detection completes. Cross-reference: Plan-25, Plan-26,
+    # Plan-27, Plan-35, Plan-36. Anti-regression: SPI devices must be deterministically
+    # closed — do not rely on __del__ alone.
+    with LoRaModuleDetector(ce_pins=[0, 1]) as detector:
+        results = detector.detect_modules(extended=extended)
 
-    results = detector.detect_modules(extended=extended)
+        print("\nHardware Detection Results:")
+        for result in results:
+            print(f"  ✅ {result}")
 
-    print("\nHardware Detection Results:")
-    for result in results:
-        print(f"  ✅ {result}")
+        if ce0 is not None or ce1 is not None:
+            config = LoRaModuleConfig(
+                ce0_expected_module_type=cast(  # PLAN-20: Cast matches runtime reality — Typer callback _normalise_module_type
+                    # already converted sx1276/sx1278 → rfm95w/rfm98w. Only canonical values exist here.
+                    Literal["rfm95w", "rfm98w", "none"], ce0
+                ) if ce0 is not None else None,
+                ce1_expected_module_type=cast(  # PLAN-20: Cast matches runtime reality — Typer callback _normalise_module_type
+                    # already converted sx1276/sx1278 → rfm95w/rfm98w. Only canonical values exist here.
+                    Literal["rfm95w", "rfm98w", "none"], ce1
+                ) if ce1 is not None else None,
+            )
 
-    if ce0 is not None or ce1 is not None:
-        config = LoRaModuleConfig(
-            ce0_expected_module_type=cast(  # PLAN-20: Cast matches runtime reality — Typer callback _normalise_module_type
-                # already converted sx1276/sx1278 → rfm95w/rfm98w. Only canonical values exist here.
-                Literal["rfm95w", "rfm98w", "none"], ce0
-            ) if ce0 is not None else None,
-            ce1_expected_module_type=cast(  # PLAN-20: Cast matches runtime reality — Typer callback _normalise_module_type
-                # already converted sx1276/sx1278 → rfm95w/rfm98w. Only canonical values exist here.
-                Literal["rfm95w", "rfm98w", "none"], ce1
-            ) if ce1 is not None else None,
-        )
+            validation_results: list[ValidationResult] = detector.validate_config(config)
 
-        validation_results: list[ValidationResult] = detector.validate_config(config)
+            print("\nConfiguration Validation Results:")
+            all_passed = True
+            for vr in validation_results:
+                status = "✅ PASS" if vr.passed else "❌ FAIL"
+                print(f"  {status} CE{vr.ce_pin}: {vr.message}")
+                if not vr.passed:
+                    all_passed = False
 
-        print("\nConfiguration Validation Results:")
-        all_passed = True
-        for vr in validation_results:
-            status = "✅ PASS" if vr.passed else "❌ FAIL"
-            print(f"  {status} CE{vr.ce_pin}: {vr.message}")
-            if not vr.passed:
-                all_passed = False
-
-        if all_passed:
-            print("\n✅ Configuration is valid.")
-        else:
-            print("❌ Configuration validation failed.")
-            raise typer.Exit(code=1)
+            if all_passed:
+                print("\n✅ Configuration is valid.")
+            else:
+                print("❌ Configuration validation failed.")
+                raise typer.Exit(code=1)
 
 
 @app.callback(invoke_without_command=True)

@@ -72,7 +72,7 @@ async def test_start_stop_concurrent_no_double_cleanup() -> None:
     is drained exactly once, the gather completes without deadlock, and no
     ExceptionGroup is produced by a cleanup race.
     """
-    app = Application(config=None, spi_factory=MockSpiBusFactory())
+    app = Application(spi_factory=MockSpiBusFactory())
 
     module = _TrackStartFailModule()
 

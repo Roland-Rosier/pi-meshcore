@@ -105,7 +105,7 @@ async def list_assemblies_impl(
 
     custom_path: Path | None = Path(config_file) if config_file else None
 
-    application = Application(config=None)
+    application = Application()
 
     assemblies = await application.list_assemblies(verbose=verbose, config_path=custom_path)
 
@@ -154,7 +154,7 @@ async def show_config_impl(
 
     custom_path: Path | None = Path(config_file) if config_file else None
 
-    application = Application(config=None)
+    application = Application()
 
     try:
         result = await application.get_assembly_config(

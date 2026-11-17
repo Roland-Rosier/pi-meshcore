@@ -40,7 +40,7 @@ async def test_hardware_impl(
     """Test hardware by transitioning modules to RESET_STATE (async implementation)."""
 
     custom_path: Path | None = Path(config_file) if config_file else None
-    application = Application(config=None)
+    application = Application()
 
     # CR-33.4 / Plan-34: the whole body is wrapped in a single try whose finally
     # always calls application.stop(), so clean shutdown runs on every path -- the

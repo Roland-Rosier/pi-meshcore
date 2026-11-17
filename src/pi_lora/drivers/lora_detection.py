@@ -14,6 +14,7 @@
 
 from __future__ import annotations
 
+import contextlib
 import os
 import sys
 from dataclasses import dataclass
@@ -115,6 +116,28 @@ class LoRaModuleDetector:
         if ce_pins is None:
             ce_pins = [0, 1]
         self.modules = [LoRaModule(ce_pin) for ce_pin in ce_pins]
+        self._entered: bool = False
+
+    def __enter__(self) -> LoRaModuleDetector:
+        # CR-37 FIX (Plan-37 Fix 2.4, code_review-36.1 finding 9.2.1, P1).
+        # LoRaModule.__init__ opens SPI devices (LoRaModule._initialize ->
+        # self.spi_device.open(...)). The old detect_modules CLI never closed them,
+        # relying on the unreliable __del__. Making LoRaModuleDetector a context manager
+        # guarantees SPI.close() runs on exit even if detect_modules() raises. The
+        # detection sequence itself (Init SPI -> Return status) stays strictly read-only;
+        # closing happens only in __exit__ after detection completes.
+        # Cross-reference: Plan-25, Plan-26, Plan-27, Plan-35, Plan-36. Anti-regression:
+        # SPI devices must be deterministically closed — do not rely on __del__ alone.
+        self._entered = True
+        return self
+
+    def __exit__(self, exc_type: Any, exc_val: Any, exc_tb: Any) -> None:
+        # Best-effort SPI cleanup for every module. SPI.close() may be unavailable on
+        # some driver backends, so guard per module; never let cleanup raise.
+        with contextlib.suppress(Exception):
+            for module in self.modules:
+                module.spi_device.close()
+        self._entered = False
 
     def detect_modules(
         self,

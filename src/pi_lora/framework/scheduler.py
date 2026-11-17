@@ -527,9 +527,16 @@ class InterruptBridge:
         #     (C extension GPIO drivers) — without it, trigger_interrupt() could read stale
         #     _loop and call call_soon_threadsafe() on a closed loop (findings 892, 921, 981)
         #   - This trade-off (brief block on shutdown) is preferred over the race condition
-        #   - Anti-regression (Plan-27 Fix #5, Findings 709-716, 759-765, CR-3.10):
+        #   - DEADLOCK ANALYSIS (CR-37 FIX, Plan-37 Fix 2.3, code_review-36.1 finding 9.3.3, P1):
+        #     No deadlock is possible. The asyncio tasks (_interrupt_task, _drain_sync_queue)
+        #     do NOT acquire _trigger_lock — they use only thread-safe queue.Queue and
+        #     asyncio.Queue. Therefore stop() waiting for tasks to finish (via gather) cannot
+        #     deadlock with trigger_interrupt() holding the lock. The only contention is the
+        #     brief moment when stop() acquires the lock after tasks are done, which blocks
+        #     trigger_interrupt() for microseconds.
+        #   - Anti-regression (Plan-27 Fix #5, Findings 709-716, 759-765, CR-3.10, Plan-26):
         #     Do not remove this lock or replace with an unprotected write — the race
-        #     findings 892/921/981 depend on it.
+        #     findings 892/921/981 depend on it. Do not replace with an unprotected write.
         with self._trigger_lock:
             self._loop = None
 

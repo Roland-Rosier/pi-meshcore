@@ -53,8 +53,15 @@ logger = logging.getLogger(__name__)
 class Application:
     """Top-level runtime owning the module lifecycle and command infrastructure."""
 
-    def __init__(self, config: Any, spi_factory: Any | None = None) -> None:
-        self.config = config
+    def __init__(self, spi_factory: Any | None = None) -> None:
+        # CR-37 FIX (Plan-37 Fix 2.5, code_review-36.1 finding 9.2.1, P2). The `config`
+        # parameter was vestigial since Plan-9: assembly config is now loaded internally
+        # via get_assembly_config()/reload_config()/_load_config(), never from a caller
+        # passed config. `self.config` is never read anywhere, so both the parameter and
+        # the assignment are removed. Custom config is still supported via config_path.
+        # Cross-reference: Plan-25, Plan-26, Plan-27, Plan-35/36. Anti-regression: every
+        # caller of Application(...) must be updated to drop the `config=` keyword or the
+        # constructor signature breaks — see the call-site updates below.
         self.scheduler = Scheduler()
         self.module_manager = ModuleManager()
         self.command_bus = CommandBus()
@@ -285,14 +292,21 @@ class Application:
           Case 2 — Cleanup raises CancelledError: chain with original. `raise original_exc
               from cleanup_cancelled` preserves both the original and the cleanup interruption
               as __cause__. Valid on Python 3.13 where CancelledError is a BaseException.
-          Case 3 — Cleanup raises a regular Exception (possibly an ExceptionGroup): chain with
-              original ONLY if original_exc is a shutdown signal (a BaseException that is NOT
-              an Exception, e.g. KeyboardInterrupt/SystemExit/CancelledError); otherwise let the
-              cleanup exception propagate (original_exc stays reachable via __context__).
-          Case 4 — Cleanup raises a BaseException other than CancelledError (KeyboardInterrupt,
-              SystemExit, GeneratorExit): chain with original if original_exc is a BaseException;
-              otherwise raise verbatim. This is CR-3.7 FIX; the pre-fix code had NO handler for
-              these and swallowed them.
+           Case 3 — Cleanup raises a regular Exception (NOT an ExceptionGroup, which is now
+               handled by the dedicated Case 3b handler): chain with original ONLY if
+               original_exc is a shutdown signal (a BaseException that is NOT an Exception,
+               e.g. KeyboardInterrupt/SystemExit/CancelledError); otherwise let the cleanup
+               exception propagate (original_exc stays reachable via __context__).
+           Case 3b — Cleanup raises an ExceptionGroup (BaseException, NOT an Exception on
+               Python 3.11+): caught by a dedicated handler BEFORE except BaseException so it
+               does not fall through into the shutdown-signal handler. The full group is logged
+               and re-raised verbatim so the per-module errors collected by
+               _cleanup_partial_start() propagate intact.
+           Case 4 — Cleanup raises a BaseException other than CancelledError (KeyboardInterrupt,
+               SystemExit, GeneratorExit): chain with original ONLY if original_exc is a
+               genuine shutdown signal (a BaseException that is NOT an Exception); otherwise
+               raise verbatim. This is CR-3.7 FIX; the pre-fix code had NO handler for these
+               and swallowed them.
 
         BUG (CR-3): the pre-fix code caught CancelledError together with generic
         Exception via ``except (Exception, asyncio.CancelledError)`` and then did
@@ -371,6 +385,21 @@ class Application:
             if original_exc is not None:
                 raise original_exc from cleanup_exc
             raise
+        except ExceptionGroup as cleanup_exc:
+            # CR-37 FIX (Plan-37 Fix 2.1, code_review-36.1 finding 9.3.1, P0).
+            # ExceptionGroup is a BaseException (NOT an Exception) on Python 3.11+, so
+            # it currently falls through `except Exception` into the `except BaseException`
+            # handler, which applies shutdown-signal chaining logic that is wrong for an
+            # ExceptionGroup. This dedicated handler catches it first and logs + re-raises
+            # the full group verbatim so the per-module errors collected by
+            # _cleanup_partial_start() propagate intact.
+            # Cross-reference: Plan-25 (Exception cleanup handling), Plan-26 (Findings
+            # 892/921/981 lock memory visibility), Plan-35/36 (CR-3 cancellation set).
+            # Anti-regression: do NOT let ExceptionGroup fall through to `except BaseException`.
+            logger.warning(
+                "Cleanup raised ExceptionGroup: %r", cleanup_exc
+            )
+            raise
         except BaseException as cleanup_exc:  # KeyboardInterrupt, SystemExit, GeneratorExit
             # CR-3 FIX (Findings 610-617, CR-3.7): Missing `except BaseException` handler.
             #
@@ -392,7 +421,10 @@ class Application:
             # Alternative rejected: catching BaseException BEFORE Exception — would intercept all
             # Exceptions too, breaking the Exception handler's __cause__ logic. Must order
             # Exception first (more specific) then BaseException (catch-all).
-            if original_exc is not None and isinstance(original_exc, BaseException):
+            if original_exc is not None and isinstance(
+                original_exc,
+                asyncio.CancelledError | KeyboardInterrupt | SystemExit | GeneratorExit,
+            ):
                 raise original_exc from cleanup_exc
             raise
         # FIX-2 (Plan-24): When cleanup completes normally (no exception), the
