@@ -104,7 +104,60 @@ async def _cleanup_and_reraise_cancellation(
 
 This is the §1.3 case.
 
+## Exception Chaining Anti-Patterns (Plan-37 Regression Prevention)
+
+### Self-Referential `__cause__` Cycle — **FORBIDDEN**
+
+When chaining exceptions with `raise original_exc from cleanup_exc`, **always check object identity first**. If `cleanup_exc` is the **same object** as `original_exc` (possible when a second `KeyboardInterrupt`/`SystemExit` interrupts cleanup while the first is being handled), `raise exc from exc` creates `exc.__cause__ = exc` — a self-referential cycle that breaks traceback rendering and exception group nesting.
+
+**Correct pattern** (Plan-37 Fix 2.1/2.2 fix):
+```python
+except BaseException as cleanup_exc:  # KeyboardInterrupt, SystemExit, GeneratorExit
+    if original_exc is not None and isinstance(
+        original_exc,
+        (asyncio.CancelledError, KeyboardInterrupt, SystemExit, GeneratorExit)
+    ):
+        # CRITICAL: Check identity to avoid self-referential __cause__ cycle
+        if cleanup_exc is original_exc:
+            raise  # Avoid exc.__cause__ = exc cycle
+        raise original_exc from cleanup_exc
+    raise
+```
+
+**Anti-pattern (BUG)**:
+```python
+# WRONG — creates self-referential cycle when cleanup_exc is original_exc
+except BaseException as cleanup_exc:
+    if original_exc is not None and isinstance(original_exc, BaseException):
+        raise original_exc from cleanup_exc  # BUG: if same object, exc.__cause__ = exc
+    raise
+```
+
+### ExceptionGroup Handling in Cleanup
+
+When `ExceptionGroup` can be raised during cleanup (e.g., `_cleanup_partial_start()` collecting per-module errors), add an **explicit `except ExceptionGroup` handler BEFORE `except Exception`**. In Python 3.11+, `ExceptionGroup` is a `BaseException` (NOT an `Exception`), so it falls through `except Exception` into `except BaseException`, which applies shutdown-signal chaining logic that is wrong for `ExceptionGroup`.
+
+```python
+try:
+    await cleanup_coro()
+except asyncio.CancelledError as cleanup_cancelled:
+    # ... cancellation handling ...
+except ExceptionGroup as cleanup_exc:
+    # ExceptionGroup is BaseException in 3.11+. Catch BEFORE except Exception.
+    # Log and re-raise verbatim so per-module errors propagate intact.
+    logger.warning("Cleanup raised ExceptionGroup: %r", cleanup_exc)
+    raise
+except Exception as cleanup_exc:
+    # Regular Exception handling
+    if original_exc is not None:
+        raise original_exc from cleanup_exc
+    raise
+except BaseException as cleanup_exc:  # KeyboardInterrupt, SystemExit, GeneratorExit
+    # ... shutdown signal handling with identity check ...
+```
+
 ## Reference
 
 - Fixed defect: `src/pi_lora/cli/test.py` NR-4 — `except BaseException:` replaced with `except Exception:` (Plan-14, R-1).
 - Deliberate catches (Plan-17): the `CancelledError`/`BaseException` split in `module_manager.py` (H-16-1) and the `_cleanup_and_reraise_cancellation()` contract in `application.py` (§1.3).
+- **Plan-37 Regressions Fixed**: Self-referential `__cause__` cycles in `start()` and `_cleanup_and_reraise_cancellation()` (code_review-37.2 findings 3.3, 3.4); missing `except ExceptionGroup` in cleanup handler (code_review-36.1 finding 9.3.1).

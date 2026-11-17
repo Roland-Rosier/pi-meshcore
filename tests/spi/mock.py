@@ -169,6 +169,9 @@ class MockSpiBusFactory:
         self,
         bus: int = 0,
         device: int = 0,
+        *,  # keyword-only args to match protocol
+        xfer_timeout: float = 5.0,
+        factory_owned: bool = False,
     ) -> SpiBus:
         """Return a new *unopened* mock SPI bus for *bus* and *device*.
 
@@ -181,6 +184,11 @@ class MockSpiBusFactory:
         FIX 11 (Issue 24.11, Plan-25): bus/device are passed into the
         ``MockSpiBus`` constructor so they are fixed at construction, and
         ``open()`` takes no args to satisfy the ``SpiBus`` protocol.
+
+        FIX 7 (Plan-38): ``xfer_timeout`` and ``factory_owned`` are added as
+        keyword-only params to satisfy the ``SpiBusFactory`` protocol Liskov
+        contract — callers passing these keywords to the mock must not fail.
+        They are accepted but ignored since the mock needs neither.
         """
         mock_bus = MockSpiBus(
             bus_number=bus,

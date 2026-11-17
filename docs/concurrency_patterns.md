@@ -113,3 +113,108 @@ if best_key is None:
 ```
 
 This is the H-16-3 case.
+
+## Concurrency Anti-Patterns (Plan-37 Regression Prevention)
+
+### Double-Checked Locking is UNSAFE for Boolean Flags that Transition False→True→False
+
+The double-checked locking pattern (outer `if flag: return` → inner `async with lock: if flag: return`) is **only safe for one-time initialization** (False→True). It is **UNSAFE** for a boolean flag that can transition back to `False` (e.g., `_started` flag in `Application` that goes False→True on `start()`, True→False on `stop()`, then False→True again on restart).
+
+**Why it fails**: On free-threaded builds or non-x86, a stale read of `True` (after `stop()` set it to `False` but the write hasn't propagated) causes the fast path to return early without acquiring the lock — the application fails to restart.
+
+**Anti-pattern (BUG)**:
+```python
+# WRONG for False→True→False flags
+already_started: bool = self._started  # Fast-path read OUTSIDE lock
+if already_started:
+    return
+async with self._lifecycle_lock:
+    if self._started:
+        return
+```
+
+**Correct pattern**: Always acquire the lock for flags that can transition back to `False`:
+```python
+# CORRECT — always acquire lock
+async with self._lifecycle_lock:
+    if self._started:
+        return
+```
+
+**Audit**: `grep -rn "if self\._started:" src/ --include="*.py"` should show **no fast-path reads outside a lock** for `_started` or similar state flags.
+
+### LazyAsyncLock Holder Must Use `aiologic.Lock`, NOT `asyncio.Lock`
+
+`LazyAsyncLock._get_or_create_holder()` in `src/pi_lora/framework/lazy_async_lock.py` creates a holder lock. This holder is shared across threads that call `get_bus_lock()` (each with their own event loop via `asyncio.run()` or `asyncio.to_thread()`). Using `asyncio.Lock()` ties the holder to **one specific event loop**, causing cross-thread contention failures ("Future attached to a different loop").
+
+**Anti-pattern (BUG)**:
+```python
+def _get_or_create_holder(self) -> asyncio.Lock:
+    with self._holder_init_lock:
+        if self._holder is None:
+            self._holder = asyncio.Lock()  # Bound to THIS thread's event loop!
+        return self._holder
+```
+
+**Correct pattern**: Use `aiologic.Lock()` (synchronous constructor, works across threads):
+```python
+def _get_or_create_holder(self) -> 'aiologic.Lock':
+    with self._holder_init_lock:
+        if self._holder is None:
+            self._holder = self._ensure_aiologic_imported().Lock()
+        return self._holder
+```
+
+**Test verification**: `test_registry_thread_safety` in `tests/drivers/spi/test_locks.py` must pass with true concurrent `asyncio.run(get_bus_lock(0))` calls from multiple threads.
+
+### Context Manager + `__del__` Interaction — Prevent Double-Close
+
+When adding a context manager (`__enter__`/`__exit__`) to a class that **already has `__del__` cleanup**, the `__exit__` must clear the resource reference to prevent double-close when the object is later garbage collected.
+
+**Anti-pattern (BUG)**:
+```python
+def __exit__(self, exc_type, exc_val, exc_tb) -> None:
+    with contextlib.suppress(Exception):  # WRONG: wraps entire loop
+        for module in self.modules:
+            module.spi_device.close()
+    # Missing: module.spi_device = None → double-close in __del__
+```
+
+**Correct pattern**:
+```python
+def __exit__(self, exc_type, exc_val, exc_tb) -> None:
+    for module in self.modules:
+        try:
+            if hasattr(module.spi_device, 'close'):
+                module.spi_device.close()
+            module.spi_device = None  # Prevent double-close in __del__
+        except Exception as e:
+            logger.warning("Failed to close SPI device for CE %s: %s", module.ce_pin, e)
+```
+
+**Key requirements**:
+1. Per-module `try/except` — one failure doesn't stop cleanup of others
+2. Clear resource reference (`module.spi_device = None`) after close
+3. Log failures but don't raise — cleanup must never propagate exceptions
+
+### InterruptBridge.stop() Race Window — Acquire Lock FIRST
+
+When a component uses a lock shared with a sync-thread callback (e.g., `_trigger_lock` shared with `trigger_interrupt()` from GPIO threads), the `stop()` method must acquire the lock **BEFORE** setting the "running" flag to `False`. Otherwise, new callbacks can fire during the window between `_running=False` and lock acquisition.
+
+**Anti-pattern (RACE)**:
+```python
+async def stop(self) -> None:
+    self._running = False
+    await asyncio.gather(self._task.cancel(), ...)
+    with self._trigger_lock:  # Too late! trigger_interrupt() can race here
+        self._loop = None
+```
+
+**Correct pattern**:
+```python
+async def stop(self) -> None:
+    with self._trigger_lock:  # Acquire FIRST — blocks new trigger_interrupt() calls
+        self._running = False
+        self._loop = None
+    await asyncio.gather(self._task.cancel(), ...)
+```

@@ -494,51 +494,18 @@ class InterruptBridge:
             self._drain_task = asyncio.create_task(self._drain_sync_queue())
 
     async def stop(self) -> None:
-        self._running = False
+        # Acquire lock FIRST to prevent new interrupts during shutdown
+        # (code_review-37.2 Section 3.6: race window fix)
+        with self._trigger_lock:
+            self._running = False
+            self._loop = None
+        # Now safe to cancel tasks — no new interrupts can be processed
         if self._task and not self._task.done():
             self._task.cancel()
             await asyncio.gather(self._task, return_exceptions=True)
         if self._drain_task and not self._drain_task.done():
             self._drain_task.cancel()
             await asyncio.gather(self._drain_task, return_exceptions=True)
-        # Location 5 (Plan-18 §6 anti-regression). Clear _loop on stop.
-        # Plan-17 H-16-2 captured the event loop in start()
-        # (self._loop = asyncio.get_running_loop()) but did NOT release it in
-        # stop(), so the stale loop reference survived a stop() -> start()
-        # restart. On restart trigger_interrupt() would call
-        # call_soon_threadsafe() on the stale, possibly-closed loop -> RuntimeError.
-        # Setting self._loop = None on stop forces start() to re-capture a fresh
-        # loop, guaranteeing restart safety.
-        #
-        # PLAN-26 FIX (Findings 892, 921, 981): Acquire _trigger_lock when clearing
-        # _loop to prevent race with trigger_interrupt() which reads _loop under
-        # the same lock. On non-GIL threads (C extension GPIO drivers), a write
-        # without the lock may not be immediately visible, causing trigger_interrupt()
-        # to call call_soon_threadsafe() on a stale/closed loop.
-        # Cross-reference: code_review-25.3.json findings 892, 921, 981.
-        # LOCK ORDERing NOTE: This acquires _trigger_lock which is also held by
-        # trigger_interrupt() (called from GPIO interrupt threads). If stop() is called
-        # while an interrupt handler holds the lock, stop() blocks briefly until the
-        # handler releases it. This is ACCEPTable because:
-        #   - trigger_interrupt() holds the lock for a SHORT duration (queue operations only)
-        #   - stop() is called during GRACEFUL SHUTDOWN, not in latency-critical paths
-        #   - The lock is a threading.RLock, so re-entrant interrupt handlers won't deadlock
-        #   - The lock is REQUIRED for memory visibility of _loop = None on non-GIL threads
-        #     (C extension GPIO drivers) — without it, trigger_interrupt() could read stale
-        #     _loop and call call_soon_threadsafe() on a closed loop (findings 892, 921, 981)
-        #   - This trade-off (brief block on shutdown) is preferred over the race condition
-        #   - DEADLOCK ANALYSIS (CR-37 FIX, Plan-37 Fix 2.3, code_review-36.1 finding 9.3.3, P1):
-        #     No deadlock is possible. The asyncio tasks (_interrupt_task, _drain_sync_queue)
-        #     do NOT acquire _trigger_lock — they use only thread-safe queue.Queue and
-        #     asyncio.Queue. Therefore stop() waiting for tasks to finish (via gather) cannot
-        #     deadlock with trigger_interrupt() holding the lock. The only contention is the
-        #     brief moment when stop() acquires the lock after tasks are done, which blocks
-        #     trigger_interrupt() for microseconds.
-        #   - Anti-regression (Plan-27 Fix #5, Findings 709-716, 759-765, CR-3.10, Plan-26):
-        #     Do not remove this lock or replace with an unprotected write — the race
-        #     findings 892/921/981 depend on it. Do not replace with an unprotected write.
-        with self._trigger_lock:
-            self._loop = None
 
     async def _drain_sync_queue(self) -> None:
         """Drain thread-safe producer queue into async consumer queue.

@@ -49,7 +49,6 @@ Usage:
 
 from __future__ import annotations
 
-import asyncio
 import threading
 from typing import TYPE_CHECKING
 
@@ -68,7 +67,11 @@ class LazyAsyncLock:
 
     def __init__(self) -> None:
         self._holder_init_lock: threading.Lock = threading.Lock()
-        self._holder: asyncio.Lock | None = None
+        # code_review-37.2 [CRITICAL] Holder must be aiologic.Lock (synchronous
+        # constructor), NOT asyncio.Lock, which is bound to the creating thread's
+        # event loop and fails cross-thread access. Prevents the race condition
+        # exercised by test_registry_thread_safety.
+        self._holder: aiologic.Lock | None = None
         self._lock: aiologic.Lock | None = None
         self._aiologic_module: aiologic | None = None
 
@@ -78,10 +81,14 @@ class LazyAsyncLock:
             self._aiologic_module = aiologic
         return self._aiologic_module
 
-    def _get_or_create_holder(self) -> asyncio.Lock:
+    def _get_or_create_holder(self) -> aiologic.Lock:
         with self._holder_init_lock:
             if self._holder is None:
-                self._holder = asyncio.Lock()
+                # code_review-37.2 [CRITICAL] Construct via aiologic.Lock() so the
+                # holder is not bound to this thread's event loop; asyncio.Lock()
+                # would break under the cross-thread access in
+                # test_registry_thread_safety.
+                self._holder = self._ensure_aiologic_imported().Lock()
             return self._holder
 
     async def acquire(self) -> aiologic.Lock:

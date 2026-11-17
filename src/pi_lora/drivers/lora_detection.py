@@ -14,11 +14,13 @@
 
 from __future__ import annotations
 
-import contextlib
+import logging
 import os
 import sys
 from dataclasses import dataclass
 from typing import Any, Literal
+
+logger = logging.getLogger(__name__)
 
 # Add project root to Python path if not already present
 current_dir = os.path.abspath(os.path.dirname(__file__))
@@ -116,7 +118,6 @@ class LoRaModuleDetector:
         if ce_pins is None:
             ce_pins = [0, 1]
         self.modules = [LoRaModule(ce_pin) for ce_pin in ce_pins]
-        self._entered: bool = False
 
     def __enter__(self) -> LoRaModuleDetector:
         # CR-37 FIX (Plan-37 Fix 2.4, code_review-36.1 finding 9.2.1, P1).
@@ -128,16 +129,21 @@ class LoRaModuleDetector:
         # closing happens only in __exit__ after detection completes.
         # Cross-reference: Plan-25, Plan-26, Plan-27, Plan-35, Plan-36. Anti-regression:
         # SPI devices must be deterministically closed — do not rely on __del__ alone.
-        self._entered = True
         return self
 
     def __exit__(self, exc_type: Any, exc_val: Any, exc_tb: Any) -> None:
-        # Best-effort SPI cleanup for every module. SPI.close() may be unavailable on
-        # some driver backends, so guard per module; never let cleanup raise.
-        with contextlib.suppress(Exception):
-            for module in self.modules:
-                module.spi_device.close()
-        self._entered = False
+        # Best-effort SPI cleanup for every module. Log failures but don't raise.
+        # Clear spi_device reference to prevent double-close in LoRaModule.__del__
+        # (code_review-37.2 Sections 3.8 & 3.9)
+        for module in self.modules:
+            try:
+                if hasattr(module.spi_device, 'close'):
+                    module.spi_device.close()
+                module.spi_device = None  # Prevent double-close in LoRaModule.__del__
+            except Exception as e:
+                logger.warning(
+                    "Failed to close SPI device for CE %s: %s", module.ce_pin, e
+                )
 
     def detect_modules(
         self,

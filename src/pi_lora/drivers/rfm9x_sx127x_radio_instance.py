@@ -16,6 +16,7 @@
 
 from __future__ import annotations
 
+import warnings
 from dataclasses import dataclass
 from typing import NamedTuple
 
@@ -125,6 +126,16 @@ class AssemblyNotFoundError(RadioInstanceError):
         )
         self.assembly_name = assembly_name
         self.device_key = device_key
+
+    @property
+    def module_name(self) -> str:
+        """Deprecated: Use assembly_name instead."""
+        warnings.warn(
+            "AssemblyNotFoundError.module_name is deprecated; use assembly_name",
+            DeprecationWarning,
+            stacklevel=2,
+        )
+        return self.assembly_name
 
 
 class DeviceSpecNotFoundError(RadioInstanceError):

@@ -94,19 +94,14 @@ class Application:
         deadlock on a self-held lock.
         """
         exc_to_raise: BaseException | None = None
-        # PLAN-25 FIX (Fix 6, Issue 24.7): double-checked locking. Fast-path read of
-        # self._started outside the lock is a benign read-only optimization (avoid lock
-        # contention on the common already-started case). The authoritative check is the
-        # re-check inside _lifecycle_lock, which serializes the actual startup.
-        #
-        # NOTE: This pattern relies on CPython's GIL for memory visibility of the
-        # _started flag. The re-check inside the lock is the authoritative guard.
-        # On free-threaded builds or non-x86, a stale read is possible but harmless
-        # (causes unnecessary lock acquisition, not incorrect behavior).
-        # Cross-reference: code_review-24.1.json finding 24.7.
-        already_started: bool = self._started
-        if already_started:
-            return
+        # PLAN-25 FIX (Fix 6, Issue 24.7): double-checked locking was REMOVED in Plan-38.
+        # The fast-path read of self._started outside the lock is UNSAFE for a boolean
+        # that transitions False→True→False (code_review-37.2 Section 3.2):
+        #   1. Thread A: reads _started=False, acquires lock, starts, sets _started=True
+        #   2. Thread B: calls stop(), acquires lock, sets _started=False
+        #   3. Thread C: reads _started=True (STale - Thread B's write not visible), returns early WITHOUT starting!
+        # The authoritative check is now ONLY the re-check inside _lifecycle_lock.
+        # Cross-reference: code_review-37.2.json Section 3.2.
         async with self._lifecycle_lock:
             # Re-check inside lock (authoritative)
             if self._started:
@@ -162,14 +157,6 @@ class Application:
                 # (a BaseException). If cleanup is interrupted by another shutdown signal,
                 # re-raise the ORIGINAL shutdown signal to preserve semantics.
                 exc_to_raise = exc
-                try:
-                    await self._cleanup_partial_start()
-                except BaseException as cleanup_exc:
-                    # If cleanup is interrupted by another shutdown signal, re-raise
-                    # the original shutdown signal with the cleanup interruption as __cause__.
-                    # If cleanup raises a regular Exception, chain it with the original.
-                    raise exc from cleanup_exc
-                raise exc
             # NR-6 FIX: cleanup runs INSIDE the lock so it is mutually exclusive
             # with a concurrent stop(). _cleanup_partial_start() must NOT re-acquire
             # the lock (NR-6 FIX) or asyncio's non-recursive Lock would deadlock.
@@ -396,6 +383,8 @@ class Application:
             # Cross-reference: Plan-25 (Exception cleanup handling), Plan-26 (Findings
             # 892/921/981 lock memory visibility), Plan-35/36 (CR-3 cancellation set).
             # Anti-regression: do NOT let ExceptionGroup fall through to `except BaseException`.
+            if original_exc is not None:
+                raise original_exc from cleanup_exc
             logger.warning(
                 "Cleanup raised ExceptionGroup: %r", cleanup_exc
             )
@@ -425,6 +414,11 @@ class Application:
                 original_exc,
                 asyncio.CancelledError | KeyboardInterrupt | SystemExit | GeneratorExit,
             ):
+                # Prevent self-referential __cause__ cycle (code_review-37.2 Section 3.4):
+                # If cleanup_exc IS the same object as original_exc, chaining creates
+                # original_exc.__cause__ = original_exc which breaks traceback rendering.
+                if cleanup_exc is original_exc:
+                    raise
                 raise original_exc from cleanup_exc
             raise
         # FIX-2 (Plan-24): When cleanup completes normally (no exception), the

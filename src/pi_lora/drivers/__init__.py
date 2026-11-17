@@ -12,6 +12,8 @@
 # see the License for the specific language governing permissions and
 # limitations under the License.
 
+import warnings
+
 from .rfm9x_sx127x_radio_instance import (
     AssemblyNotFoundError,
     ConfigConsistencyError,
@@ -41,4 +43,22 @@ __all__: list[str] = [
     "ConfigConsistencyError",
     "SpiBusError",
 ]
+
+# Deprecated alias for backward compatibility (code_review-37.2 Section 4)
+# Use DriverModuleNotFoundError instead — this alias will be removed in v2.0
+from .rfm9x_sx127x_radio_instance import (
+    DriverModuleNotFoundError as _DriverModuleNotFoundError,
+)
+
+
+class ModuleNotFoundError(_DriverModuleNotFoundError):
+    """Deprecated: Use DriverModuleNotFoundError instead."""
+
+    def __init__(self, module_name: str) -> None:
+        warnings.warn(
+            "ModuleNotFoundError is deprecated; use DriverModuleNotFoundError",
+            DeprecationWarning,
+            stacklevel=2,
+        )
+        super().__init__(module_name)
 
