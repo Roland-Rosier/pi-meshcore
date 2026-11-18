@@ -490,7 +490,7 @@ def spidev_kernel_patch(fake_spi: FakeSpiDev) -> Iterator[object]:
      """
     token: contextvars.Token[int] | None = None
     with _spidev_patch_lock:
-        backup: object | None = sys.modules.get("spidev", None)
+        backup: types.ModuleType | None = sys.modules.get("spidev", None)
         fake_module: types.SimpleNamespace = types.SimpleNamespace(SpiDev=lambda: fake_spi)
         sys.modules["spidev"] = fake_module  # type: ignore[assignment]
         # CR-8 FIX (R-4): mark the injected spidev kernel patch as active via a
