@@ -6,10 +6,10 @@
 #
 #     http://www.apache.org/licenses/LICENSE-2.0
 #
-# unless required by applicable law or agreed to in writing, software
+# Unless required by applicable law or agreed to in writing, software
 # distributed under the License is distributed on an "AS IS" BASIS,
 # WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
-# see the License for the specific language governing permissions and
+# See the License for the specific language governing permissions and
 # limitations under the License.
 
 from __future__ import annotations
@@ -18,6 +18,7 @@ import logging
 import os
 import sys
 from dataclasses import dataclass
+from types import TracebackType
 from typing import Any, Literal
 
 logger = logging.getLogger(__name__)
@@ -131,19 +132,25 @@ class LoRaModuleDetector:
         # SPI devices must be deterministically closed — do not rely on __del__ alone.
         return self
 
-    def __exit__(self, exc_type: Any, exc_val: Any, exc_tb: Any) -> None:
+    def __exit__(
+        self,
+        exc_type: type[BaseException] | None,
+        exc_val: BaseException | None,
+        exc_tb: TracebackType | None,
+    ) -> None:
         # Best-effort SPI cleanup for every module. Log failures but don't raise.
         # Clear spi_device reference to prevent double-close in LoRaModule.__del__
         # (code_review-37.2 Sections 3.8 & 3.9)
         for module in self.modules:
-            try:
-                if hasattr(module.spi_device, 'close'):
-                    module.spi_device.close()
-                module.spi_device = None  # Prevent double-close in LoRaModule.__del__
-            except Exception as e:
-                logger.warning(
-                    "Failed to close SPI device for CE %s: %s", module.ce_pin, e
-                )
+            spi_dev = module.spi_device
+            if spi_dev is not None and hasattr(spi_dev, 'close'):
+                try:
+                    spi_dev.close()
+                except Exception as e:
+                    logger.warning(
+                        "Failed to close SPI device for CE %s: %s", module.ce_pin, e
+                    )
+            module.spi_device = None  # Prevent double-close in LoRaModule.__del__
 
     def detect_modules(
         self,
@@ -167,7 +174,6 @@ class LoRaModuleDetector:
                 "ce_pin": module.ce_pin,
                 "module_type": module.module_type,
                 "Silicon Revision": f"0x{module.silicon_revision:02X}" if module.silicon_revision is not None else "None detected",
-                "reg_rxbw_freqifmsb": f"0x{module.read_register(0x12):02X}" if module.read_register(0x12) is not None else "None read",
                 "extended_detection": False,
             }
             results.append(result)
@@ -214,11 +220,6 @@ class LoRaModuleDetector:
                         f"0x{module.silicon_revision:02X}"
                         if module.silicon_revision is not None
                         else "None detected"
-                    ),
-                    "reg_rxbw_freqifmsb": (
-                        f"0x{module.read_register(0x12):02X}"
-                        if module.read_register(0x12) is not None
-                        else "None read"
                     ),
                     "extended_detection": True,
                 }
@@ -465,9 +466,3 @@ class LoRaModuleDetector:
             ))
 
         return results
-
-
-
-
-
-

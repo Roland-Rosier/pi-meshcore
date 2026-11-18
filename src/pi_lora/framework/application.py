@@ -384,6 +384,13 @@ class Application:
             # 892/921/981 lock memory visibility), Plan-35/36 (CR-3 cancellation set).
             # Anti-regression: do NOT let ExceptionGroup fall through to `except BaseException`.
             if original_exc is not None:
+                # Cannot chain ExceptionGroup as __cause__ of ExceptionGroup (TypeError).
+                # If original_exc is also ExceptionGroup, raise it verbatim to preserve
+                # both groups (cleanup_exc remains in __context__).
+                if isinstance(original_exc, ExceptionGroup):
+                    # Raise verbatim without chaining to avoid TypeError for nested
+                    # ExceptionGroups. Using from None suppresses the __cause__ chain.
+                    raise original_exc from None
                 raise original_exc from cleanup_exc
             logger.warning(
                 "Cleanup raised ExceptionGroup: %r", cleanup_exc
@@ -410,6 +417,14 @@ class Application:
             # Alternative rejected: catching BaseException BEFORE Exception — would intercept all
             # Exceptions too, breaking the Exception handler's __cause__ logic. Must order
             # Exception first (more specific) then BaseException (catch-all).
+            # NOTE: ExceptionGroup is a BaseException but is caught by the earlier
+            # `except ExceptionGroup` handler. If a subclass slips through, it cannot be
+            # chained as __cause__ (TypeError). Guard against it.
+            # if isinstance(cleanup_exc, ExceptionGroup):
+            #     # Cannot chain ExceptionGroup as __cause__; raise verbatim.
+            #     if original_exc is not None:
+            #         raise original_exc
+            #     raise
             if original_exc is not None and isinstance(
                 original_exc,
                 asyncio.CancelledError | KeyboardInterrupt | SystemExit | GeneratorExit,

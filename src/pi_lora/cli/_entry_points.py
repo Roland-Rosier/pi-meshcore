@@ -74,10 +74,8 @@ def pi_lora() -> int:
     # PLAN-23 FIX (Issue 6): setup_logging() moved from cli/main.py module-level
     # (which ran on import and polluted the test environment) to entry-point-local
     # setup here, isolating logging configuration to the actual console script run.
-    setup_logging()
-    # async_typer.AsyncTyper raises SystemExit on CLI exits (e.g. --help, invalid
-    # args) rather than returning an int; _run_app extracts the exit code instead
-    # of letting it propagate.
+    # _run_app() also calls setup_logging() (force=True makes it idempotent), so this
+    # call is redundant; _run_app()'s call is the sole source.
     return _run_app(main_app)
 
 
@@ -86,10 +84,8 @@ def pi_lora_config() -> int:
     # PLAN-23 FIX (Issue 6): setup_logging() moved from cli/main.py module-level
     # (which ran on import and polluted the test environment) to entry-point-local
     # setup here, isolating logging configuration to the actual console script run.
-    setup_logging()
-    # async_typer.AsyncTyper raises SystemExit on CLI exits (e.g. --help, invalid
-    # args) rather than returning an int; _run_app extracts the exit code instead
-    # of letting it propagate.
+    # _run_app() also calls setup_logging() (force=True makes it idempotent), so this
+    # call is redundant; _run_app()'s call is the sole source.
     return _run_app(config_app)
 
 
@@ -98,10 +94,8 @@ def pi_lora_test() -> int:
     # PLAN-23 FIX (Issue 6): setup_logging() moved from cli/main.py module-level
     # (which ran on import and polluted the test environment) to entry-point-local
     # setup here, isolating logging configuration to the actual console script run.
-    setup_logging()
-    # async_typer.AsyncTyper raises SystemExit on CLI exits (e.g. --help, invalid
-    # args) rather than returning an int; _run_app extracts the exit code instead
-    # of letting it propagate.
+    # _run_app() also calls setup_logging() (force=True makes it idempotent), so this
+    # call is redundant; _run_app()'s call is the sole source.
     return _run_app(test_app)
 
 
@@ -110,8 +104,6 @@ def check_hardware() -> int:
     # PLAN-23 FIX (Issue 6): setup_logging() moved from cli/main.py module-level
     # (which ran on import and polluted the test environment) to entry-point-local
     # setup here, isolating logging configuration to the actual console script run.
-    setup_logging()
-    # async_typer.AsyncTyper raises SystemExit on CLI exits (e.g. --help, invalid
-    # args) rather than returning an int; _run_app extracts the exit code instead
-    # of letting it propagate.
+    # _run_app() also calls setup_logging() (force=True makes it idempotent), so this
+    # call is redundant; _run_app()'s call is the sole source.
     return _run_app(check_hardware_app)

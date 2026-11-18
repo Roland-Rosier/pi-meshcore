@@ -121,10 +121,12 @@ async def get_bus_lock(bus_number: int) -> SpiLock:
     # (no await between check and set) — an asyncio.Lock would be overkill and
     # unnecessary to acquire/release here. The lock is released before the
     # await _registry.acquire() below, so it never blocks the async path.
+    # CR-38.1 (NEW): Run _verify_single_registry() on every call to eliminate
+    # the race window where a second import path could create a duplicate _bus_locks
+    # registry undetected. This is a cheap check (iterates sys.modules) and ensures
+    # the single-registry invariant is always enforced.
     with _registry_verified_lock:
-        if not _registry_verified:
-            _verify_single_registry()
-            _registry_verified = True
+        _verify_single_registry()
 
     if _aiologic_module is None:
         try:

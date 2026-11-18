@@ -106,17 +106,17 @@ async def detect_modules(
     with LoRaModuleDetector(ce_pins=[0, 1]) as detector:
         results = detector.detect_modules(extended=extended)
 
-        print("\nHardware Detection Results:")
+        typer.echo("\nHardware Detection Results:")
         for result in results:
-            print(f"  ✅ {result}")
+            typer.echo(f"  ✅ {result}")
 
         if ce0 is not None or ce1 is not None:
             config = LoRaModuleConfig(
-                ce0_expected_module_type=cast(  # PLAN-20: Cast matches runtime reality — Typer callback _normalise_module_type
+                ce0_expected_module_type=cast(  # Cast matches runtime reality — Typer callback _normalise_module_type
                     # already converted sx1276/sx1278 → rfm95w/rfm98w. Only canonical values exist here.
                     Literal["rfm95w", "rfm98w", "none"], ce0
                 ) if ce0 is not None else None,
-                ce1_expected_module_type=cast(  # PLAN-20: Cast matches runtime reality — Typer callback _normalise_module_type
+                ce1_expected_module_type=cast(  # Cast matches runtime reality — Typer callback _normalise_module_type
                     # already converted sx1276/sx1278 → rfm95w/rfm98w. Only canonical values exist here.
                     Literal["rfm95w", "rfm98w", "none"], ce1
                 ) if ce1 is not None else None,
@@ -124,18 +124,18 @@ async def detect_modules(
 
             validation_results: list[ValidationResult] = detector.validate_config(config)
 
-            print("\nConfiguration Validation Results:")
+            typer.echo("\nConfiguration Validation Results:")
             all_passed = True
             for vr in validation_results:
                 status = "✅ PASS" if vr.passed else "❌ FAIL"
-                print(f"  {status} CE{vr.ce_pin}: {vr.message}")
+                typer.echo(f"  {status} CE{vr.ce_pin}: {vr.message}")
                 if not vr.passed:
                     all_passed = False
 
             if all_passed:
-                print("\n✅ Configuration is valid.")
+                typer.echo("\n✅ Configuration is valid.")
             else:
-                print("❌ Configuration validation failed.")
+                typer.echo("❌ Configuration validation failed.")
                 raise typer.Exit(code=1)
 
 
@@ -164,7 +164,3 @@ async def main_callback(ctx: typer.Context) -> None:
 if __name__ == "__main__":
     from pi_lora.cli._entry_points import _run_app
     raise SystemExit(_run_app(app))
-
-
-
-
