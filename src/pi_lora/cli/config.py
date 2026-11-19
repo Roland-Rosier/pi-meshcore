@@ -208,6 +208,6 @@ if __name__ == "__main__":
     # and raises SystemExit; calling it bare leaves coroutine handling to typer.
     # `_run_app` (src/pi_lora/cli/_entry_points.py) is the canonical pattern that
     # coerces SystemExit (or a None return) into a Click exit code consistently.
-    # See code_review-33.1.json.
+    # See docs/plan_summaries/2026_10_08_hardening_spike.md (Plan-34).
     from pi_lora.cli._entry_points import _run_app
     raise SystemExit(_run_app(app))

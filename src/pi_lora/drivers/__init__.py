@@ -44,7 +44,7 @@ __all__: list[str] = [
     "SpiBusError",
 ]
 
-# Deprecated alias for backward compatibility (code_review-37.2 Section 4)
+# Deprecated alias for backward compatibility (see docs/plan_summaries/2026_10_08_hardening_spike.md)
 # Use DriverModuleNotFoundError instead — this alias will be removed in v2.0
 from .rfm9x_sx127x_radio_instance import (
     DriverModuleNotFoundError as _DriverModuleNotFoundError,

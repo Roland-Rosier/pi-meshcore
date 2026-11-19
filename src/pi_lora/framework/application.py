@@ -54,14 +54,15 @@ class Application:
     """Top-level runtime owning the module lifecycle and command infrastructure."""
 
     def __init__(self, spi_factory: Any | None = None) -> None:
-        # CR-37 FIX (Plan-37 Fix 2.5, code_review-36.1 finding 9.2.1, P2). The `config`
+        # FIX (Application Lifecycle, Plans 4-38; durable summary:
+        # docs/plan_summaries/2026_10_08_hardening_spike.md). The `config`
         # parameter was vestigial since Plan-9: assembly config is now loaded internally
         # via get_assembly_config()/reload_config()/_load_config(), never from a caller
         # passed config. `self.config` is never read anywhere, so both the parameter and
         # the assignment are removed. Custom config is still supported via config_path.
-        # Cross-reference: Plan-25, Plan-26, Plan-27, Plan-35/36. Anti-regression: every
-        # caller of Application(...) must be updated to drop the `config=` keyword or the
-        # constructor signature breaks — see the call-site updates below.
+        # Plan-38 (double-checked locking fast-path removal) governs the lifecycle guard.
+        # Anti-regression: every caller of Application(...) must be updated to drop the
+        # `config=` keyword or the constructor signature breaks — see the call-site below.
         self.scheduler = Scheduler()
         self.module_manager = ModuleManager()
         self.command_bus = CommandBus()
@@ -94,14 +95,16 @@ class Application:
         deadlock on a self-held lock.
         """
         exc_to_raise: BaseException | None = None
-        # PLAN-25 FIX (Fix 6, Issue 24.7): double-checked locking was REMOVED in Plan-38.
-        # The fast-path read of self._started outside the lock is UNSAFE for a boolean
-        # that transitions False→True→False (code_review-37.2 Section 3.2):
+        # FIX (Application Lifecycle, Plans 4-38; durable summary:
+        # docs/plan_summaries/2026_10_08_hardening_spike.md). Double-checked locking was
+        # REMOVED in Plan-38. The fast-path read of self._started outside the lock is
+        # UNSAFE for a boolean that transitions False→True→False (lifecycle reentrancy,
+        # Plan-4: Fix Application.start() reentrancy):
         #   1. Thread A: reads _started=False, acquires lock, starts, sets _started=True
         #   2. Thread B: calls stop(), acquires lock, sets _started=False
         #   3. Thread C: reads _started=True (STale - Thread B's write not visible), returns early WITHOUT starting!
         # The authoritative check is now ONLY the re-check inside _lifecycle_lock.
-        # Cross-reference: code_review-37.2.json Section 3.2.
+        # Cross-reference: durable summary Application Lifecycle (Plan-4 reentrancy).
         async with self._lifecycle_lock:
             # Re-check inside lock (authoritative)
             if self._started:
@@ -373,15 +376,16 @@ class Application:
                 raise original_exc from cleanup_exc
             raise
         except ExceptionGroup as cleanup_exc:
-            # CR-37 FIX (Plan-37 Fix 2.1, code_review-36.1 finding 9.3.1, P0).
-            # ExceptionGroup is a BaseException (NOT an Exception) on Python 3.11+, so
-            # it currently falls through `except Exception` into the `except BaseException`
-            # handler, which applies shutdown-signal chaining logic that is wrong for an
-            # ExceptionGroup. This dedicated handler catches it first and logs + re-raises
-            # the full group verbatim so the per-module errors collected by
+            # FIX (Application Lifecycle, Plans 4-38; durable summary:
+            # docs/plan_summaries/2026_10_08_hardening_spike.md). ExceptionGroup is a
+            # BaseException (NOT an Exception) on Python 3.11+, so it currently falls
+            # through `except Exception` into the `except BaseException` handler, which
+            # applies shutdown-signal chaining logic that is wrong for an ExceptionGroup.
+            # Plan-37: Fix missing `except ExceptionGroup` in cleanup handler. This
+            # dedicated handler catches it first and logs + re-raises the full group
+            # verbatim so the per-module errors collected by
             # _cleanup_partial_start() propagate intact.
-            # Cross-reference: Plan-25 (Exception cleanup handling), Plan-26 (Findings
-            # 892/921/981 lock memory visibility), Plan-35/36 (CR-3 cancellation set).
+            # Cross-reference: durable summary Application Lifecycle (Plan-37).
             # Anti-regression: do NOT let ExceptionGroup fall through to `except BaseException`.
             if original_exc is not None:
                 # Cannot chain ExceptionGroup as __cause__ of ExceptionGroup (TypeError).
@@ -429,9 +433,12 @@ class Application:
                 original_exc,
                 asyncio.CancelledError | KeyboardInterrupt | SystemExit | GeneratorExit,
             ):
-                # Prevent self-referential __cause__ cycle (code_review-37.2 Section 3.4):
-                # If cleanup_exc IS the same object as original_exc, chaining creates
+                # Prevent self-referential __cause__ cycle (Application Lifecycle,
+                # Plans 4-38; durable summary:
+                # docs/plan_summaries/2026_10_08_hardening_spike.md): if cleanup_exc IS
+                # the same object as original_exc, chaining creates
                 # original_exc.__cause__ = original_exc which breaks traceback rendering.
+                # Plan-25: Fix exception chaining in start().
                 if cleanup_exc is original_exc:
                     raise
                 raise original_exc from cleanup_exc

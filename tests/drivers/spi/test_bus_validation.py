@@ -12,7 +12,7 @@
 # see the License for the specific language governing permissions and
 # limitations under the License.
 
-"""Validation tests for RealSpiBus xfer_timeout bounds (plan-29 Section 2.5)."""
+"""Validation tests for RealSpiBus xfer_timeout bounds (see docs/plan_summaries/2026_10_08_hardening_spike.md)."""
 
 from __future__ import annotations
 

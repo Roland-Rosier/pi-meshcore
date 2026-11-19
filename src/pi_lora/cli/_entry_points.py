@@ -23,7 +23,7 @@ from .test import app as test_app
 
 def _run_app(app_callable: Callable[[], Any]) -> int:
     # P33-1: Corrected docstring to reflect actual AsyncTyper return value (None on success).
-    # See plan-33.md Section 2.1.
+    # See docs/plan_summaries/2026_10_08_hardening_spike.md (Plan-33 scope).
     """Drive a Typer app and coerce its return / SystemExit into a Click exit code.
 
     ``app_callable`` returns ``Any`` because ``async_typer.AsyncTyper`` drives the
@@ -41,11 +41,11 @@ def _run_app(app_callable: Callable[[], Any]) -> int:
     setup_logging()
     try:
         # P33-1: async_typer.AsyncTyper returns None on successful command completion;
-        # map None -> exit code 0 explicitly. See plan-33.md Section 2.1.
+        # map None -> exit code 0 explicitly. See docs/plan_summaries/2026_10_08_hardening_spike.md (Plan-33).
         result = app_callable()
         if result is None:
             return 0
-        # CR-33.7 (Plan-34, code_review-33.1.json): `cast(int, result)` is a
+        # Plan-34 (see docs/plan_summaries/2026_10_08_hardening_spike.md): `cast(int, result)` is a
         # static-only assertion and hides a runtime non-int return. If
         # AsyncTyper.__call__ ever returns a non-int (it currently only raises
         # SystemExit on completion), the bug would be invisible at runtime. The
@@ -60,7 +60,7 @@ def _run_app(app_callable: Callable[[], Any]) -> int:
         #   None          → 0 (successful exit, e.g., --help)
         #   int (0, 1, 2) → that int (explicit exit code)
         #   str, typer.Exit(code="msg") → 1 (failure — non-int codes indicate error)
-        # See plan-31.md Section 2.
+        # See docs/plan_summaries/2026_10_08_hardening_spike.md (Plan-31).
         if e.code is None:
             return 0
         elif isinstance(e.code, int):

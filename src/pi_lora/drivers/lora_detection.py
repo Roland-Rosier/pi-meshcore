@@ -121,15 +121,14 @@ class LoRaModuleDetector:
         self.modules = [LoRaModule(ce_pin) for ce_pin in ce_pins]
 
     def __enter__(self) -> LoRaModuleDetector:
-        # CR-37 FIX (Plan-37 Fix 2.4, code_review-36.1 finding 9.2.1, P1).
+        # CR-37 FIX (see docs/plan_summaries/2026_10_08_hardening_spike.md).
         # LoRaModule.__init__ opens SPI devices (LoRaModule._initialize ->
         # self.spi_device.open(...)). The old detect_modules CLI never closed them,
         # relying on the unreliable __del__. Making LoRaModuleDetector a context manager
         # guarantees SPI.close() runs on exit even if detect_modules() raises. The
         # detection sequence itself (Init SPI -> Return status) stays strictly read-only;
         # closing happens only in __exit__ after detection completes.
-        # Cross-reference: Plan-25, Plan-26, Plan-27, Plan-35, Plan-36. Anti-regression:
-        # SPI devices must be deterministically closed — do not rely on __del__ alone.
+        # Anti-regression: SPI devices must be deterministically closed — do not rely on __del__ alone.
         return self
 
     def __exit__(
@@ -140,7 +139,7 @@ class LoRaModuleDetector:
     ) -> None:
         # Best-effort SPI cleanup for every module. Log failures but don't raise.
         # Clear spi_device reference to prevent double-close in LoRaModule.__del__
-        # (code_review-37.2 Sections 3.8 & 3.9)
+        # (see docs/plan_summaries/2026_10_08_hardening_spike.md)
         for module in self.modules:
             spi_dev = module.spi_device
             if spi_dev is not None and hasattr(spi_dev, 'close'):

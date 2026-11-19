@@ -138,8 +138,8 @@ def test_system_exit_fallback_logic() -> None:
     """
 
     def _handler(e: SystemExit) -> int:
-        # PLAN-30 FIX (CR-29-1): SystemExit(None) = successful exit (code 0) in Unix/Click/Typer.
-        # Fallback to 0, not 1. See plan-30.md Section 1.
+        # Plan-30 FIX: SystemExit(None) = successful exit (code 0) in Unix/Click/Typer.
+        # Fallback to 0, not 1. See docs/plan_summaries/2026_10_08_hardening_spike.md (Plan-30).
         return e.code if isinstance(e.code, int) else 0
 
     assert _handler(SystemExit(None)) == 0
@@ -319,7 +319,7 @@ def test_run_app_returns_zero_on_success() -> None:
     this exercises the success branch where ``app_callable()`` returns ``None``
     and verifies it maps to exit code ``0``.
     """
-    # P33-3: Test _run_app handles None return from AsyncTyper. See plan-33.md Section 2.3.
+    # P33-3: Test _run_app handles None return from AsyncTyper. See docs/plan_summaries/2026_10_08_hardening_spike.md (Plan-33).
     def _app_returns_none() -> None:
         return None
 

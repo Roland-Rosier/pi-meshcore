@@ -59,10 +59,11 @@ class SpiLock(Protocol):
     # ``green_release`` (sync/greenlet context). It has NO ``release`` method
     # (verified at runtime: ``hasattr(aiologic.Lock(), "release") is False``;
     # ``hasattr(aiologic.Lock(), "green_release") is True``).
-    # code_review-10.1:1 flagged this as a "``async_release`` vs ``release`` mismatch"
-    # bug, but that was a false positive: it wrongly assumed ``aiologic.Lock`` mirrors
-    # ``asyncio.Lock``'s ``release()``. Renaming to ``release`` reintroduces an
-    # ``AttributeError`` at runtime; the protocol must track the real ``aiologic.Lock`` API.
+    # Reference: durable summary docs/plan_summaries/2026_10_08_hardening_spike.md
+    # category "SPI Lock Abstraction (Plans 4-28+)" (summary lines 128-133): the
+    # async_release protocol. The ``async_release`` name is correct — the concrete
+    # :class:`aiologic.Lock` exposes ``async_release`` and ``green_release``, not
+    # ``release``; renaming to ``release`` reintroduces an AttributeError at runtime.
     def async_release(self) -> None: ...
     def green_release(self) -> None: ...
     def locked(self) -> bool: ...

@@ -48,7 +48,7 @@ async def test_hardware_impl(
     # typer.Exit before start()) and any exception raised by start(). The narrow
     # inner try/except only catches the two legitimate "not-found" errors;
     # KeyboardInterrupt/SystemExit/GeneratorExit (PEP 3134) and any Exception from
-    # start() propagate through the finally uncaught. See code_review-33.1.json.
+    # start() propagate through the finally uncaught. See docs/plan_summaries/2026_10_08_hardening_spike.md (Plan-34).
     try:
         try:
             radio_configs = await application.get_assembly_config(
@@ -95,7 +95,7 @@ async def test_hardware_impl(
 
         # CR-34.3-1 / Plan-35 FIX: empty modules list means no targets matched the
         # SPI/CE filter. This is a user error (wrong assembly name or filter), not
-        # success. Exit with error instead of silently succeeding. See code_review-34.3.json.
+        # success. Exit with error instead of silently succeeding. See docs/plan_summaries/2026_10_08_hardening_spike.md (Plan-35).
         if not modules:
             console.print("[red]Error:[/red] No modules match the given SPI/CE filters")
             raise typer.Exit(code=1)
@@ -154,6 +154,6 @@ if __name__ == "__main__":
     # SystemExit internally. Calling ``app()`` bare defers coroutine handling to typer; the
     # canonical ``_run_app`` helper (used by all 4 console entry points in
     # ``src/pi_lora/cli/_entry_points.py``) coerces the SystemExit/None return into a
-    # consistent Click exit code. See code_review-33.1.json.
+    # consistent Click exit code. See docs/plan_summaries/2026_10_08_hardening_spike.md (Plan-34).
     from pi_lora.cli._entry_points import _run_app
     raise SystemExit(_run_app(app))

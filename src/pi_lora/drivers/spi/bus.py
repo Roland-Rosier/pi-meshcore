@@ -230,7 +230,7 @@ class RealSpiBus:
         except ImportError as err:
             # PLAN-26 FIX (Findings 418, 456, 474): Wrap ImportError in SpiBusError
             # for consistent error handling with xfer2() and close().
-            # Cross-reference: code_review-25.3.json findings 418, 456, 474.
+            # Cross-reference: durable summary docs/plan_summaries/2026_10_08_hardening_spike.md — plan-25 bus.py scope (4 CRITICAL + 8 HIGH from code_review-24.1).
             raise SpiBusError(
                 f"SPI bus {self.bus_number}.{self.device_number} open failed: "
                 f"spidev module not available: {err}. Bus is closed."
@@ -243,7 +243,7 @@ class RealSpiBus:
             # PLAN-26 FIX (Findings 418, 456): Wrap OSError in SpiBusError for
             # consistent error handling. Common causes: device not found (ENODEV),
             # permission denied (EACCES), bus already in use (EBUSY).
-            # Cross-reference: code_review-25.3.json findings 418, 456.
+            # Cross-reference: durable summary docs/plan_summaries/2026_10_08_hardening_spike.md — plan-25 bus.py scope (4 CRITICAL + 8 HIGH from code_review-24.1).
             raise SpiBusError(
                 f"SPI bus {self.bus_number}.{self.device_number} open failed: "
                 f"{err}. Bus is closed; call open() after resolving the issue."
@@ -375,7 +375,7 @@ class RealSpiBus:
                 # spidev.close() fails). If we let that propagate, the original TimeoutError is
                 # lost. Catch close() failure, log it, then raise the timeout error with the
                 # close failure as __context__ so both are visible to debuggers.
-                # Cross-reference: code_review-25.3.json findings 408, 446, 494.
+                # Cross-reference: durable summary docs/plan_summaries/2026_10_08_hardening_spike.md — plan-25 bus.py scope (4 CRITICAL + 8 HIGH from code_review-24.1).
                 try:
                     self.close()
                 except SpiBusError as close_err:

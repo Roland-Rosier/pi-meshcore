@@ -211,17 +211,17 @@ class TestSharedLoggingInvalidLevel:
     """Phase 10: ``setup_logging`` validates ``PI_LORA_LOG_LEVEL``."""
 
     def test_invalid_level_emits_warning(self) -> None:
-        """``PI_LORA_LOG_LEVEL=INVALID`` triggers a UserWarning and does not crash."""
+        """``PI_LORA_LOG_LEVEL=INVALID`` reports the invalid level via ``sys.stderr`` and defaults to WARNING."""
+        import io
         import logging
         import os
-        import warnings
+        import sys
 
         import pi_lora.cli._logging as _shared
 
-        with patch.dict(os.environ, {"PI_LORA_LOG_LEVEL": "INVALID"}), warnings.catch_warnings(record=True) as _rw:
-            warnings.simplefilter("always")
+        with patch.dict(os.environ, {"PI_LORA_LOG_LEVEL": "INVALID"}), patch.object(sys, "stderr", new=io.StringIO()) as _stderr:
             _shared.setup_logging()
-        assert any(issubclass(w.category, UserWarning) for w in _rw)
+        assert "Invalid log level" in _stderr.getvalue()
         assert logging.getLogger().level == logging.WARNING
 
     def test_valid_level_applied_without_warning(self) -> None:

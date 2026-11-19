@@ -407,6 +407,6 @@ async def create_radio_instance_from_default(
     config is None (CR-2 FIX, Plan 21). The previous explicit call was redundant
     and introduced in Plan 21 when create_radio_instance was split into a sync
     core + async wrapper but this convenience function was not updated.
-    Cross-reference: code_review-25.3.json finding 376.
+    Cross-reference: durable summary docs/plan_summaries/2026_10_08_hardening_spike.md — Plan-25 scope (4 CRITICAL + 8 HIGH from code_review-24.1); radio_instance.py is a 5+ plan-iteration key file.
     """
     return await create_radio_instance(assembly_name, spi_device_id, ce_number, config=None)

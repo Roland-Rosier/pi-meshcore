@@ -71,7 +71,8 @@ class CommandBus:
         If the handler is a coroutine function it is awaited; otherwise it
         is called directly.
         """
-        # H-16-3 / Plan-17: The previous depth-based lookup computed
+        # Dispatch resolution (docs/plan_summaries/2026_10_08_hardening_spike.md,
+        # Command Bus (Plans 4-38), Phase 6 / plan-4: Fix CommandBus.execute()). The previous depth-based lookup computed
         # `command_depth - len(registered_type.__mro__)` and assumed a
         # registered type's MRO is a suffix of the command's MRO. That assumption
         # breaks for diamond inheritance, where two base classes share a common
@@ -105,7 +106,7 @@ class CommandBus:
                 return await result
             return result
         except asyncio.CancelledError as exc:
-            # H-10 / Plan-16: CancelledError must be caught BEFORE the generic
+            # CancelledError must be caught BEFORE the generic
             # except Exception. In Python 3.13+, asyncio.CancelledError is a
             # direct subclass of BaseException (NOT Exception). In Python 3.11-3.12,
             # it is a subclass of Exception. Catching it explicitly first works
@@ -115,14 +116,15 @@ class CommandBus:
             # coroutine. A verbatim re-raise is required: returning would swallow
             # the cancellation and the caller would never observe it.
             #
-            # PLAN-19: Comment updated for Python 3.13+ where CancelledError is BaseException, not Exception. Explicit catch before Exception works in all versions.
+            # (docs/plan_summaries/2026_10_08_hardening_spike.md, Command Bus (Plans 4-38), Plan-34: Fix exception hierarchy in dispatch()).
             logger.warning(
                 "Command handler cancelled for %s",
                 type(command).__name__,
             )
             raise exc
         except ExceptionGroup as eg:
-            # CR-34.3-4 / Plan-35 FIX: ExceptionGroup may contain a CancelledError which
+            # ExceptionGroup handling (docs/plan_summaries/2026_10_08_hardening_spike.md,
+            # Command Bus (Plans 4-38), Plan-37: Fix ExceptionGroup in _cleanup_and_reraise_cancellation()). ExceptionGroup may contain a CancelledError which
             # must propagate asyncio cancellation semantics to the caller. Unpack the
             # group: if any contained exception is a CancelledError, re-raise it verbatim
             # to preserve cancellation. Otherwise re-raise the whole ExceptionGroup for
@@ -175,10 +177,10 @@ class CommandBus:
         if self._module_resolver is None:
             raise RuntimeError("Module resolver not set")
         module = self._module_resolver(command)
-        # PLAN-25 FIX (Fix 8, Issue 24.10): module_resolver may return None to signal
+        # module_resolver may return None to signal
         # "no module found for this command type" — a legitimate case. Guard against None
         # before dereferencing to avoid an AttributeError and raise a clear ValueError instead.
-        # Cross-reference: code_review-24.1.json finding 24.10.
+        # (docs/plan_summaries/2026_10_08_hardening_spike.md, Command Bus (Plans 4-38), Plan-16: Fix dispatch() None from module_resolver.)
         if module is None:
             raise ValueError(f"No module found for command {type(command).__name__}")
         from .events import CommandEvent, EventType, ModuleEvent

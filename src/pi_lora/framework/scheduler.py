@@ -89,11 +89,8 @@ class TimerScheduler:
     async def unregister_module(self, module: Rfm9xSx127xModule) -> None:
         self._registered.discard(module)
         self._intervals.pop(module, None)
-        # M-19 / Plan-16 FIX: _failure_counts and _last_failure_log must be
-        # cleaned on unregister too. A stale entry would keep the module bound in
-        # those dicts, preventing garbage-collection of the module object and
-        # leaving a dangling failure record that later logic could re-read.
-        # Unregister must fully release the module's scheduler state.
+        # Scheduler fix: failure tracking must be released on unregister (see
+        # docs/plan_summaries/2026_10_08_hardening_spike.md 'Scheduler (Plans 4-38)').
         self._failure_counts.pop(module, None)
         self._last_failure_log.pop(module, None)
         task = self._tasks.pop(module, None)
@@ -152,16 +149,9 @@ class TimerScheduler:
     ) -> None:
         """Execute one timer tick with exponential backoff on failure.
 
-        CR-5 FIX: unified backoff for BOTH custom and default intervals.
-        Plan-11's original code nested the backoff branch inside
-        ``if interval is not None:``, so a module running on the default
-        interval (``interval is None`` resolved via
-        ``self._intervals.get(module) or self._default_interval``) never
-        reached the failure-handling path. That reintroduced unbounded error
-        spam: every default-interval iteration logged an error with no backoff.
-        This helper removes that conditional so every tick — whether the
-        interval came from ``_intervals`` or ``_default_interval`` — applies the
-        same ``min(2 ** failure_count, 60)`` exponential backoff on failure.
+        Scheduler fix: unified exponential backoff for both custom and default
+        intervals (Phase 25 backoff pattern). See
+        docs/plan_summaries/2026_10_08_hardening_spike.md 'Scheduler (Plans 4-38)'.
         """
         try:
             await module.event_queue.put(
@@ -187,10 +177,11 @@ class TimerScheduler:
 class IdlePacer:
     """Single task that paces all idle-enabled modules with IDLE events.
 
-    .. warning:: Breaking change from Plan-14: the IDLE event rate changed from
-       ``asyncio.sleep(0)`` (~1000+ events/sec) to ``asyncio.sleep(min_interval)``
-       (~100 events/sec at the default 0.01s). Modules relying on frequent IDLE
-       events must adjust their expectations.
+        .. warning:: Breaking change: the IDLE event rate changed from
+        ``asyncio.sleep(0)`` (~1000+ events/sec) to ``asyncio.sleep(min_interval)``
+        (~100 events/sec at the default 0.01s). Modules relying on frequent IDLE
+        events must adjust their expectations. See
+        docs/plan_summaries/2026_10_08_hardening_spike.md 'Scheduler (Plans 4-38)'.
     """
 
     @staticmethod
@@ -213,18 +204,9 @@ class IdlePacer:
             self._idle_enabled_modules.add(module)
         else:
             self._idle_enabled_modules.discard(module)
-            # FIX-4 / Plan-24: on enabled=False the module must be fully released
-            # from _failure_count and _backoff_until, exactly as
-            # TimerScheduler.unregister_module() (lines 91-98) releases
-            # _failure_counts and _last_failure_log. Mirroring that cleanup is
-            # required for two reasons:
-            # 1. Memory leak - stale dict entries keyed by id(module) survive a
-            #    start/stop cycle and keep the module object retained, preventing
-            #    garbage-collection.
-            # 2. Correctness bug - module dicts are keyed by id(module), and a new
-            #    reused module object can receive the same id() (common with object
-            #    reuse). A stale failure count / backoff window would then be
-            #    inherited by the new module, producing spurious backoff.
+            # Scheduler fix: on enabled=False release the module from
+            # _failure_count and _backoff_until (see
+            # docs/plan_summaries/2026_10_08_hardening_spike.md 'Scheduler (Plans 4-38)').
             self._failure_count.pop(module_id, None)
             self._backoff_until.pop(module_id, None)
 
@@ -244,13 +226,9 @@ class IdlePacer:
             now = time.monotonic()
             for module in list(self._idle_enabled_modules):
                 module_id = id(module)
-                # Location 6 (Plan-18 §6 anti-regression). Exponential backoff
-                # mirroring TimerScheduler (Plans 15/16 BUG-7 fix): per-module
-                # failure tracking with exponential backoff (min 0.1s, max 60s),
-                # engaging after 5 consecutive failures and resetting on success.
-                # Without this, a queue-full paced module logged at ~100 Hz ->
-                # unbounded error spam / CPU waste (the pre-Plan-18 pre-existing
-                # bug). Do NOT regress to a flat per-iteration log.
+                # Scheduler fix: per-module exponential backoff (Phase 4, plan-4
+                # IdlePacer._idle_task CPU spin). See
+                # docs/plan_summaries/2026_10_08_hardening_spike.md 'Scheduler (Plans 4-38)'.
                 # Check backoff
                 if module_id in self._backoff_until and now < self._backoff_until[module_id]:
                     continue
@@ -314,16 +292,14 @@ class InterruptBridge:
      legitimate ``threading.*Lock`` use in the codebase and is documented here so
      future readers understand why it is NOT ``aiologic.Lock``.
 
-     H-9 FIX (Plan-16): the lock is a ``threading.RLock`` (re-entrant), NOT a plain
-     ``threading.Lock``. GPIO interrupt handlers can be re-entrant — an
-     edge-triggered or recursive callback may invoke ``trigger_interrupt()`` while
-     another call already holds ``self._trigger_lock``. A non-re-entrant
-     ``threading.Lock`` would self-lock and deadlock on that recursive call;
-     ``RLock`` counts acquisitions and releases only once the outermost call
-     exits, so the compound drop-oldest stays atomic without self-locking.
-     Plan-15 used a plain ``Lock`` because it targeted the atomicity of the
-     drop-oldest compound op but missed the re-entrancy requirement that real
-     GPIO handlers (recursive/edge-triggered callbacks) impose.
+      Scheduler fix: the lock is a ``threading.RLock`` (re-entrant), NOT a plain
+      ``threading.Lock``. GPIO interrupt handlers can be re-entrant — an
+      edge-triggered or recursive callback may invoke ``trigger_interrupt()`` while
+      another call already holds ``self._trigger_lock``. A non-re-entrant
+      ``threading.Lock`` would self-lock and deadlock on that recursive call;
+      ``RLock`` counts acquisitions and releases only once the outermost call
+      exits, so the compound drop-oldest stays atomic without self-locking.
+      See docs/plan_summaries/2026_10_08_hardening_spike.md 'Scheduler (Plans 4-38)'.
 
      WHY ``threading.*Lock`` (NOT ``aiologic.Lock``) — unchanged rationale:
      - trigger_interrupt() runs in a SYNC thread context (GPIO interrupt callbacks
@@ -363,49 +339,25 @@ class InterruptBridge:
         # put_nowait() drop-oldest operation in trigger_interrupt() so the
         # "drop oldest to make room for newest" sequence is atomic across the
         # arbitrary threads that call trigger_interrupt() from GPIO drivers.
-        # H-9 FIX (Plan-16): this is a threading.RLock (re-entrant), NOT a plain
-        # threading.Lock, because GPIO interrupt handlers can be re-entrant — an
-        # edge-triggered/recursive callback may call trigger_interrupt() while
-        # another call already holds the lock. A plain Lock would self-lock and
-        # deadlock; RLock counts acquisitions and releases only on the outermost
-        # exit. Plan-15 used a plain Lock and missed this re-entrancy requirement.
-        # threading.RLock (NOT aiologic.Lock) is correct because trigger_interrupt()
-        # runs in sync thread context with no event loop guaranteed at call time;
-        # queue.Queue is stdlib thread-safe and threading.Lock/RLock is its natural
-        # companion. Precedent: locks.py uses asyncio.Lock for module-level init
-        # guard (same rationale).
+        # Scheduler fix: threading.RLock (re-entrant) for atomic drop-oldest under
+        # trigger_interrupt(). See docs/plan_summaries/2026_10_08_hardening_spike.md
+        # 'Scheduler (Plans 4-38)'.
         self._trigger_lock: threading.RLock = threading.RLock()
         self._running = False
-        # M-21 FIX (Plan-16): an asyncio.Event that trigger_interrupt() sets when
-        # new data is available so _drain_sync_queue() waits on it instead of
-        # busy-waiting with asyncio.sleep(0.001). The 1ms sleep was bad because it
-        # (a) starved/inefficiently polled the consumer task, (b) imposed a fixed
-        # ~1ms worst-case latency on delivered interrupts, and (c) consumed
-        # unbounded CPU spinning every millisecond forever while idle. An Event is
-        # correct because the drain task sleeps (zero CPU) until data is signaled,
-        # and trigger_interrupt() sets it via loop.call_soon_threadsafe() which is
-        # thread-safe for the sync GPIO interrupt context (no guaranteed running
-        # loop at call time).
+        # Scheduler fix: drain task waits on an asyncio.Event set by
+        # trigger_interrupt() instead of busy-waiting (see
+        # docs/plan_summaries/2026_10_08_hardening_spike.md 'Scheduler (Plans 4-38)').
         self._drain_event: asyncio.Event = asyncio.Event()
         self._task: asyncio.Task[None] | None = None
         self._drain_task: asyncio.Task[None] | None = None
-        # H-16-2/Plan-17 FIX: the event loop captured once in start().
-        # trigger_interrupt() runs in a GPIO interrupt thread (lgpio/RPi.GPIO/
-        # gpiod), which is NOT the event loop thread. asyncio.get_running_loop()
-        # returns the *current thread's* loop, so calling it from the GPIO thread
-        # returns the wrong loop (or raises RuntimeError when no loop is running),
-        # causing call_soon_threadsafe() to signal the wrong loop. start() runs
-        # guaranteed in the event loop thread, so capturing the loop there and
-        # reusing it here is correct. Guarded with try/except (RuntimeError,
-        # AttributeError) so early init before start() (no captured loop yet) is a
-        # no-op.
+        # Scheduler fix: capture the event loop once in start() and reuse it here
+        # (Plan-17 loop capture; see Plan-18 stop() loop capture). See
+        # docs/plan_summaries/2026_10_08_hardening_spike.md 'Scheduler (Plans 4-38)'.
         self._loop: asyncio.AbstractEventLoop | None = None
-        # CR-33.8 / Plan-34 FIX: failure tracking for exponential backoff must live
-        # on the instance (mirrors TimerScheduler._failure_counts and IdlePacer's
-        # _failure_count / _backoff_until pattern, lines 56, 204-205). Local dicts
-        # in _interrupt_task() became stale on unregister: a new module reusing the
-        # same GPIO pin would inherit a stale failure count / backoff window and
-        # produce spurious backoff. Instance state is released in unregister_module().
+        # Scheduler fix: exponential backoff failure tracking lives on the instance
+        # (mirrors TimerScheduler._failure_counts and IdlePacer's _failure_count /
+        # _backoff_until). Instance state released in unregister_module(). See
+        # docs/plan_summaries/2026_10_08_hardening_spike.md 'Scheduler (Plans 4-38)'.
         self._failure_counts: dict[int, int] = {}
         self._backoff_until: dict[int, float] = {}
 
@@ -429,12 +381,9 @@ class InterruptBridge:
         docstring for the rationale). The monitoring threshold still fires an
         early-warning log when the queue depth becomes abnormal.
         """
-        # PLAN-25 FIX (Fix 9, Issue 24.11): the ENTire put/drop/monitor sequence now
-        # runs inside trigger_lock. The fast-path put_nowait previously ran OUTSIDE
-        # the lock, so on queue.Full another thread could fill the slot before the
-        # drop-oldest fallback ran, breaking atomicity. Now the whole sequence is
-        # serialized: newest wins, producer never exceeds maxsize.
-        # Cross-reference: code_review-24.1.json findings 24.11, 24.12.
+        # Scheduler fix: whole put/drop/monitor sequence under trigger_lock (Phase 5,
+        # plan-4 InterruptBridge broadcast). See
+        # docs/plan_summaries/2026_10_08_hardening_spike.md 'Scheduler (Plans 4-38)'.
         with self._trigger_lock:
             try:
                 self._trigger_queue.put_nowait(gpio_pin)
@@ -468,25 +417,20 @@ class InterruptBridge:
                     self._monitor_queue_depth_threshold,
                     gpio_pin,
                 )
-            # PLAN-25 FIX (Fix 10, Issue 24.12): the _loop read is now atomic with the
-            # queue operations under trigger_lock, so stop() nulling _loop cannot race
-            # between the read and its use.
+            # Scheduler fix: _loop read is atomic with queue ops under trigger_lock.
+            # See docs/plan_summaries/2026_10_08_hardening_spike.md 'Scheduler (Plans 4-38)'.
             loop = self._loop
             if loop is not None:
-                # H-16-2/Plan-17: Use captured loop from start() instead of
-                # asyncio.get_running_loop() which returns the current thread's loop
-                # (wrong thread for GPIO callbacks).
+                # Scheduler fix: use captured loop from start() (Plan-17). See
+                # docs/plan_summaries/2026_10_08_hardening_spike.md 'Scheduler (Plans 4-38)'.
                 with contextlib.suppress(RuntimeError, AttributeError):
                     loop.call_soon_threadsafe(self._drain_event.set)
 
     async def start(self) -> None:
         self._running = True
-        # H-16-2/Plan-17: Capture the event loop here (guaranteed to be the
-        # event loop thread) so trigger_interrupt() can use call_soon_threadsafe
-        # from GPIO interrupt threads. asyncio.get_running_loop() was previously
-        # called inside trigger_interrupt(), but that returned the GPIO thread's
-        # loop (wrong loop) or raised RuntimeError, so the drain Event was
-        # signaled on the wrong loop.
+        # Scheduler fix: capture the event loop here (Plan-17) so
+        # trigger_interrupt() can use call_soon_threadsafe from GPIO threads. See
+        # docs/plan_summaries/2026_10_08_hardening_spike.md 'Scheduler (Plans 4-38)'.
         self._loop = asyncio.get_running_loop()
         if self._task is None or self._task.done():
             self._task = asyncio.create_task(self._interrupt_task())
@@ -494,8 +438,9 @@ class InterruptBridge:
             self._drain_task = asyncio.create_task(self._drain_sync_queue())
 
     async def stop(self) -> None:
-        # Acquire lock FIRST to prevent new interrupts during shutdown
-        # (code_review-37.2 Section 3.6: race window fix)
+        # Scheduler fix: acquire trigger_lock first during shutdown (Plan-36:
+        # stop() acquires trigger_lock first). See
+        # docs/plan_summaries/2026_10_08_hardening_spike.md 'Scheduler (Plans 4-38)'.
         with self._trigger_lock:
             self._running = False
             self._loop = None
@@ -550,14 +495,9 @@ class InterruptBridge:
                         pass
 
     async def _interrupt_task(self) -> None:
-        # P31-3 FIX: Exponential backoff on queue put failure to prevent unbounded
-        # error logging under sustained high load. Mirrors TimerScheduler._do_tick
-        # (lines ~166-184): on failure, sleep for backoff interval instead of
-        # immediately consuming next interrupt. IdlePacer checks backoff BEFORE processing.
-        # CR-33.8 / Plan-34 FIX: use the instance dicts (self._failure_counts /
-        # self._backoff_until) instead of locals. Local dicts were stale across
-        # unregister: a new module reusing the same GPIO pin would inherit stale
-        # failure tracking. Instance state is released in unregister_module().
+        # Scheduler fix: exponential backoff on queue put failure (Phase 25 backoff
+        # pattern; Plan-27 InterruptBridge backoff bug — check before consuming).
+        # See docs/plan_summaries/2026_10_08_hardening_spike.md 'Scheduler (Plans 4-38)'.
         while self._running:
             # Get interrupt from queue
             gpio_pin = await self._async_trigger_queue.get()
@@ -610,14 +550,9 @@ class InterruptBridge:
         for gpio_pin, m in list(self._interrupt_map.items()):
             if m is module:
                 del self._interrupt_map[gpio_pin]
-                # CR-33.8 / Plan-34 FIX: release failure tracking for this GPIO pin
-                # on unregister. Mirrors TimerScheduler.unregister_module() (lines
-                # 97-98) releasing _failure_counts and _last_failure_log, and
-                # IdlePacer.set_idle_enabled() (lines 228-229) releasing
-                # _failure_count / _backoff_until. Without this cleanup, stale
-                # entries survive a start/stop cycle and a new module reusing the
-                # same GPIO pin inherits the stale failure count / backoff window,
-                # producing spurious backoff. Unregister must fully release state.
+                # Scheduler fix: release failure tracking for this GPIO pin on
+                # unregister (see docs/plan_summaries/2026_10_08_hardening_spike.md
+                # 'Scheduler (Plans 4-38)').
                 self._failure_counts.pop(gpio_pin, None)
                 self._backoff_until.pop(gpio_pin, None)
 
@@ -641,34 +576,28 @@ class Scheduler:
         await self.timer_scheduler.stop()
 
     async def unregister_module(self, module: Rfm9xSx127xModule) -> None:
-        # PLAN-26 FIX (Findings 911, 941): Collect all errors and raise ExceptionGroup
-        # so that failures in one scheduler component don't mask failures in others.
-        # Cross-reference: code_review-25.3.json findings 911, 941.
+        # Scheduler fix: collect errors and raise ExceptionGroup so component
+        # failures don't mask others (Plan-26). See
+        # docs/plan_summaries/2026_10_08_hardening_spike.md 'Scheduler (Plans 4-38)'.
         errors: list[Exception] = []
-        # PLAN-30 FIX (CR-29-5): Catch ExceptionGroup from component unregister.
-        # Match Application.stop() pattern (application.py:217). ExceptionGroup is
-        # BaseException, not Exception. Defensive: components don't currently raise
-        # ExceptionGroup but may in future.
+        # Scheduler fix: catch ExceptionGroup from component unregister (see
+        # docs/plan_summaries/2026_10_08_hardening_spike.md 'Scheduler (Plans 4-38)').
         try:
             await self.timer_scheduler.unregister_module(module)
         except ExceptionGroup as eg:
             errors.extend(eg.exceptions)
         except Exception as e:
             errors.append(e)
-        # PLAN-30 FIX (CR-29-5): Catch ExceptionGroup from component unregister.
-        # Match Application.stop() pattern (application.py:217). ExceptionGroup is
-        # BaseException, not Exception. Defensive: components don't currently raise
-        # ExceptionGroup but may in future.
+        # Scheduler fix: catch ExceptionGroup from component unregister (see
+        # docs/plan_summaries/2026_10_08_hardening_spike.md 'Scheduler (Plans 4-38)').
         try:
             self.idle_pacer.set_idle_enabled(module, False)
         except ExceptionGroup as eg:
             errors.extend(eg.exceptions)
         except Exception as e:
             errors.append(e)
-        # PLAN-30 FIX (CR-29-5): Catch ExceptionGroup from component unregister.
-        # Match Application.stop() pattern (application.py:217). ExceptionGroup is
-        # BaseException, not Exception. Defensive: components don't currently raise
-        # ExceptionGroup but may in future.
+        # Scheduler fix: catch ExceptionGroup from component unregister (see
+        # docs/plan_summaries/2026_10_08_hardening_spike.md 'Scheduler (Plans 4-38)').
         try:
             self.interrupt_bridge.unregister_module(module)
         except ExceptionGroup as eg:

@@ -50,14 +50,18 @@ async def _rollback_pending(
 ) -> None:
     """Rollback pending modules with shield to prevent cancellation mid-cleanup.
 
-    PLAN-20: asyncio.shield ensures the entire rollback completes even if the
+    Rollback shield: asyncio.shield ensures the entire rollback completes even if the
     enclosing scope is cancelled. Without shield, a CancelledError during
     rollback leaves modules registered in the scheduler (resource leak).
+    Durable summary docs/plan_summaries/2026_10_08_hardening_spike.md
+    (Module Manager Plans 4-38: rollback ExceptionGroup handling).
     """
     rollback_errors: list[Exception] = []
-    # PLAN-30 FIX (CR-29-3): Catch ExceptionGroup from scheduler.unregister_module()
+    # Rollback ExceptionGroup handling (durable summary: docs/plan_summaries/2026_10_08_hardening_spike.md).
+    # Catch ExceptionGroup from scheduler.unregister_module()
     # which raises ExceptionGroup (scheduler.py:659). ExceptionGroup is BaseException,
     # not Exception. Match Application.stop() pattern (application.py:217).
+    # Module Manager Plans 4-38: rollback ExceptionGroup handling.
     for module in reversed(pending_modules):
         try:
             await scheduler.unregister_module(module)
@@ -104,7 +108,9 @@ class ModuleManager:
         """
         from ..drivers.rfm9x_sx127x_module import Rfm9xSx127xModule
 
-        # H-13/Plan-16: register-in-scheduler-then-commit-later.
+        # Plan-13 registration order + pending list pattern
+        # (durable summary: docs/plan_summaries/2026_10_08_hardening_spike.md).
+        # register-in-scheduler-then-commit-later.
         #
         # WHY register-before-track was dangerous: the previous strategy added a
         # module to the ``Scheduler`` and then to ``self.modules``/
@@ -134,7 +140,9 @@ class ModuleManager:
                 )
 
                 # Extract GPIO pins from DIO->GPIO mappings
-                # PLAN-26 FIX (Findings 843, 862): Fail fast on invalid GPIO mappings
+                # Phase 23 (plan-4) silent GPIO parsing failures
+                # (durable summary: docs/plan_summaries/2026_10_08_hardening_spike.md).
+                # Fail fast on invalid GPIO mappings
                 # instead of silently disabling interrupt handling. Invalid config is
                 # a deployment error that must be caught at load time.
                 gpio_pins: list[int] = []
@@ -169,7 +177,9 @@ class ModuleManager:
                             ) from e
 
                 device_key: DeviceIdentity = radio_config.device_id_key
-                # H-13/Plan-16: a duplicate can live in the main tracking (a prior
+                # Phase 22 (plan-4) duplicate DeviceIdentity handling
+                # (durable summary: docs/plan_summaries/2026_10_08_hardening_spike.md).
+                # a duplicate can live in the main tracking (a prior
                 # load) OR in pending_by_id (an earlier module registered in this
                 # same loop). Check both before registering.
                 if device_key in self.modules_by_id or device_key in pending_by_id:
@@ -182,7 +192,9 @@ class ModuleManager:
                     interrupt_gpio_pins=gpio_pins,
                 )
 
-                # H-13/Plan-16: park in pending (NOT main tracking) so rollback
+                # Plan-13 registration order + pending list pattern
+                # (durable summary: docs/plan_summaries/2026_10_08_hardening_spike.md).
+                # park in pending (NOT main tracking) so rollback
                 # can unregister exactly the modules the scheduler owns.
                 pending_modules.append(module)
                 pending_by_id[device_key] = module
@@ -196,11 +208,11 @@ class ModuleManager:
                 #   - Mitigation: Process exits shortly after; OS reclaims resources
                 #   - Do NOT change to catch BaseException without verifying shutdown safety
                 #
-                # Locations 1 & 2 (Plan-18 §6 anti-regression). Two invariants
+                # Locations 1 & 2 (durable summary: docs/plan_summaries/2026_10_08_hardening_spike.md). Two invariants
                 # that must NOT regress:
                 #
                 # [1] Rollback on ALL exceptions, INCLUDING CancelledError.
-                #     Plan-17 H-16-1 originally *committed* (did NOT roll back)
+                #     Plan-25 (durable summary: docs/plan_summaries/2026_10_08_hardening_spike.md) originally *committed* (did NOT roll back)
                 #     on CancelledError: pending modules were left registered in
                 #     the scheduler instead of unregistered. That leaked resources
                 #     because Application._cleanup_partial_start() only tracked
@@ -226,20 +238,20 @@ class ModuleManager:
                 #     an async cleanup (await scheduler.unregister_module()) would
                 #     raise RuntimeError and hang shutdown. Let them propagate.
                 #
-                # PLAN-20: asyncio.shield protects rollback from cancellation. If the original
+                # Plan-25: asyncio.shield protects rollback from cancellation. If the original
                 # exception was CancelledError (or a new cancellation arrives), the rollback
                 # still completes fully — no partial unregister leaves dangling scheduler refs.
                 try:
                     await asyncio.shield(_rollback_pending(pending_modules, scheduler))
-                # PLAN-30 FIX (CR-29-3): Catch ExceptionGroup from scheduler.unregister_module()
+                # Plan-25: Catch ExceptionGroup from scheduler.unregister_module()
                 # which raises ExceptionGroup (scheduler.py:659). ExceptionGroup is BaseException,
                 # not Exception. Match Application.stop() pattern (application.py:217).
                 except (Exception, ExceptionGroup) as rollback_exc:
-                    # PLAN-20: when unregister failures aggregate into an ExceptionGroup,
+                    # Plan-25: when unregister failures aggregate into an ExceptionGroup,
                     # main tracking must still reset and the "rolled back" warning must
                     # still be emitted (H-12 / test_module_manager_rollback_aggregates_errors
                     # asserts both). Clear pending lists and log before raising the
-                    # aggregated group so the Plan-19 warning path is not regressed.
+                    # aggregated group so the Phase 24 (rolled back on load failure) warning path is not regressed.
                     pending_modules.clear()
                     pending_by_id.clear()
                     logger.warning(
@@ -247,7 +259,7 @@ class ModuleManager:
                         "tracking reset empty"
                     )
                     if isinstance(rollback_exc, ExceptionGroup):
-                        # REVIEWer anti-regression (Fix 4A / Findings 699-706, CR-3.9):
+                        # REVIEWer anti-regression (durable summary: docs/plan_summaries/2026_10_08_hardening_spike.md, Module Manager Plan-25):
                         # _rollback_pending already created the ExceptionGroup with message
                         # "rollback failed" and all exceptions. Re-wrapping in a NEW
                         # ExceptionGroup with the same message loses the original
@@ -265,7 +277,7 @@ class ModuleManager:
                 )
                 raise
 
-        # H-13/Plan-16: whole loop succeeded -- commit pending to main tracking
+        # Plan-13: whole loop succeeded -- commit pending to main tracking
         # so callers see a fully consistent set. Only now is self.modules and
         # self.modules_by_id populated; a caller never sees a partial leak.
         for device_key, module in pending_by_id.items():
