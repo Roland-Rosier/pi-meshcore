@@ -14,34 +14,268 @@
 
 """Tests for lock registry correctness in ``spi/locks.py``."""
 
+import asyncio
+import concurrent.futures
+import inspect
+import types
 
-from src.pi_lora.drivers.spi.locks import SpiLock, get_bus_lock
+import aiologic
+import pytest
+
+from pi_lora.drivers.spi.locks import SpiLock, get_bus_lock
 
 
 class TestLockRegistry:
-    """Verify lock registry returns consistent locks per bus number."""
+    """Verify lock registry returns consistent locks per bus number.
 
-    def test_same_lock_per_bus(self) -> None:
-        lock_a = get_bus_lock(0)
-        lock_b = get_bus_lock(0)
+    ``get_bus_lock`` is an ``async def`` per Phase H; every call must be
+    ``await``-ed inside an ``async def`` marked ``@pytest.mark.asyncio``.
+    """
+
+    @pytest.mark.asyncio
+    async def test_same_lock_per_bus(self) -> None:
+        lock_a = await get_bus_lock(0)
+        lock_b = await get_bus_lock(0)
         assert lock_a is lock_b
 
-    def test_different_locks_per_bus(self) -> None:
-        lock_0 = get_bus_lock(0)
-        lock_1 = get_bus_lock(1)
+    @pytest.mark.asyncio
+    async def test_different_locks_per_bus(self) -> None:
+        lock_0 = await get_bus_lock(0)
+        lock_1 = await get_bus_lock(1)
         assert lock_0 is not lock_1
 
-    def test_multiple_buses(self) -> None:
+    @pytest.mark.asyncio
+    async def test_multiple_buses(self) -> None:
         locks: dict[int, SpiLock] = {}
         for bus_id in range(10):
             if bus_id not in locks:
-                locks[bus_id] = get_bus_lock(bus_id)
+                locks[bus_id] = await get_bus_lock(bus_id)
         # Verify consistency: re-fetching should return same lock
         for bus_id in range(10):
-            assert get_bus_lock(bus_id) is locks[bus_id]
+            assert await get_bus_lock(bus_id) is locks[bus_id]
 
-    def test_negative_bus_number(self) -> None:
+    @pytest.mark.asyncio
+    async def test_negative_bus_number(self) -> None:
         """Lock registry should handle negative bus numbers."""
-        lock_neg = get_bus_lock(-1)
-        lock_neg_again = get_bus_lock(-1)
+        lock_neg = await get_bus_lock(-1)
+        lock_neg_again = await get_bus_lock(-1)
         assert lock_neg is lock_neg_again
+
+    def test_registry_thread_safety(self) -> None:
+        """The registry hands back one instance across threads/event-loops.
+
+        ``get_bus_lock`` is invoked from ``asyncio.to_thread`` in ``bus.py``,
+        which runs each call in a separate worker thread with its own event
+        loop. A per-thread ``asyncio.Lock`` registry guard would let two threads
+        both pass the ``bus_number not in _bus_locks`` check and mint distinct
+        per-bus locks, breaking per-bus mutual exclusion. With a single shared
+        registry instance (``aiologic.Lock``) only one thread can create the
+        lock, so every thread observes the same instance.
+        """
+        num_threads = 8
+        iterations = 25
+
+        def _worker(_bus_id: int) -> object:
+            return asyncio.run(get_bus_lock(0))
+
+        with concurrent.futures.ThreadPoolExecutor(max_workers=num_threads) as pool:
+            collected: list[object] = list(pool.map(_worker, range(iterations)))
+
+        assert collected, "no locks were produced"
+        first = collected[0]
+        assert all(lock is first for lock in collected)
+
+    @pytest.mark.asyncio
+    async def test_get_bus_lock_returns_protocol_type(self) -> None:
+        """The returned lock structurally satisfies the ``SpiLock`` protocol.
+
+        Section 2.2 return type abstraction: ``get_bus_lock`` is annotated to
+        return :class:`SpiLock`, so the concrete ``aiologic.Lock`` must expose
+        every protocol member. This test asserts each method/dunder exists on
+        the instance returned for a given bus number.
+        """
+        lock = await get_bus_lock(0)
+        protocol_methods = (
+            "__enter__",
+            "__exit__",
+            "__aenter__",
+            "__aexit__",
+            "async_acquire",
+            "async_release",
+            "locked",
+        )
+        for method_name in protocol_methods:
+            assert hasattr(lock, method_name), (
+                f"returned lock is missing protocol member {method_name!r}"
+            )
+
+
+class TestCancellationLeak:
+    """Verify ``async with lock:`` never leaks a release on cancellation.
+
+    Section 2.5 remediation. With the old ``acquired``/``finally``/``release()``
+    pattern, a coroutine cancelled during ``await lock.acquire()`` could leave the
+    worker thread holding the lock while ``acquired`` stayed ``False``, producing
+    a leak. The corrected ``async with lock:`` pattern relies on ``aiologic.Lock``
+    managing cancellation internally: if ``__aenter__`` never completes acquisition,
+    the lock never reports ownership and no release is ever issued. This test
+    cancels a task while it is inside the lock scope and asserts the lock ends up
+    un-held (``lock.locked() is False``) with no ``RuntimeError: release
+    unlocked lock``. The scenario is deterministic: the task is cancelled after it
+    has demonstrably entered the lock scope, so ``__aexit__`` must run and release.
+    """
+
+    @pytest.mark.asyncio
+    async def test_cancellation_inside_lock_scope_does_not_leak(self) -> None:
+        """A task cancelled inside ``async with lock:`` leaves the lock un-held."""
+        lock = await get_bus_lock(0)
+        assert lock.locked() is False
+
+        async def _coro() -> None:
+            async with lock:
+                await asyncio.sleep(0.5)
+
+        coro = _coro()
+        task = asyncio.ensure_future(coro)
+
+        # Let the task acquire the lock and reach the blocking ``sleep``.
+        await asyncio.sleep(0)
+        await asyncio.sleep(0)
+
+        task.cancel()
+        with pytest.raises(asyncio.CancelledError):
+            await task
+
+        # No leak: the lock is not left held; no ``RuntimeError: release
+        # unlocked lock`` could have occurred because aiologic.Lock never
+        # issued a release for an unacquired state.
+        assert lock.locked() is False
+
+    @pytest.mark.asyncio
+    async def test_cancellation_at_acquire_boundary_does_not_leak(self) -> None:
+        """Cancelled during ``__aenter__`` (acquire) leaves the lock un-held."""
+        lock = await get_bus_lock(1)
+        assert lock.locked() is False
+
+        async def _coro() -> None:
+            # Cancel the outer task right as it begins acquiring the lock.
+            await asyncio.sleep(0)
+            async with lock:
+                await asyncio.sleep(0.5)
+
+        coro = _coro()
+        task = asyncio.ensure_future(coro)
+
+        # Give the task a chance to enter ``async with lock:``; cancel while it
+        # is still within the acquisition or inside the scope — either way the
+        # lock must end un-held.
+        await asyncio.sleep(0)
+        task.cancel()
+        with pytest.raises(asyncio.CancelledError):
+            await task
+
+        assert lock.locked() is False
+
+
+class TestLockProtocolSignatures:
+    """Verify the ``SpiLock`` protocol signatures match ``aiologic.Lock``.
+
+    Phase 11 corrections. ``async_acquire`` must be a coroutine (an ``async
+    def``) because the concrete ``aiologic.Lock.async_acquire`` is a coroutine;
+    calling it without ``await`` yields a ``types.CoroutineType`` and awaiting
+    it yields a ``bool``. ``__enter__`` and ``__aenter__`` must return the lock
+    instance itself so they are faithful self-returning context managers.
+
+    Each test exercises a distinct bus number so the shared per-bus
+    :class:`aiologic.Lock` instances never leak ownership across tests.
+    """
+
+    @pytest.mark.asyncio
+    async def test_async_acquire_is_a_coroutine(self) -> None:
+        """``async_acquire`` returns a coroutine object when awaited-less."""
+        lock = await get_bus_lock(0)
+        raw = lock.async_acquire()
+        assert isinstance(raw, types.CoroutineType)
+        raw.close()
+
+    @pytest.mark.asyncio
+    async def test_async_acquire_returns_bool(self) -> None:
+        """Awaited ``async_acquire`` resolves to a boolean."""
+        lock = await get_bus_lock(1)
+        result = await lock.async_acquire()
+        assert isinstance(result, bool)
+        lock.async_release()
+
+    @pytest.mark.asyncio
+    async def test_async_release_matches_aiologic_api(self) -> None:
+        """Pin ``async_release`` to the concrete :class:`aiologic.Lock` API.
+
+        Regression for code_review-10.1:1. The concrete lock exposes
+        ``async_release`` and has NO ``release`` method; the ``SpiLock`` protocol
+        must track this. Asserting both directions prevents future implementers
+        from renaming the protocol member to ``release`` (which would reintroduce
+        an ``AttributeError`` at runtime).
+        """
+        lock = await get_bus_lock(5)
+        assert hasattr(lock, "async_release") is True
+        assert hasattr(lock, "release") is False
+
+        acquired = await lock.async_acquire()
+        assert acquired is True
+        assert lock.locked() is True
+        lock.async_release()
+        assert lock.locked() is False
+
+    def test_enter_requires_async_acquisition(self) -> None:
+        """The returned lock is a raw aiologic.Lock (no _GuardedLock wrapper)."""
+        lock = asyncio.new_event_loop().run_until_complete(get_bus_lock(2))
+        assert isinstance(lock, aiologic.Lock)
+        assert type(lock).__name__ != "_GuardedLock"
+
+    @pytest.mark.asyncio
+    async def test_aenter_returns_self(self) -> None:
+        """``async with lock:`` returns the lock instance itself."""
+        lock = await get_bus_lock(3)
+        async with lock as entered:
+            assert entered is lock
+        assert entered is lock
+
+    @pytest.mark.asyncio
+    async def test_protocol_async_acquire_is_coroutine_function(self) -> None:
+        """The concrete lock's ``async_acquire`` is a coroutine function."""
+        lock = await get_bus_lock(4)
+        assert inspect.iscoroutinefunction(lock.async_acquire) is True
+
+    @pytest.mark.asyncio
+    async def test_concrete_lock_supports_sync_context_manager_after_async_acquisition(self) -> None:
+        """Sync context-manager members exist on the guard; acquisition is async.
+
+        CR-4. Before the fix the ``SpiLock`` protocol omitted ``__enter__``/
+        ``__exit__`` even though ``aiologic.Lock`` supports them at runtime, so
+        type checkers could not verify ``with lock:`` synchronously. The protocol
+        now declares them so the static-vs-runtime gap is closed. ``__members__``
+        is a static-only attribute (absent at runtime), so the ground truth is the
+        concrete instance: it must expose every protocol member -- including the
+        newly declared sync context managers -- which is verified here with
+        ``hasattr``. Because ``get_bus_lock`` returns a :class:`_GuardedLock` whose
+        sync ``__enter__`` raises unless ``__aenter__`` has already run, acquisition
+        must go through ``async with lock:`` rather than a bare sync ``with lock:``.
+        """
+        lock = await get_bus_lock(6)
+        protocol_members = (
+            "__enter__",
+            "__exit__",
+            "__aenter__",
+            "__aexit__",
+            "async_acquire",
+            "async_release",
+            "locked",
+        )
+        for member_name in protocol_members:
+            assert hasattr(lock, member_name), (
+                f"concrete lock is missing protocol member {member_name!r}"
+            )
+        assert lock.locked() is False
+        async with lock:
+            assert lock.locked() is True
+        assert lock.locked() is False

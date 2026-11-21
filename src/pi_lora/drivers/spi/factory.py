@@ -22,33 +22,56 @@ from .bus import SpiBus
 class SpiBusFactory(Protocol):
     """Protocol defining SPI bus factory interface."""
 
-    def create(self, bus: int, device: int) -> SpiBus:
-        """Create a SpiBus instance.
+    def create(
+        self, bus: int, device: int, *, xfer_timeout: float = 5.0, factory_owned: bool = False
+    ) -> SpiBus:
+        """Create an unopened SpiBus instance.
+
+        The returned bus is UNOPENED: it has not been opened and must not be
+        used directly. The caller MUST call ``open()`` on the returned bus
+        before using it. This is a Liskov Substitution (LSP) contract
+        requirement: the factory creates the bus, and the caller owns the
+        lifecycle including the open step.
 
         Args:
             bus: The bus identifier.
             device: The device identifier.
+            xfer_timeout: Upper bound in seconds for a single xfer2 transfer.
+            factory_owned: True if created by test factory with spidev patch.
 
         Returns:
-            A SpiBus implementation.
+            An unopened SpiBus implementation.
         """
 
 
 class RealSpiBusFactory:
     """Real implementation of SpiBusFactory."""
 
-    def create(self, bus: int, device: int) -> SpiBus:
-        """Create a RealSpiBus instance.
+    def create(
+        self, bus: int, device: int, *, xfer_timeout: float = 5.0, factory_owned: bool = False
+    ) -> SpiBus:
+        """Create an unopened RealSpiBus instance.
+
+        The returned bus is UNOPENED: it has not been opened and must not be
+        used directly. The caller MUST call ``open()`` on the returned bus
+        before using it. This is a Liskov Substitution (LSP) contract
+        requirement: the factory creates the bus, and the caller owns the
+        lifecycle including the open step.
 
         Args:
             bus: The bus identifier.
             device: The device identifier.
+            xfer_timeout: Upper bound in seconds for a single xfer2 transfer.
+            factory_owned: True if created by test factory with spidev patch.
 
         Returns:
-            A new RealSpiBus instance.
+            An unopened RealSpiBus instance.
         """
         from .bus import RealSpiBus
 
-        bus_instance = RealSpiBus()
-        bus_instance.open(bus=bus, device=device)
-        return bus_instance  # type: ignore[return-value]
+        return RealSpiBus(
+            bus_number=bus,
+            device_number=device,
+            xfer_timeout=xfer_timeout,
+            factory_owned=factory_owned,
+        )

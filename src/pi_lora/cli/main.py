@@ -1,30 +1,19 @@
 """Main CLI entry point for pi_lora package."""
 
-import logging
-import os
+from __future__ import annotations
 
-import typer
+from async_typer import AsyncTyper
 
-
-def setup_logging() -> None:
-    """Configure root logger using PI_LORA_LOG_LEVEL environment variable.
-
-    Safe to call multiple times — basicConfig is idempotent after first call.
-    """
-    log_level = os.environ.get("PI_LORA_LOG_LEVEL", "WARNING").upper()
-    logging.basicConfig(
-        level=getattr(logging, log_level, logging.WARNING),
-        format="%(asctime)s %(levelname)s %(name)s: %(message)s",
-    )
-
-
-setup_logging()
-
+# PLAN-23 FIX (Issue 6): setup_logging() was removed from this module-level scope.
+# Calling it on import ran on every importer (tests, other modules) and polluted
+# the test environment with logging configuration. Logging setup is now isolated
+# to entry-point-local setup in cli/_entry_points.py, so it only runs on the
+# actual console script run.
 from .check_hardware import app as check_hardware_app
 from .config import app as config_app
 from .test import app as test_app
 
-app = typer.Typer(
+app = AsyncTyper(
     name="pi_lora",
     help="MeshCore Pi LoRa CLI — hardware test, config, and diagnostics",
     no_args_is_help=True,
@@ -33,3 +22,15 @@ app = typer.Typer(
 app.add_typer(check_hardware_app, name="check-hardware")
 app.add_typer(config_app, name="config")
 app.add_typer(test_app, name="test")
+
+
+if __name__ == "__main__":
+    # CR-34.3.5 / Plan-35 FIX: delegate to the canonical entry point function
+    # in _entry_points.py instead of duplicating setup_logging() + _run_app() logic.
+    # This ensures:
+    # - Single source of truth for entry point behavior (Plan-23 architecture)
+    # - Dev workflow (python -m pi_lora.cli.main) gets logging automatically
+    # - No double setup_logging() call (entry point handles it)
+    # - Consistent with how console scripts (pi-lora) are invoked
+    from pi_lora.cli._entry_points import pi_lora
+    raise SystemExit(pi_lora())

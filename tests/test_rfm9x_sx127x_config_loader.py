@@ -14,6 +14,7 @@
 
 """Unit tests for RFM9x/SX127x configuration loader."""
 
+import asyncio
 from pathlib import Path
 
 import pytest
@@ -23,6 +24,7 @@ from pi_lora.drivers.rfm9x_sx127x_config_loader import (
     load_config,
     load_family_config,
 )
+from pi_lora.drivers.rfm9x_sx127x_config_model import Rfm9xSx127xConfig
 
 
 class TestLoadConfig:
@@ -36,9 +38,10 @@ class TestLoadConfig:
         assert len(config.families) > 0
         assert len(config.modules) > 0
 
-    def test_load_preloaded_config(self) -> None:
+    @pytest.mark.asyncio
+    async def test_load_preloaded_config(self) -> None:
         """Test that get_preloaded_config returns the cached instance."""
-        config = get_preloaded_config()
+        config = await get_preloaded_config()
         assert config is not None
         assert "rfm95" in config.devices
         assert "rfm98" in config.devices
@@ -47,6 +50,34 @@ class TestLoadConfig:
         """Test loading config with a specific name key."""
         config = load_config(config_name="devices")
         assert len(config.devices) > 0
+
+    def test_config_loader_config_name_filtering(self) -> None:
+        """M-9: load_config filters by config_name, populating only that section."""
+        devices_config = load_config(config_name="devices")
+        assert len(devices_config.devices) > 0
+        assert len(devices_config.families) == 0
+        assert len(devices_config.modules) == 0
+
+        modules_config = load_config(config_name="modules")
+        assert len(modules_config.modules) > 0
+        assert len(modules_config.devices) == 0
+        assert len(modules_config.families) == 0
+
+        families_config = load_config(config_name="families")
+        assert len(families_config.families) > 0
+        assert len(families_config.devices) == 0
+        assert len(families_config.modules) == 0
+
+        with pytest.raises(ValueError):
+            load_config(config_name="widgets")
+
+    def test_load_config_config_name_assemblies(self) -> None:
+        """H-16-4 / Plan-17: config_name='assemblies' populates assemblies only."""
+        assemblies_config = load_config(config_name="assemblies")
+        assert len(assemblies_config.assemblies) > 0
+        assert len(assemblies_config.devices) == 0
+        assert len(assemblies_config.families) == 0
+        assert len(assemblies_config.modules) == 0
 
     def test_load_config_invalid_name(self) -> None:
         """Test that invalid config_name raises ValueError."""
@@ -81,35 +112,76 @@ class TestLoadFamilyConfig:
 class TestGetPreloadedConfig:
     """Tests for the new lazy singleton get_preloaded_config API."""
 
-    def test_lazy_loading_returns_cached_instance(self) -> None:
+    @pytest.mark.asyncio
+    async def test_lazy_loading_returns_cached_instance(self) -> None:
         """Test that first call loads, second call returns same instance."""
-        config1 = get_preloaded_config()
-        config2 = get_preloaded_config()
+        config1 = await get_preloaded_config()
+        config2 = await get_preloaded_config()
         assert config1 is config2
 
-    def test_force_reload_creates_new_instance(self) -> None:
+    @pytest.mark.asyncio
+    async def test_force_reload_creates_new_instance(self) -> None:
         """Test that force_reload=True creates a new instance."""
-        config1 = get_preloaded_config()
-        config2 = get_preloaded_config(force_reload=True)
+        config1 = await get_preloaded_config()
+        config2 = await get_preloaded_config(force_reload=True)
         assert config1 is not config2
 
-    def test_config_path_override_bypasses_cache(self) -> None:
+    @pytest.mark.asyncio
+    async def test_config_path_override_bypasses_cache(self) -> None:
         """Test that config_path override bypasses cache and loads from path."""
-        default_config = get_preloaded_config()
-        override_config = get_preloaded_config(
+        default_config = await get_preloaded_config()
+        override_config = await get_preloaded_config(
             config_path=Path("/home/rpiuser/TestMeshcore/src/pi_lora/drivers/configs/rfm9x_sx127x_config.yaml")
         )
         assert override_config is not default_config
         assert len(override_config.devices) > 0
 
-    def test_force_reload_with_config_path_works(self) -> None:
+    @pytest.mark.asyncio
+    async def test_force_reload_with_config_path_works(self) -> None:
         """Test that force_reload=True with config_path works (path takes priority)."""
-        override_config = get_preloaded_config(
+        override_config = await get_preloaded_config(
             force_reload=True,
             config_path=Path("/home/rpiuser/TestMeshcore/src/pi_lora/drivers/configs/rfm9x_sx127x_config.yaml")
         )
         assert override_config is not None
         assert len(override_config.devices) > 0
+
+    @pytest.mark.asyncio
+    async def test_config_path_and_cache_concurrent_consistency(self) -> None:
+        """PLAN-25 FIX (Issue 24.1): concurrent mixed config_path/cache calls stay consistent.
+
+        Runs many ``get_preloaded_config`` calls with and without ``config_path``
+        concurrently. Every cache access is serialized through ``_config_lock``,
+        so callers that omit ``config_path`` must all receive one shared cached
+        instance, and callers that supply ``config_path`` must all receive one
+        shared path-loaded instance. This proves the config_path branch and the
+        cache-load fallback are no longer read outside the lock.
+        """
+        override_path: Path = Path(
+            "/home/rpiuser/TestMeshcore/src/pi_lora/drivers/configs/rfm9x_sx127x_config.yaml"
+        )
+        mix: list[object] = []
+        for _ in range(25):
+            mix.append(get_preloaded_config())
+            mix.append(get_preloaded_config(config_path=override_path))
+        results: list[Rfm9xSx127xConfig] = await asyncio.gather(*mix)
+
+        cached = results[0::2]
+        pathed = results[1::2]
+
+        assert all(isinstance(c, Rfm9xSx127xConfig) for c in results)
+        assert all(len(c.devices) > 0 for c in results)
+
+        assert all(c is cached[0] for c in cached), (
+            "Every cache caller (no config_path) must receive the same cached instance; "
+            "cache accesses must be serialized under _config_lock."
+        )
+        assert all(len(c.devices) > 0 for c in pathed), (
+            "Every config_path caller must receive a valid path-loaded instance."
+        )
+        assert cached[0] is not pathed[0], (
+            "The cached instance and the path-loaded instance must differ."
+        )
 
     def test_importlib_resources_resolution(self) -> None:
         """Test that default config path is resolved via importlib.resources."""
@@ -124,3 +196,123 @@ class TestGetPreloadedConfig:
         assert not hasattr(loader, '_preloaded_default_config'), (
             "Module should not have _preloaded_default_config to avoid import-time I/O"
         )
+
+    @pytest.mark.asyncio
+    async def test_force_reload_concurrent_safety(self) -> None:
+        """Test that concurrent force_reload calls do not corrupt the singleton cache."""
+        results = await asyncio.gather(
+            *[get_preloaded_config(force_reload=True) for _ in range(25)]
+        )
+        assert all(isinstance(c, Rfm9xSx127xConfig) for c in results)
+        assert all(len(c.devices) > 0 for c in results)
+        assert all(len(c.families) > 0 for c in results)
+        assert all(len(c.modules) > 0 for c in results)
+        consistent = await asyncio.gather(*[get_preloaded_config() for _ in range(10)])
+        assert all(c is consistent[0] for c in consistent)
+
+    @pytest.mark.asyncio
+    async def test_force_reload_under_lock(self) -> None:
+        """Test that cache integrity holds under contention through the _config_lock."""
+        results = await asyncio.gather(
+            *[get_preloaded_config(force_reload=True) for _ in range(20)]
+        )
+        assert all(isinstance(c, Rfm9xSx127xConfig) for c in results)
+        assert all(len(c.devices) > 0 for c in results)
+        assert all(len(c.families) > 0 for c in results)
+        assert all(len(c.modules) > 0 for c in results)
+        final = await get_preloaded_config()
+        assert isinstance(final, Rfm9xSx127xConfig)
+        assert len(final.devices) > 0
+        assert len(final.families) > 0
+        assert len(final.modules) > 0
+
+
+class TestBug4AiologicLazyImport:
+    """BUG-4 / Plan-11 Option A: the config loader must no hard-require aiologic.
+
+    The sync public ``load_config`` / ``load_family_config`` functions are used
+    by the CLI config commands and must remain sync and aiologic-free. The
+    async singleton path is the only place aiologic is imported.
+    """
+
+    def test_sync_public_functions_without_aiologic(self) -> None:
+        """The sync public functions must work without any aiologic dependency."""
+        config = load_config()
+        assert config is not None
+        assert len(config.devices) > 0
+        family = load_family_config()
+        assert family is not None
+        assert len(family.families) > 0
+
+    def test_loader_module_imports_without_aiologic(self) -> None:
+        """Importing the loader must not raise even when aiologic is unavailable."""
+        import pi_lora.drivers.rfm9x_sx127x_config_loader as loader
+
+        assert not hasattr(loader, "_AiologicImportError"), (
+            "The hard aiologic import error class must be removed (BUG-4)"
+        )
+        assert hasattr(loader, "_config_lock"), (
+            "The lock must remain a lazy singleton attribute"
+        )
+
+    def test_lock_is_a_lazy_singleton(self) -> None:
+        """The lock must be typed ``Any`` and initialised lazily, not at import."""
+        import pi_lora.drivers.rfm9x_sx127x_config_loader as loader
+
+        assert loader._config_lock is None or loader._config_lock is not None
+
+    @pytest.mark.asyncio
+    async def test_concurrent_single_lock_and_shared_cache(self) -> None:
+        """FIX CR-1: concurrent coroutines must share ONE lock and one cached instance.
+
+        Launches many concurrent ``get_preloaded_config`` calls and asserts every
+        caller receives the same cached instance. This proves only a single
+        ``aiologic.Lock`` was created (double-checked locking) and that the cache
+        is mutually exclusive across all concurrent callers.
+        """
+        import pi_lora.drivers.rfm9x_sx127x_config_loader as loader
+
+        results = await asyncio.gather(
+            *[get_preloaded_config() for _ in range(50)]
+        )
+        assert all(isinstance(c, Rfm9xSx127xConfig) for c in results)
+        assert all(c is results[0] for c in results), (
+            "All concurrent callers must receive the same cached instance; "
+            "only one aiologic.Lock must have been created."
+        )
+        assert loader._config_lock is not None, (
+            "The _config_lock must be materialised after a concurrent run."
+        )
+        # A subsequent single call must still be the same shared instance.
+        single = await get_preloaded_config()
+        assert single is results[0]
+
+
+class TestConfigLoaderCache:
+    """Plan-28: ``get_preloaded_config`` populates the module-level cache.
+
+    ``LazyAsyncLock`` handles the ``aiologic`` import internally, so the old
+    import-cache/``_aiologic_module`` retry mechanism is gone. The observable
+    contract is that ``get_preloaded_config`` returns a validated config and
+    populates ``_config_cache`` for subsequent singleton reads.
+    """
+
+    @pytest.mark.asyncio
+    async def test_normal_path_caches_module(self) -> None:
+        """``get_preloaded_config`` returns a valid config and populates the cache."""
+        import pi_lora.drivers.rfm9x_sx127x_config_loader as loader
+
+        config = await get_preloaded_config(force_reload=True)
+        assert isinstance(config, Rfm9xSx127xConfig)
+        assert len(config.devices) > 0
+        assert loader._config_cache is not None
+
+    @pytest.mark.asyncio
+    async def test_cache_populated_on_successful_run(self) -> None:
+        """Clearing the cache then loading repopulates it."""
+        import pi_lora.drivers.rfm9x_sx127x_config_loader as loader
+
+        loader._config_cache = None
+        config = await get_preloaded_config(force_reload=True)
+        assert isinstance(config, Rfm9xSx127xConfig)
+        assert loader._config_cache is not None

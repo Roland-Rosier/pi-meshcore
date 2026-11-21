@@ -105,10 +105,9 @@ class TestLoRaModuleDetectorRegisters:
         results: list[dict] = detector.detect_modules()
 
         # The result dict includes the register value from read_register(0x12).
-        assert "reg_rxbw_freqifmsb" in results[0]
-        # FakeSpiDev returns 0x00 for address 0x12 (default register value),
-        # and 0x12 only for address 0x42 (silicon revision) during init.
-        assert results[0]["reg_rxbw_freqifmsb"] is not None
+        assert "Silicon Revision" in results[0]
+        # FakeSpiDev returns 0x12 for address 0x42 (silicon revision) during init.
+        assert results[0]["Silicon Revision"] is not None
 
     def test_write_register_rfm95w(self) -> None:
         """Test writing registers to RFM95W fake device through real module."""
@@ -683,7 +682,7 @@ class TestLoRaModuleDetectorExtendedDetection:
         """Test that detect_modules() result dicts contain all expected keys.
 
         Verifies the presence of both common keys (ce_pin, module_type, Silicon Revision,
-        reg_rxbw_freqifmsb) in single-pin results and extended detection keys
+        extended_detection) in single-pin results and extended detection keys
         (is_single_module_dual_spi, unique_value_written, unique_value_verified) when
         dual pins are configured with modules on both.
         """
@@ -701,7 +700,7 @@ class TestLoRaModuleDetectorExtendedDetection:
             "ce_pin",
             "module_type",
             "Silicon Revision",
-            "reg_rxbw_freqifmsb",
+            "extended_detection",
         ]
         for key in common_keys:
             assert key in single_results[0], (

@@ -16,13 +16,71 @@
 
 from __future__ import annotations
 
-from contextlib import suppress
-from typing import Any
+import asyncio
+import logging
+from typing import TYPE_CHECKING, Any
 
 from .scheduler import Scheduler
-from ..drivers.rfm9x_sx127x_module import Rfm9xSx127xModule
-from ..drivers.rfm9x_sx127x_radio_instance import DeviceIdentity, RadioInstanceConfig
+from ..drivers.rfm9x_sx127x_radio_instance import (
+    DeviceIdentity,
+    RadioInstanceConfig,
+    RadioInstanceError,
+)
 from ..types import StateBits
+
+if TYPE_CHECKING:
+    # ISSUE-2 anti-regression: original correct pattern was TYPE_CHECKING + lazy import
+    # (commit c6c86e8). Commit f5a0b9e (2026-10-08) regressed to a module-level import to
+    # fix mypy/ruff failures, creating the circular dependency
+    # rfm9x_sx127x_module -> framework.events -> framework.application ->
+    # framework.module_manager -> rfm9x_sx127x_module.
+    # This fix keeps the import under TYPE_CHECKING (erased at runtime, so no circular
+    # import) and relies on from __future__ import annotations (PEP 563), which makes all
+    # annotations strings at runtime. mypy --strict resolves the names via the
+    # TYPE_CHECKING import, and ruff does not flag unquoted annotations. The class is
+    # instantiated via a lazy local import inside load_from_config().
+    from ..drivers.rfm9x_sx127x_module import Rfm9xSx127xModule
+
+logger = logging.getLogger(__name__)
+
+
+async def _rollback_pending(
+    pending_modules: list[Rfm9xSx127xModule],
+    scheduler: Scheduler,
+) -> None:
+    """Rollback pending modules with shield to prevent cancellation mid-cleanup.
+
+    Rollback shield: asyncio.shield ensures the entire rollback completes even if the
+    enclosing scope is cancelled. Without shield, a CancelledError during
+    rollback leaves modules registered in the scheduler (resource leak).
+    Durable summary docs/plan_summaries/2026_10_08_hardening_spike.md
+    (Module Manager Plans 4-38: rollback ExceptionGroup handling).
+    """
+    rollback_errors: list[Exception] = []
+    # Rollback ExceptionGroup handling (durable summary: docs/plan_summaries/2026_10_08_hardening_spike.md).
+    # Catch ExceptionGroup from scheduler.unregister_module()
+    # which raises ExceptionGroup (scheduler.py:659). ExceptionGroup is BaseException,
+    # not Exception. Match Application.stop() pattern (application.py:217).
+    # Module Manager Plans 4-38: rollback ExceptionGroup handling.
+    for module in reversed(pending_modules):
+        try:
+            await scheduler.unregister_module(module)
+        except ExceptionGroup as eg:
+            rollback_errors.extend(eg.exceptions)
+        except Exception as unregister_err:
+            rollback_errors.append(unregister_err)
+    if rollback_errors:
+        raise ExceptionGroup("rollback failed", rollback_errors)
+
+
+class DuplicateDeviceIdentityError(RadioInstanceError):
+    """Raised when a ``DeviceIdentity`` already exists in the manager during load."""
+
+    def __init__(self, device_key: DeviceIdentity) -> None:
+        super().__init__(
+            f"Duplicate DeviceIdentity {device_key} in config",
+            {"device_key": str(device_key)},
+        )
 
 
 class ModuleManager:
@@ -36,7 +94,7 @@ class ModuleManager:
         self.modules_by_id: dict[DeviceIdentity, Rfm9xSx127xModule] = {}
         self.modules: list[Rfm9xSx127xModule] = []
 
-    def load_from_config(
+    async def load_from_config(
         self,
         radio_configs: list[RadioInstanceConfig],
         scheduler: Scheduler,
@@ -48,41 +106,185 @@ class ModuleManager:
         ``RadioInstanceConfig``. Uses ``radio_config.dio_gpio_mappings`` for
         ``interrupt_gpio_pins``. Keys modules by ``radio_config.device_id_key`` (DeviceIdentity).
         """
-        for radio_config in radio_configs:
-            module = Rfm9xSx127xModule(
-                radio_config=radio_config,
-                state=StateBits.UNKNOWN_STATE,
-                spi_factory=spi_factory,
-            )
+        from ..drivers.rfm9x_sx127x_module import Rfm9xSx127xModule
 
-            # Extract GPIO pins from DIO->GPIO mappings
-            gpio_pins: list[int] = []
-            if radio_config.dio_gpio_mappings:
-                for mapping in radio_config.dio_gpio_mappings:
-                    parts = mapping.split(":")
-                    if len(parts) == 2:
+        # Plan-13 registration order + pending list pattern
+        # (durable summary: docs/plan_summaries/2026_10_08_hardening_spike.md).
+        # register-in-scheduler-then-commit-later.
+        #
+        # WHY register-before-track was dangerous: the previous strategy added a
+        # module to the ``Scheduler`` and then to ``self.modules``/
+        # ``self.modules_by_id`` in the same step. If a later config failed, the
+        # scheduler already held a task for an earlier module whose instance was
+        # NOT in the tracking lists -- a dangling scheduler reference with no
+        # owning module, i.e. a resource leak. Rollback then had to walk tracking
+        # lists that could be out of sync with the scheduler.
+        #
+        # HOW the pending list prevents dangling refs: each module is registered
+        # in the scheduler but parked in ``pending_modules``/``pending_by_id``
+        # instead of the main tracking. Rollback therefore only ever touches
+        # pending modules (in reverse order), so every scheduler-registered module
+        # is unregistered and no dangling reference survives. Main tracking
+        # (``self.modules``/``self.modules_by_id``) is populated ONLY after the
+        # whole loop completes successfully, so a caller either sees a fully
+        # consistent set or an empty set -- never a partial leak.
+        pending_modules: list[Rfm9xSx127xModule] = []
+        pending_by_id: dict[DeviceIdentity, Rfm9xSx127xModule] = {}
+
+        for index, radio_config in enumerate(radio_configs):
+            try:
+                module = Rfm9xSx127xModule(
+                    radio_config=radio_config,
+                    state=StateBits.UNKNOWN_STATE,
+                    spi_factory=spi_factory,
+                )
+
+                # Extract GPIO pins from DIO->GPIO mappings
+                # Phase 23 (plan-4) silent GPIO parsing failures
+                # (durable summary: docs/plan_summaries/2026_10_08_hardening_spike.md).
+                # Fail fast on invalid GPIO mappings
+                # instead of silently disabling interrupt handling. Invalid config is
+                # a deployment error that must be caught at load time.
+                gpio_pins: list[int] = []
+                if radio_config.dio_gpio_mappings:
+                    for mapping in radio_config.dio_gpio_mappings:
+                        parts = mapping.split(":")
+                        if len(parts) != 2:
+                            raise ValueError(
+                                f"Invalid GPIO mapping {mapping!r} at config index {index} "
+                                f"(device {radio_config.device_name!r}): must be in format "
+                                f"'DIO:<GPIO|WPi><pin_number>'"
+                            )
                         gpio_str = parts[1]
+                        matched_prefix: str | None = None
                         for prefix in ("GPIO", "WPi"):
                             if gpio_str.startswith(prefix):
-                                with suppress(ValueError):
-                                    gpio_pins.append(int(gpio_str[len(prefix):]))
+                                matched_prefix = prefix
                                 break
+                        if matched_prefix is None:
+                            raise ValueError(
+                                f"Invalid GPIO mapping {mapping!r} at config index {index} "
+                                f"(device {radio_config.device_name!r}): pin must start with "
+                                f"'GPIO' or 'WPi'"
+                            )
+                        try:
+                            gpio_pins.append(int(gpio_str[len(matched_prefix):]))
+                        except ValueError as e:
+                            raise ValueError(
+                                f"Invalid GPIO mapping {mapping!r} at config index {index} "
+                                f"(device {radio_config.device_name!r}): pin number must be "
+                                f"an integer"
+                            ) from e
 
-            scheduler.register_module(
-                module,
-                timer_interval=1.0,
-                idle_enabled=True,
-                interrupt_gpio_pins=gpio_pins,
-            )
+                device_key: DeviceIdentity = radio_config.device_id_key
+                # Phase 22 (plan-4) duplicate DeviceIdentity handling
+                # (durable summary: docs/plan_summaries/2026_10_08_hardening_spike.md).
+                # a duplicate can live in the main tracking (a prior
+                # load) OR in pending_by_id (an earlier module registered in this
+                # same loop). Check both before registering.
+                if device_key in self.modules_by_id or device_key in pending_by_id:
+                    raise DuplicateDeviceIdentityError(device_key)
 
-            device_key: DeviceIdentity = radio_config.device_id_key
-            if device_key in self.modules_by_id:
-                import logging
-                logging.getLogger(__name__).warning(
-                    "Duplicate DeviceIdentity %s in config; overwriting previous module", device_key
+                scheduler.register_module(
+                    module,
+                    timer_interval=1.0,
+                    idle_enabled=True,
+                    interrupt_gpio_pins=gpio_pins,
                 )
-            self.modules_by_id[device_key] = module
+
+                # Plan-13 registration order + pending list pattern
+                # (durable summary: docs/plan_summaries/2026_10_08_hardening_spike.md).
+                # park in pending (NOT main tracking) so rollback
+                # can unregister exactly the modules the scheduler owns.
+                pending_modules.append(module)
+                pending_by_id[device_key] = module
+            except (Exception, asyncio.CancelledError) as original_exc:
+                # REVIEWer NOTE: This deliberately catches (Exception, asyncio.CancelledError) ONLY.
+                # KeyboardInterrupt/SystemExit are NOT caught because:
+                #   - They are shutdown signals, not recoverable errors
+                #   - Async cleanup (await scheduler.unregister_module) during shutdown may hang
+                #     (event loop closing/closed → RuntimeError)
+                #   - This is a KNOWN LIMITATION documented in KNOWN_DEFECTS.md
+                #   - Mitigation: Process exits shortly after; OS reclaims resources
+                #   - Do NOT change to catch BaseException without verifying shutdown safety
+                #
+                # Locations 1 & 2 (durable summary: docs/plan_summaries/2026_10_08_hardening_spike.md). Two invariants
+                # that must NOT regress:
+                #
+                # [1] Rollback on ALL exceptions, INCLUDING CancelledError.
+                #     Plan-25 (durable summary: docs/plan_summaries/2026_10_08_hardening_spike.md) originally *committed* (did NOT roll back)
+                #     on CancelledError: pending modules were left registered in
+                #     the scheduler instead of unregistered. That leaked resources
+                #     because Application._cleanup_partial_start() only tracked
+                #     self.module_manager._started_modules (modules appended AFTER
+                #     init_spi_bus() succeeded), so a module committed on
+                #     CancelledError lived in module_manager.get_all_modules()
+                #     but was absent from _started_modules -> never cleaned.
+                #     Rolling back on every caught exception unregisters every
+                #     pending module. asyncio.CancelledError is a BaseException,
+                #     NOT an Exception, in Python 3.13, so it is NOT matched by
+                #     `except Exception` alone; the explicit
+                #     `(Exception, asyncio.CancelledError)` tuple catches it so
+                #     it rolls back too. The caller (Application) then cleans ALL
+                #     modules uniformly via get_all_modules() -- the caller owns
+                #     cleanup after any exception.
+                #
+                # [2] Catch Exception only (plus CancelledError). KeyboardInterrupt,
+                #     SystemExit, and GeneratorExit are shutdown signals, NOT
+                #     recoverable errors. They are NOT matched by
+                #     `(Exception, asyncio.CancelledError)`, so they propagate
+                #     immediately with no async operation running. During process
+                #     shutdown the event loop may be closing or already closed, so
+                #     an async cleanup (await scheduler.unregister_module()) would
+                #     raise RuntimeError and hang shutdown. Let them propagate.
+                #
+                # Plan-25: asyncio.shield protects rollback from cancellation. If the original
+                # exception was CancelledError (or a new cancellation arrives), the rollback
+                # still completes fully — no partial unregister leaves dangling scheduler refs.
+                try:
+                    await asyncio.shield(_rollback_pending(pending_modules, scheduler))
+                # Plan-25: Catch ExceptionGroup from scheduler.unregister_module()
+                # which raises ExceptionGroup (scheduler.py:659). ExceptionGroup is BaseException,
+                # not Exception. Match Application.stop() pattern (application.py:217).
+                except (Exception, ExceptionGroup) as rollback_exc:
+                    # Plan-25: when unregister failures aggregate into an ExceptionGroup,
+                    # main tracking must still reset and the "rolled back" warning must
+                    # still be emitted (H-12 / test_module_manager_rollback_aggregates_errors
+                    # asserts both). Clear pending lists and log before raising the
+                    # aggregated group so the Phase 24 (rolled back on load failure) warning path is not regressed.
+                    pending_modules.clear()
+                    pending_by_id.clear()
+                    logger.warning(
+                        "Rolled back pending modules on load failure; main "
+                        "tracking reset empty"
+                    )
+                    if isinstance(rollback_exc, ExceptionGroup):
+                        # REVIEWer anti-regression (durable summary: docs/plan_summaries/2026_10_08_hardening_spike.md, Module Manager Plan-25):
+                        # _rollback_pending already created the ExceptionGroup with message
+                        # "rollback failed" and all exceptions. Re-wrapping in a NEW
+                        # ExceptionGroup with the same message loses the original
+                        # group identity (different container, same children). Just re-raise the
+                        # existing group with cause chaining to preserve identity.
+                        # Do NOT wrap again — _rollback_pending already produces the correct
+                        # ExceptionGroup.
+                        raise rollback_exc from original_exc
+                    raise rollback_exc from original_exc
+                pending_modules.clear()
+                pending_by_id.clear()
+                logger.warning(
+                    "Rolled back pending modules on load failure; main "
+                    "tracking reset empty"
+                )
+                raise
+
+        # Plan-13: whole loop succeeded -- commit pending to main tracking
+        # so callers see a fully consistent set. Only now is self.modules and
+        # self.modules_by_id populated; a caller never sees a partial leak.
+        for device_key, module in pending_by_id.items():
             self.modules.append(module)
+            self.modules_by_id[device_key] = module
+        pending_modules.clear()
+        pending_by_id.clear()
 
     def get_module(
         self,

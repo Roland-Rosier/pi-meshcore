@@ -19,6 +19,15 @@ requires = ["uv_build>=0.11.25,<0.12"]
 build-backend = "uv_build"
 
 [tool.uv.build-backend]
+# CR-3.4 / Finding 542-549 Anti-Regression guard: this package MUST remain
+# declared under the single import path "pi_lora" only. Never add "src.pi_lora"
+# as a module-name, package, or find_packages() entry. A second importable
+# top-level package name ("src.pi_lora") would create a second module registry
+# for src/pi_lora/drivers/spi/locks.py, silently splitting _bus_locks = {}
+# across two import paths (pi_lora.drivers.spi.locks vs src.pi_lora.drivers.spi.locks)
+# and triggering the dual-import race that the lazy _verify_single_registry()
+# safety net is meant to catch. "src" is a repo-layout directory only; it is
+# NOT a declared package and must never be.
 module-name = "pi_lora"
 package-data = { "pi_lora.drivers" = ["configs/*"] }
 
@@ -31,7 +40,7 @@ version = "0.0.1"
 description = "MeshCore Client/Repeater on Raspberry Pi 4 with Uputronics LoRa Hat"
 readme = "README.md"
 license = { text = "Apache-2.0" }
-requires-python = ">=3.10"
+requires-python = ">=3.11"
 
 authors = [
     { name = "Roland Rosier", email = "" },
@@ -44,7 +53,6 @@ classifiers = [
     "License :: OSI Approved :: Apache Software License",
     "Operating System :: POSIX :: Linux",
     "Programming Language :: Python :: 3",
-    "Programming Language :: Python :: 3.10",
     "Programming Language :: Python :: 3.11",
     "Programming Language :: Python :: 3.12",
     "Programming Language :: Python :: 3.13",
@@ -59,23 +67,28 @@ dependencies = [
     # Core hardware drivers — required for RPi + LoRa Hat operation
     "spidev>=3.8",
     "gpiod>=2.4",
-
     # CLI framework (Typer, with Click/Rich/Shellingame extras)
-    "typer[all]>=0.19",
-
+    # PLAN-16 M-5 / PLAN-35: Exact pins for BOTH typer and async-typer are REQUIRED.
+    # async-typer is a thin wrapper around typer; they MUST be the same version
+    # to avoid API incompatibility. Do NOT use ~= or upper bounds — upgrading one
+    # without the other breaks the CLI. Upgrade both together in a coordinated way.
+    "typer[all]==0.27.2",
+    # Async CLI framework (migrate from typer to async-typer for async entry points)
+    # PLAN-16 M-5 / PLAN-35: Exact pins REQUIRED (see above). async-typer==0.27.2
+    # must match typer==0.27.2 exactly. Upgrade both together.
+    "async-typer==0.27.2",
     # Configuration system — Pydantic models + YAML parsing
     "pydantic>=2.8",
     "ruamel.yaml>=0.6",
-
     # Async/sync locking primitives (works in both contexts)
+    # Required: SPI locking needs sync context manager support (aiologic.Lock).
+    # See H-6 FIX in src/pi_lora/drivers/spi/locks.py — no sync fallback by design.
     "aiologic>=0.1",
-
     # --- Optional: MeshCore protocol library ---
     # Uncomment the line below if you need MeshCore client/repeater functionality.
     # This package is optional because it may not be ultimately needed, and some
     # users may only want to scan frequencies without the full MeshCore stack.
     # "meshcore>=2.3",
-
     # --- Optional: Web interface (FastAPI + uvicorn) ---
     # Uncomment both lines below if you plan to use the web dashboard.
     # "fastapi>=0.115",
@@ -115,6 +128,7 @@ dev = [
     # Testing and coverage
     "pytest-cov>=4.1",
     "pytest-asyncio>=0.24",
+    "pytest-xdist>=2.3",
     "coverage[toml]>=7.0",
 
     # Linting (Rust-based, ~100x faster than flake8)
@@ -128,10 +142,15 @@ dev = [
 # CLI entry points
 # -----------------------------------------------------------------------------
 [project.scripts]
-pi-lora = "pi_lora.cli.main:app"
-check-hardware = "pi_lora.cli.check_hardware:app"
-config = "pi_lora.cli.config:app"
-pi-lora-test = "pi_lora.cli.test:app"
+pi-lora = "pi_lora.cli._entry_points:pi_lora"
+check-hardware = "pi_lora.cli._entry_points:check_hardware"
+# NOTE: Plan-22 Section 6 Anti-Regression Documentation (Item 8).
+# The 'config' console script was renamed to 'pi-lora-config' in Plan-22
+# to avoid namespace conflicts with system 'config' commands. The old name
+# is intentionally NOT aliased — this is a pre-1.0 breaking change documented
+# here so future reviewers don't flag it as an issue.
+pi-lora-config = "pi_lora.cli._entry_points:pi_lora_config"
+pi-lora-test = "pi_lora.cli._entry_points:pi_lora_test"
 
 # No ASGI application module yet — web interface not implemented
 
@@ -147,6 +166,7 @@ markers = [
     "slow: marks tests as slow (deselect with '-m \"not slow\"')",
     "integration: marks tests as integration tests",
     "asyncio: marks tests as async tests",
+    "hardware: marks real-hardware integration tests (gated on PI_LORA_HARDWARE=1)",
 ]
 pythonpath = ["src"]
 asyncio_mode = "strict"
@@ -176,7 +196,7 @@ directory = "htmlcov"
 # mypy configuration (dev-only)
 # -----------------------------------------------------------------------------
 [tool.mypy]
-python_version = "3.10"
+python_version = "3.11"
 strict = true
 warn_return_any = true
 warn_unused_configs = true
@@ -212,10 +232,19 @@ ignore_missing_imports = true
 module = ["typer"]
 ignore_missing_imports = true
 
+# pi_lora.cli.main builds the composite CLI app via add_typer(); async_typer has no
+# type stubs, so mypy resolves app as the "missing" type (...) and emits has-type on
+# app.add_typer(). Silenced for this thin assembly module only — the public apps are
+# exercised at runtime by the entry-point tests.
+[[tool.mypy.overrides]]
+module = ["pi_lora.cli.main"]
+disable_error_code = ["has-type"]
+
 # First-party internal modules — mypy can't resolve them as stubs.
 [[tool.mypy.overrides]]
 module = ["pi_lora.drivers.spi.bus", "pi_lora.drivers.spi.factory", "pi_lora.drivers.spi.locks"]
 ignore_missing_imports = true
+disable_error_code = ["no-any-return"]
 
 [[tool.mypy.overrides]]
 module = ["pi_lora.drivers.rfm9x_sx127x_handler"]
@@ -230,22 +259,25 @@ module = ["fakes", "pi_lora.drivers.lora_module", "pi_lora.drivers.lora_detectio
 ignore_missing_imports = true
 
 [[tool.mypy.overrides]]
-module = ["src.pi_lora.framework", "src.pi_lora.framework.exceptions", "src.pi_lora.framework.application", "src.pi_lora.drivers.rfm9x_sx127x_radio_instance", "src.pi_lora.drivers.rfm9x_sx127x_config_loader", "pi_lora.framework", "pi_lora.framework.exceptions", "pi_lora.framework.application", "pi_lora.drivers.rfm9x_sx127x_radio_instance", "pi_lora.drivers.rfm9x_sx127x_config_loader"]
+module = ["pi_lora.framework", "pi_lora.framework.exceptions", "pi_lora.framework.application", "pi_lora.drivers.rfm9x_sx127x_radio_instance", "pi_lora.drivers.rfm9x_sx127x_config_loader"]
 ignore_missing_imports = true
 
+# lazy_async_lock.py uses forward-reference string annotations ("aiologic.Lock"
+# and "aiologic") purely for documentation/clarity: the holder is an aiologic.Lock
+# and the cached module is the aiologic module. aiologic has no type stubs, so
+# mypy cannot resolve a module name as a type ("valid-type") nor attribute access
+# on it ("attr-defined"). These forward refs are intentional and validated by the
+# concurrency test suite at runtime, so the two error codes are silenced per-module
+# rather than downgrading the hints to Any (which would lose the documented type).
 [[tool.mypy.overrides]]
-module = ["src.pi_lora.drivers.rfm9x_sx127x_config_model"]
-disable_error_code = ["import-untyped"]
-
-[[tool.mypy.overrides]]
-module = ["src.pi_lora.framework.application"]
-disable_error_code = ["no-any-return", "unused-ignore"]
+module = ["pi_lora.framework.lazy_async_lock"]
+disable_error_code = ["attr-defined", "valid-type"]
 
 # -----------------------------------------------------------------------------
 # ruff configuration (linting)
 # -----------------------------------------------------------------------------
 [tool.ruff]
-target-version = "py310"
+target-version = "py311"
 line-length = 88
 src = ["src", "tests"]
 
@@ -296,6 +328,12 @@ ignore = [
 # Tests that verify simulated SPI failures use bare Exception intentionally.
 "tests/test_fakes.py" = ["B017"]
 
+# Plan-19 Fix 3 deliberately uses the explicit ``asyncio.TimeoutError`` (the
+# canonical async timeout) rather than the builtin alias for clarity in async
+# code. ruff's UP041 prefers the builtin; the explicit choice is intentional,
+# so the warning is suppressed here.
+"src/pi_lora/drivers/rfm9x_sx127x_module.py" = ["UP041"]
+
 [tool.ruff.lint.isort]
 
 known-first-party = ["pi_lora.drivers", "pi_lora.cli", "tests.fakes"]
@@ -313,7 +351,7 @@ keep-runtime-typing = false
 [tool.semgrep]
 language = "python"
 strictness = "default"
-ruling = ["security", "supply-chain"]
+ruling = ["security", "supply-chain", "correctness"]
 
 [tool.semgrep.lint]
 severity = "error"

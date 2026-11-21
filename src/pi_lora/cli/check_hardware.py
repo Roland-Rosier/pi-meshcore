@@ -14,30 +14,16 @@
 
 from __future__ import annotations
 
-import os
-import sys
 from typing import Literal, cast
 
 import typer
+from async_typer import AsyncTyper
 
 from pi_lora.drivers.lora_detection import (
     LoRaModuleConfig,
     LoRaModuleDetector,
     ValidationResult,
 )
-
-# Add project root to Python path if not already present
-current_dir = os.path.abspath(os.path.dirname(__file__))
-project_root = os.path.abspath(os.path.join(current_dir, '..', '..'))
-
-if project_root not in sys.path:
-    sys.path.append(project_root)
-    print(f"✅ Added project root to sys.path: {project_root}")
-
-
-def _ensure_logged() -> None:
-    from pi_lora.cli.main import setup_logging
-    setup_logging()
 
 
 def _normalise_module_type(value: str | None) -> Literal["rfm95w", "rfm98w", "none"] | None:
@@ -51,7 +37,11 @@ def _normalise_module_type(value: str | None) -> Literal["rfm95w", "rfm98w", "no
     if value is None:
         return None
     canonical = value.strip().lower()
-    mapping: dict[Literal["rfm95w", "sx1276", "rfm98w", "sx1278", "none"], Literal["rfm95w", "rfm98w", "none"]] = {
+    # PLAN-19: Mapping key type includes all CLI aliases (sx1276/sx1278); cast matches LoRaModuleConfig field type which normalizes in __post_init__.
+    mapping: dict[
+        Literal["rfm95w", "sx1276", "rfm98w", "sx1278", "none"],
+        Literal["rfm95w", "rfm98w", "none"]
+    ] = {
         "rfm95w": "rfm95w",
         "sx1276": "rfm95w",
         "rfm98w": "rfm98w",
@@ -65,14 +55,28 @@ def _normalise_module_type(value: str | None) -> Literal["rfm95w", "rfm98w", "no
     return mapping[canonical]
 
 
-app = typer.Typer(
+# FIX CR-7: migrated from a sync ``typer.Typer`` to ``async_typer.AsyncTyper``.
+#
+# With the sync Typer, ``typer.BadParameter`` raised inside the ``--ce0``/``--ce1``
+# callback aborted option parsing, but ``_entry_points.check_hardware()`` performed
+# ``cast(int, app())`` -- a sync Typer returns ``None`` on error, so the wrapper
+# yielded exit code ``0`` and rejected input was silently accepted.
+#
+# ``async_typer.AsyncTyper`` subclasses ``typer.Typer`` and drives each async command
+# body through a synchronous runner, so ``app()`` returns a genuine Click exit code
+# (``1`` on rejected input). The rejected alternative -- forcing exit code ``1`` via a
+# ``cast`` hack in the wrapper -- would not change the underlying sync Typer behaviour
+# and would leave this CLI inconsistent with the other async entry points.
+app = AsyncTyper(
     name="check-hardware",
     help="Check LoRa hardware modules on the MeshCore Pi4 Hat.",
 )
 
 
 @app.command("detect-modules")
-def detect_modules(
+async def detect_modules(
+    # ``async`` is retained for AsyncTyper API consistency (the ``app`` is an
+    # ``async_typer.AsyncTyper``); no ``await`` is required and behaviour is unchanged.
     ce0: str | None = typer.Option(
         None,
         "--ce0",
@@ -92,42 +96,54 @@ def detect_modules(
     ),
 ) -> None:
     """Scan hardware and optionally validate against an expected configuration."""
+    # CR-37 FIX (Plan-37 Fix 2.4, code_review-36.1 finding 9.2.1, P1). The detector is
+    # now wrapped in a context manager so SPI devices opened by LoRaModule.__init__ are
+    # deterministically closed via __exit__ even if detect_modules() raises. The
+    # detection sequence itself (Init SPI -> Return status) stays strictly read-only;
+    # closing happens only after detection completes. Cross-reference: Plan-25, Plan-26,
+    # Plan-27, Plan-35, Plan-36. Anti-regression: SPI devices must be deterministically
+    # closed — do not rely on __del__ alone.
+    with LoRaModuleDetector(ce_pins=[0, 1]) as detector:
+        results = detector.detect_modules(extended=extended)
 
-    detector = LoRaModuleDetector(ce_pins=[0, 1])
+        typer.echo("\nHardware Detection Results:")
+        for result in results:
+            typer.echo(f"  ✅ {result}")
 
-    results = detector.detect_modules(extended=extended)
+        if ce0 is not None or ce1 is not None:
+            config = LoRaModuleConfig(
+                ce0_expected_module_type=cast(  # Cast matches runtime reality — Typer callback _normalise_module_type
+                    # already converted sx1276/sx1278 → rfm95w/rfm98w. Only canonical values exist here.
+                    Literal["rfm95w", "rfm98w", "none"], ce0
+                ) if ce0 is not None else None,
+                ce1_expected_module_type=cast(  # Cast matches runtime reality — Typer callback _normalise_module_type
+                    # already converted sx1276/sx1278 → rfm95w/rfm98w. Only canonical values exist here.
+                    Literal["rfm95w", "rfm98w", "none"], ce1
+                ) if ce1 is not None else None,
+            )
 
-    print("\nHardware Detection Results:")
-    for result in results:
-        print(f"  ✅ {result}")
+            validation_results: list[ValidationResult] = detector.validate_config(config)
 
-    if ce0 is not None or ce1 is not None:
-        config = LoRaModuleConfig(
-            ce0_expected_module_type=cast(Literal["rfm95w", "rfm98w", "none"], ce0) if ce0 is not None else None,  # Already normalised by callback
-            ce1_expected_module_type=cast(Literal["rfm95w", "rfm98w", "none"], ce1) if ce1 is not None else None,  # Already normalised by callback
-        )
+            typer.echo("\nConfiguration Validation Results:")
+            all_passed = True
+            for vr in validation_results:
+                status = "✅ PASS" if vr.passed else "❌ FAIL"
+                typer.echo(f"  {status} CE{vr.ce_pin}: {vr.message}")
+                if not vr.passed:
+                    all_passed = False
 
-        validation_results: list[ValidationResult] = detector.validate_config(config)
-
-        print("\nConfiguration Validation Results:")
-        all_passed = True
-        for vr in validation_results:
-            status = "✅ PASS" if vr.passed else "❌ FAIL"
-            print(f"  {status} CE{vr.ce_pin}: {vr.message}")
-            if not vr.passed:
-                all_passed = False
-
-        if all_passed:
-            print("\n✅ Configuration is valid.")
-        else:
-            raise typer.Exit(code=1)
+            if all_passed:
+                typer.echo("\n✅ Configuration is valid.")
+            else:
+                typer.echo("❌ Configuration validation failed.")
+                raise typer.Exit(code=1)
 
 
 @app.callback(invoke_without_command=True)
-def main_callback(ctx: typer.Context) -> None:
+async def main_callback(ctx: typer.Context) -> None:
     """MeshCore hardware check utility — show help when invoked without subcommand."""
-    _ensure_logged()
-
+    # ``async`` is retained for AsyncTyper API consistency (the ``app`` is an
+    # ``async_typer.AsyncTyper``); no ``await`` is required and behaviour is unchanged.
     if ctx.invoked_subcommand is None:
         typer.echo("Usage: check-hardware [command]")
         typer.echo("Available commands:")
@@ -135,9 +151,16 @@ def main_callback(ctx: typer.Context) -> None:
         raise typer.Exit(code=0)
 
 
+# FIX CR-33.2 (Plan-34): the bare ``app()`` call was inconsistent with the other
+# console entry points. ``app`` is an ``async_typer.AsyncTyper`` that drives the
+# event loop internally and may raise ``SystemExit`` (or return ``None``); calling
+# it bare leaves the coroutine-handling and exit-code coercion to typer, so the
+# resulting exit code becomes non-deterministic across entry points.
+#
+# ``_run_app`` in ``src/pi_lora/cli/_entry_points.py`` is the canonical pattern
+# used by all 4 console entry points (see code_review-33.1.json): it coerces the
+# ``SystemExit``/return value into a uniform Click exit code. Delegate to it here
+# to keep this CLI consistent with the rest.
 if __name__ == "__main__":
-    app()
-
-
-
-
+    from pi_lora.cli._entry_points import _run_app
+    raise SystemExit(_run_app(app))

@@ -54,6 +54,7 @@ def _build_mock_application() -> MagicMock:
     app = MagicMock()
     app.start = AsyncMock()
     app.stop = AsyncMock()
+    app.get_assembly_config = AsyncMock()
     return app
 
 
@@ -193,8 +194,10 @@ class TestHardwareAssemblyNotFoundError:
     async def test_assembly_not_found_propagates(self) -> None:
         """Run ``hardware nonexistent`` when the assembly is missing.
 
-        Verify exit code 1, the error message, and ``stop()`` NOT awaited
-        (the error is raised before ``start()``).
+        Verify exit code 1, the error message, and ``stop()`` awaited once.
+        NR-4 wraps the whole body in a ``try`` whose ``finally`` always calls
+        ``application.stop()``, so cleanup runs even when the error fires before
+        ``start()``.
         """
         capture = StringIO()
         mock_application = _build_mock_application()
@@ -208,7 +211,7 @@ class TestHardwareAssemblyNotFoundError:
 
         assert exit_code == 1, f"Expected exit 1, got {exit_code}: {capture.getvalue()}"
         assert "Error:" in capture.getvalue()
-        mock_application.stop.assert_not_awaited()
+        mock_application.stop.assert_awaited_once()
 
 
 # ---------------------------------------------------------------------------
@@ -222,7 +225,8 @@ class TestHardwareDeviceAttachmentNotFoundError:
     async def test_device_attachment_not_found_propagates(self) -> None:
         """Run ``hardware default --spi 99 --ce 99`` when no device matches.
 
-        Verify exit code 1, the error message, and ``stop()`` NOT awaited.
+        Verify exit code 1, the error message, and ``stop()`` awaited once.
+        NR-4's ``finally`` always calls ``application.stop()``.
         """
         capture = StringIO()
         mock_application = _build_mock_application()
@@ -236,7 +240,7 @@ class TestHardwareDeviceAttachmentNotFoundError:
 
         assert exit_code == 1, f"Expected exit 1, got {exit_code}: {capture.getvalue()}"
         assert "No device attachment found" in capture.getvalue()
-        mock_application.stop.assert_not_awaited()
+        mock_application.stop.assert_awaited_once()
 
 
 # ---------------------------------------------------------------------------
@@ -278,6 +282,141 @@ class TestHardwareFilterOptions:
         assert kwargs.get("ce_number") == 0
         module_a.wait_for_event.assert_awaited()
         module_b.wait_for_event.assert_not_awaited()
+
+
+# ---------------------------------------------------------------------------
+# Phase 6 & 7 — narrowed except + module-level traceback import
+# ---------------------------------------------------------------------------
+
+class TestHardwareRuntimeError:
+    """NR-4: a non-``typer.Exit`` exception from ``Application.start`` is caught by
+    the ``except BaseException`` guard, cleanup runs, and the exception propagates."""
+
+    @pytest.mark.asyncio
+    async def test_runtime_error_propagates(self) -> None:
+        """When ``Application.start`` raises RuntimeError, NR-4 lets it propagate
+        after the ``finally`` cleanup runs."""
+        capture = StringIO()
+        mock_application = _build_mock_application()
+        mock_application.get_assembly_config.return_value = [_build_radio_config(0, 0)]
+        module = _build_module(_SUCCESSFUL_EVENT)
+        module.get_spi_device_id.return_value = 0
+        module.get_ce_number.return_value = 0
+        mock_application.module_manager.get_all_modules.return_value = [module]
+        mock_application.start.side_effect = RuntimeError("startup failed")
+
+        with (
+            patch("pi_lora.cli.test.Application", return_value=mock_application),
+            patch("pi_lora.cli.test.console", Console(file=capture)),
+            pytest.raises(RuntimeError),
+        ):
+            await _test_cmd.test_hardware_impl(assembly_name="default")
+        mock_application.stop.assert_awaited_once()
+
+
+class TestHardwareHardwareException:
+    """NR-4: ``OSError``, ``TimeoutError`` and ``ConnectionError`` raised by
+    ``Application.start`` are caught by the ``except BaseException`` guard, cleanup
+    runs, and the exception propagates out of ``test_hardware_impl``.
+
+    ``_SUCCESSFUL_EVENT`` is set so the code path reaches ``start()`` before the
+    exception fires; the exception short-circuits the transition block.
+    """
+
+    @pytest.mark.parametrize(
+        "exc",
+        [
+            OSError("hardware init failed"),
+            TimeoutError("event loop timeout"),
+            ConnectionError("radio bus connection lost"),
+        ],
+    )
+    @pytest.mark.asyncio
+    async def test_hardware_exceptions_propagate(self, exc: OSError) -> None:
+        """Each hardware startup exception propagates after the cleanup runs."""
+        capture = StringIO()
+        mock_application = _build_mock_application()
+        mock_application.get_assembly_config.return_value = [_build_radio_config(0, 0)]
+        module = _build_module(_SUCCESSFUL_EVENT)
+        module.get_spi_device_id.return_value = 0
+        module.get_ce_number.return_value = 0
+        mock_application.module_manager.get_all_modules.return_value = [module]
+        mock_application.start.side_effect = exc
+
+        with (
+            patch("pi_lora.cli.test.Application", return_value=mock_application),
+            patch("pi_lora.cli.test.console", Console(file=capture)),
+            pytest.raises((OSError, TimeoutError, ConnectionError)),
+        ):
+            await _test_cmd.test_hardware_impl(assembly_name="default")
+        mock_application.stop.assert_awaited_once()
+
+
+class TestHardwareGenericException:
+    """NR-4: any ``Exception`` raised by ``Application.start`` (here ``IndexError``)
+    is caught by the ``except BaseException`` guard, cleanup runs, and the exception
+    propagates out of ``test_hardware_impl``."""
+
+    @pytest.mark.asyncio
+    async def test_generic_exception_propagates(self) -> None:
+        """A generic startup exception (``IndexError``) propagates after cleanup."""
+        capture = StringIO()
+        mock_application = _build_mock_application()
+        mock_application.get_assembly_config.return_value = [_build_radio_config(0, 0)]
+        module = _build_module(_SUCCESSFUL_EVENT)
+        module.get_spi_device_id.return_value = 0
+        module.get_ce_number.return_value = 0
+        mock_application.module_manager.get_all_modules.return_value = [module]
+        mock_application.start.side_effect = IndexError("unexpected startup failure")
+
+        with (
+            patch("pi_lora.cli.test.Application", return_value=mock_application),
+            patch("pi_lora.cli.test.console", Console(file=capture)),
+            pytest.raises(IndexError),
+        ):
+            await _test_cmd.test_hardware_impl(assembly_name="default")
+        mock_application.stop.assert_awaited_once()
+
+
+class TestTracebackModuleLevel:
+    """NR-4: ``traceback`` is NOT imported at module level in ``pi_lora.cli.test``.
+    The ``finally`` cleanup path does not surface a traceback message, so no
+    module-level ``traceback`` import is required."""
+
+    def test_traceback_absent_from_module_namespace(self) -> None:
+        """``pi_lora.cli.test`` does not expose ``traceback`` in its namespace."""
+        import pi_lora.cli.test as _test_cmd
+
+        assert not hasattr(_test_cmd, "traceback")
+        assert "traceback" not in _test_cmd.__dict__
+
+
+# ---------------------------------------------------------------------------
+# Phase 2 — defensive module-manager NoneType check
+# ---------------------------------------------------------------------------
+
+class TestHardwareModuleManagerNone:
+    """Phase 2, test 6: ``application.module_manager`` is None after ``start()``.
+
+    Verify exit code 1, the "Module manager is unavailable" message, and that
+    ``stop()`` still runs exactly once (the resource-leak fix).
+    """
+
+    @pytest.mark.asyncio
+    async def test_module_manager_unavailable_exits(self) -> None:
+        """Run ``hardware default`` when the module manager is None after start."""
+        capture = StringIO()
+        mock_application = _build_mock_application()
+        mock_application.get_assembly_config.return_value = [_build_radio_config(0, 0)]
+        mock_application.module_manager = None
+
+        exit_code = await _run_hardware(
+            capture, mock_application, assembly_name="default"
+        )
+
+        assert exit_code == 1, f"Expected exit 1, got {exit_code}: {capture.getvalue()}"
+        assert "Module manager is unavailable" in capture.getvalue()
+        mock_application.stop.assert_awaited_once()
 
 
 if __name__ == "__main__":

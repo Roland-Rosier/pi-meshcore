@@ -22,6 +22,7 @@ from pathlib import Path
 from typing import Any
 
 import typer
+from async_typer import AsyncTyper
 from rich.console import Console
 from rich.table import Table
 
@@ -32,13 +33,7 @@ from pi_lora.framework.exceptions import (
     DeviceAttachmentNotFoundError,
 )
 
-
-def _ensure_logged() -> None:
-    from pi_lora.cli.main import setup_logging
-    setup_logging()
-
-
-app = typer.Typer(
+app = AsyncTyper(
     name="config",
     help="Query radio instance configuration.",
 )
@@ -101,21 +96,18 @@ def _format_config_json(config: RadioInstanceConfig | list[RadioInstanceConfig])
     return json.dumps(_serialize(config), indent=2)
 
 
-@app.command("list-assemblies")
-def list_assemblies(
-    verbose: bool = typer.Option(False, "--verbose", "-v", help="Show module name and device count"),
-    json_output: bool = typer.Option(False, "--json", help="Output as JSON"),
-    config_file: str | None = typer.Option(None, "--config", "-c", help="Custom config file path"),
+async def list_assemblies_impl(
+    verbose: bool = False,
+    json_output: bool = False,
+    config_file: str | None = None,
 ) -> None:
     """List available assemblies."""
 
-    _ensure_logged()
-
     custom_path: Path | None = Path(config_file) if config_file else None
 
-    application = Application(config=None)
+    application = Application()
 
-    assemblies = application.list_assemblies(verbose=verbose, config_path=custom_path)
+    assemblies = await application.list_assemblies(verbose=verbose, config_path=custom_path)
 
     if json_output:
         typer.echo(json.dumps(assemblies, indent=2))
@@ -137,25 +129,35 @@ def list_assemblies(
             typer.echo(f"  {a['assembly_name']}")
 
 
-@app.command("show-config")
-def show_config(
-    assembly_name: str = typer.Argument(..., help="Assembly name to query"),
-    spi: int | None = typer.Option(None, "--spi", help="SPI device ID (e.g., 0)"),
-    ce: int | None = typer.Option(None, "--ce", help="CE number (e.g., 0 or 1)"),
+@app.command("list-assemblies")
+async def list_assemblies(
+    verbose: bool = typer.Option(False, "--verbose", "-v", help="Show module name and device count"),
     json_output: bool = typer.Option(False, "--json", help="Output as JSON"),
     config_file: str | None = typer.Option(None, "--config", "-c", help="Custom config file path"),
 ) -> None:
-    """Show configuration for an assembly."""
-    _ensure_logged()
+    """List available assemblies."""
+    await list_assemblies_impl(
+        verbose=verbose,
+        json_output=json_output,
+        config_file=config_file,
+    )
 
-    from pathlib import Path
+
+async def show_config_impl(
+    assembly_name: str,
+    spi: int | None = None,
+    ce: int | None = None,
+    json_output: bool = False,
+    config_file: str | None = None,
+) -> None:
+    """Show configuration for an assembly."""
 
     custom_path: Path | None = Path(config_file) if config_file else None
 
-    application = Application(config=None)
+    application = Application()
 
     try:
-        result = application.get_assembly_config(
+        result = await application.get_assembly_config(
             assembly_name=assembly_name,
             spi_device_id=spi,
             ce_number=ce,
@@ -165,6 +167,9 @@ def show_config(
         typer.echo(f"Error: {e}", file=sys.stderr)
         raise typer.Exit(code=1) from None
     except DeviceAttachmentNotFoundError as e:
+        typer.echo(f"Error: {e}", file=sys.stderr)
+        raise typer.Exit(code=1) from None
+    except Exception as e:
         typer.echo(f"Error: {e}", file=sys.stderr)
         raise typer.Exit(code=1) from None
 
@@ -179,5 +184,30 @@ def show_config(
             typer.echo(_format_config_text(result))
 
 
+@app.command("show-config")
+async def show_config(
+    assembly_name: str = typer.Argument(..., help="Assembly name to query"),
+    spi: int | None = typer.Option(None, "--spi", help="SPI device ID (e.g., 0)"),
+    ce: int | None = typer.Option(None, "--ce", help="CE number (e.g., 0 or 1)"),
+    json_output: bool = typer.Option(False, "--json", help="Output as JSON"),
+    config_file: str | None = typer.Option(None, "--config", "-c", help="Custom config file path"),
+) -> None:
+    """Show configuration for an assembly."""
+    await show_config_impl(
+        assembly_name=assembly_name,
+        spi=spi,
+        ce=ce,
+        json_output=json_output,
+        config_file=config_file,
+    )
+
+
 if __name__ == "__main__":
-    app()
+    # CR-33.3 / Plan-34: bare `app()` was inconsistent with the other 3 console
+    # entry points. `app` is an AsyncTyper that drives the event loop internally
+    # and raises SystemExit; calling it bare leaves coroutine handling to typer.
+    # `_run_app` (src/pi_lora/cli/_entry_points.py) is the canonical pattern that
+    # coerces SystemExit (or a None return) into a Click exit code consistently.
+    # See docs/plan_summaries/2026_10_08_hardening_spike.md (Plan-34).
+    from pi_lora.cli._entry_points import _run_app
+    raise SystemExit(_run_app(app))

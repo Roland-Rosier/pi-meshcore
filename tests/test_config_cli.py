@@ -16,71 +16,132 @@
 
 from __future__ import annotations
 
+import io
 import json
-from unittest.mock import MagicMock, patch
+import sys
+from dataclasses import dataclass
+from typing import Any
+from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
-from src.pi_lora.framework.exceptions import (
+import typer
+
+from pi_lora.cli.config import (
+    list_assemblies_impl,
+    show_config_impl,
+)
+from pi_lora.framework.exceptions import (
     AssemblyNotFoundError,
     DeviceAttachmentNotFoundError,
 )
-from typer.testing import CliRunner
 
-from pi_lora.cli.config import app as cli_app
+
+async def _run_list_assemblies(
+    capture: io.StringIO,
+    mock_application: MagicMock,
+    **kwargs: Any,
+) -> int:
+    """Invoke ``list_assemblies_impl`` directly with a mocked Application.
+
+    ``typer.testing.CliRunner`` does not await async commands, so the command
+    body is exercised by calling ``list_assemblies_impl`` directly after
+    patching ``Application``. Output is captured by swapping ``sys.stdout`` /
+    ``sys.stderr`` to ``capture`` (rich ``Console`` and ``typer.echo`` both write
+    to ``sys.stdout``). Returns the exit code produced (0 on success, 1 on error).
+    """
+    _old_stdout: object = sys.stdout
+    _old_stderr: object = sys.stderr
+    sys.stdout = capture
+    sys.stderr = capture
+    exit_code: int = 0
+    with patch("pi_lora.cli.config.Application", return_value=mock_application):
+        try:
+            await list_assemblies_impl(**kwargs)
+        except (SystemExit, typer.Exit) as exc:
+            exit_code = getattr(exc, "code", 1)
+        finally:
+            sys.stdout = _old_stdout
+            sys.stderr = _old_stderr
+    return exit_code
+
+
+async def _run_show_config(
+    capture: io.StringIO,
+    mock_application: MagicMock,
+    **kwargs: Any,
+) -> int:
+    """Invoke ``show_config_impl`` directly with a mocked Application.
+
+    Patches ``pi_lora.cli.config.Application`` and swaps ``sys.stdout`` /
+    ``sys.stderr`` to ``capture`` so the rich ``Console`` output and the
+    ``typer.echo(..., file=sys.stderr)`` error path are both captured. Returns
+    the exit code produced (0 on success, 1 on error).
+    """
+    _old_stdout: object = sys.stdout
+    _old_stderr: object = sys.stderr
+    sys.stdout = capture
+    sys.stderr = capture
+    exit_code: int = 0
+    with patch("pi_lora.cli.config.Application", return_value=mock_application):
+        try:
+            await show_config_impl(**kwargs)
+        except (SystemExit, typer.Exit) as exc:
+            exit_code = getattr(exc, "code", 1)
+        finally:
+            sys.stdout = _old_stdout
+            sys.stderr = _old_stderr
+    return exit_code
 
 
 class TestListAssembliesCli:
     """Tests for the list-assemblies CLI command."""
 
-    def test_list_assemblies_basic(self) -> None:
+    @pytest.mark.asyncio
+    async def test_list_assemblies_basic(self) -> None:
         """Verify list-assemblies returns assembly names."""
-        runner = CliRunner()
-
+        capture = io.StringIO()
         mock_application = MagicMock()
-        mock_application.list_assemblies.return_value = [
+        mock_application.list_assemblies = AsyncMock(return_value=[
             {"assembly_name": "default"},
-        ]
+        ])
+        exit_code = await _run_list_assemblies(
+            capture, mock_application, verbose=False, json_output=False, config_file=None
+        )
+        assert exit_code == 0
+        assert "default" in capture.getvalue()
 
-        with patch("pi_lora.cli.config.Application", return_value=mock_application):
-            result = runner.invoke(cli_app, ["list-assemblies"])
-
-        assert result.exit_code == 0
-        assert "default" in result.output
-
-    def test_list_assemblies_verbose(self) -> None:
+    @pytest.mark.asyncio
+    async def test_list_assemblies_verbose(self) -> None:
         """Verify list-assemblies --verbose shows module name and device count."""
-        runner = CliRunner()
-
+        capture = io.StringIO()
         mock_application = MagicMock()
-        mock_application.list_assemblies.return_value = [
+        mock_application.list_assemblies = AsyncMock(return_value=[
             {
                 "assembly_name": "default",
                 "module_name": "lora_pi_434_868",
                 "device_count": 2,
             },
-        ]
+        ])
+        exit_code = await _run_list_assemblies(
+            capture, mock_application, verbose=True, json_output=False, config_file=None
+        )
+        assert exit_code == 0
+        assert "default" in capture.getvalue()
+        assert "lora_pi_434_868" in capture.getvalue()
 
-        with patch("pi_lora.cli.config.Application", return_value=mock_application):
-            result = runner.invoke(cli_app, ["list-assemblies", "--verbose"])
-
-        assert result.exit_code == 0
-        assert "default" in result.output
-        assert "lora_pi_434_868" in result.output
-
-    def test_list_assemblies_json(self) -> None:
+    @pytest.mark.asyncio
+    async def test_list_assemblies_json(self) -> None:
         """Verify list-assemblies --json outputs valid JSON."""
-        runner = CliRunner()
-
+        capture = io.StringIO()
         mock_application = MagicMock()
-        mock_application.list_assemblies.return_value = [
+        mock_application.list_assemblies = AsyncMock(return_value=[
             {"assembly_name": "default"},
-        ]
-
-        with patch("pi_lora.cli.config.Application", return_value=mock_application):
-            result = runner.invoke(cli_app, ["list-assemblies", "--json"])
-
-        assert result.exit_code == 0
-        parsed = json.loads(result.output)
+        ])
+        exit_code = await _run_list_assemblies(
+            capture, mock_application, verbose=False, json_output=True, config_file=None
+        )
+        assert exit_code == 0
+        parsed = json.loads(capture.getvalue())
         assert isinstance(parsed, list)
         assert parsed[0]["assembly_name"] == "default"
 
@@ -88,76 +149,77 @@ class TestListAssembliesCli:
 class TestShowConfigCli:
     """Tests for the show-config CLI command."""
 
-    def test_show_config_valid_assembly(self) -> None:
+    @pytest.mark.asyncio
+    async def test_show_config_valid_assembly(self) -> None:
         """Verify show-config works with valid assembly name."""
-        runner = CliRunner()
-
+        capture = io.StringIO()
         mock_application = MagicMock()
         mock_result = MagicMock()
         mock_result.module_name = "lora_pi_434_868"
         mock_result.spi_device_id = 0
         mock_result.ce_number = 0
         mock_result.device_name = "RFM95"
-        mock_application.get_assembly_config.return_value = [mock_result]
+        mock_application.get_assembly_config = AsyncMock(return_value=[mock_result])
+        exit_code = await _run_show_config(
+            capture, mock_application, assembly_name="default", spi=None, ce=None, json_output=False, config_file=None
+        )
+        assert exit_code == 0
+        assert "RFM95" in capture.getvalue()
 
-        with patch("pi_lora.cli.config.Application", return_value=mock_application):
-            result = runner.invoke(cli_app, ["show-config", "default"])
-
-        assert result.exit_code == 0
-
-    def test_show_config_with_spi_ce(self) -> None:
+    @pytest.mark.asyncio
+    async def test_show_config_with_spi_ce(self) -> None:
         """Verify show-config --spi --ce filters to single device."""
-        runner = CliRunner()
-
+        capture = io.StringIO()
         mock_application = MagicMock()
         mock_result = MagicMock()
         mock_result.module_name = "lora_pi_434_868"
         mock_result.spi_device_id = 0
         mock_result.ce_number = 0
         mock_result.device_name = "RFM95"
-        mock_application.get_assembly_config.return_value = mock_result
-
-        with patch("pi_lora.cli.config.Application", return_value=mock_application):
-            result = runner.invoke(cli_app, ["show-config", "default", "--spi", "0", "--ce", "0"])
-
-        assert result.exit_code == 0
+        mock_application.get_assembly_config = AsyncMock(return_value=[mock_result])
+        exit_code = await _run_show_config(
+            capture, mock_application, assembly_name="default", spi=0, ce=0, json_output=False, config_file=None
+        )
+        assert exit_code == 0
         mock_application.get_assembly_config.assert_called_with(
             assembly_name="default",
             spi_device_id=0,
             ce_number=0,
             config_path=None,
         )
+        assert "RFM95" in capture.getvalue()
 
-    def test_show_config_invalid_assembly(self) -> None:
+    @pytest.mark.asyncio
+    async def test_show_config_invalid_assembly(self) -> None:
         """Verify show-config exits with code 1 for invalid assembly."""
-        runner = CliRunner()
-
+        capture = io.StringIO()
         mock_application = MagicMock()
-        mock_application.get_assembly_config.side_effect = AssemblyNotFoundError("test")
+        mock_application.get_assembly_config = AsyncMock(
+            side_effect=AssemblyNotFoundError("test")
+        )
+        exit_code = await _run_show_config(
+            capture, mock_application, assembly_name="nonexistent", spi=None, ce=None, json_output=False, config_file=None
+        )
+        assert exit_code == 1
 
-        with patch("pi_lora.cli.config.Application", return_value=mock_application):
-            result = runner.invoke(cli_app, ["show-config", "nonexistent"])
-
-        assert result.exit_code == 1
-
-    def test_show_config_invalid_spi_ce(self) -> None:
+    @pytest.mark.asyncio
+    async def test_show_config_invalid_spi_ce(self) -> None:
         """Verify show-config exits with code 1 for invalid SPI/CE."""
-        runner = CliRunner()
-
+        capture = io.StringIO()
         mock_application = MagicMock()
-        mock_application.get_assembly_config.side_effect = DeviceAttachmentNotFoundError("mod", 99, 99)
+        mock_application.get_assembly_config = AsyncMock(
+            side_effect=DeviceAttachmentNotFoundError("mod", 99, 99)
+        )
+        exit_code = await _run_show_config(
+            capture, mock_application, assembly_name="default", spi=99, ce=99, json_output=False, config_file=None
+        )
+        assert exit_code == 1
 
-        with patch("pi_lora.cli.config.Application", return_value=mock_application):
-            result = runner.invoke(cli_app, ["show-config", "default", "--spi", "99", "--ce", "99"])
-
-        assert result.exit_code == 1
-
-    def test_show_config_json(self) -> None:
+    @pytest.mark.asyncio
+    async def test_show_config_json(self) -> None:
         """Verify show-config --json outputs valid JSON."""
-        runner = CliRunner()
-
+        capture = io.StringIO()
         mock_application = MagicMock()
-        from dataclasses import dataclass
 
         @dataclass
         class MockRadioConfig:
@@ -175,40 +237,85 @@ class TestShowConfigCli:
             antenna_gain_db: float | None = 25.0
 
         mock_result = MockRadioConfig()
-        mock_application.get_assembly_config.return_value = mock_result
-
-        with patch("pi_lora.cli.config.Application", return_value=mock_application):
-            result = runner.invoke(cli_app, ["show-config", "default", "--json"])
-
-        assert result.exit_code == 0
-        parsed = json.loads(result.output)
+        mock_application.get_assembly_config = AsyncMock(return_value=mock_result)
+        exit_code = await _run_show_config(
+            capture, mock_application, assembly_name="default", spi=None, ce=None, json_output=True, config_file=None
+        )
+        assert exit_code == 0
+        parsed = json.loads(capture.getvalue())
         assert isinstance(parsed, dict)
 
 
 class TestShowConfigCustomConfig:
     """Tests for custom config file option."""
 
-    def test_show_config_with_custom_config(self) -> None:
+    @pytest.mark.asyncio
+    async def test_show_config_with_custom_config(self) -> None:
         """Verify show-config --config loads custom config."""
-        runner = CliRunner()
-
+        capture = io.StringIO()
         mock_application = MagicMock()
         mock_result = MagicMock()
         mock_result.module_name = "test_module"
         mock_result.spi_device_id = 0
         mock_result.ce_number = 0
         mock_result.device_name = "RFM95"
-        mock_application.get_assembly_config.return_value = [mock_result]
-
-        with patch("pi_lora.cli.config.Application", return_value=mock_application):
-            result = runner.invoke(cli_app, ["show-config", "default", "--config", "/path/to/config.yaml"])
-
-        assert result.exit_code == 0
+        mock_application.get_assembly_config = AsyncMock(return_value=[mock_result])
+        exit_code = await _run_show_config(
+            capture, mock_application, assembly_name="default", spi=None, ce=None, json_output=False, config_file="/path/to/config.yaml"
+        )
+        assert exit_code == 0
         call_kwargs = mock_application.get_assembly_config.call_args
         assert call_kwargs.kwargs.get("config_path") is not None
 
 
+class TestShowConfigPathImportRemoved:
+    """Phase 42: the redundant local ``from pathlib import Path`` was removed
+    from ``show_config_impl``; the module-level import still covers it."""
+
+    @pytest.mark.asyncio
+    async def test_show_config_impl_runs_with_custom_config(self) -> None:
+        """show_config_impl must resolve a custom config path after removal."""
+        capture = io.StringIO()
+        mock_application = MagicMock()
+        mock_result = MagicMock()
+        mock_result.module_name = "test_module"
+        mock_result.spi_device_id = 0
+        mock_result.ce_number = 0
+        mock_result.device_name = "RFM95"
+        mock_application.get_assembly_config = AsyncMock(return_value=[mock_result])
+        exit_code = await _run_show_config(
+            capture, mock_application, assembly_name="default", spi=None, ce=None, json_output=False, config_file="/path/to/config.yaml"
+        )
+        assert exit_code == 0
+        assert "RFM95" in capture.getvalue()
+        call_kwargs = mock_application.get_assembly_config.call_args
+        assert call_kwargs.kwargs.get("config_path") is not None
+
+
+class TestEnsureLoggedRemoved:
+    """Fix #2.17: ``_ensure_logged`` was removed from the CLI modules."""
+
+    def test_ensure_logged_absent_from_config(self) -> None:
+        """``pi_lora.cli.config`` must no longer expose ``_ensure_logged``."""
+        import pi_lora.cli.config as _cfg
+
+        assert not hasattr(_cfg, "_ensure_logged")
+        assert "_ensure_logged" not in _cfg.__dict__
+
+    def test_impl_accepts_plain_kwargs(self) -> None:
+        """The ``_impl`` helpers take plain keyword defaults, not Typer annotations."""
+        import inspect
+
+        for impl in (list_assemblies_impl, show_config_impl):
+            sig = inspect.signature(impl)
+            for param in sig.parameters.values():
+                if param.default is inspect._empty:
+                    continue
+                assert param.default in (False, None), (
+                    f"{impl.__name__} param {param.name} default is not a plain value"
+                )
+
+
 if __name__ == "__main__":
-    import sys
     exit_code = pytest.main([__file__, "-v"])
     sys.exit(exit_code)

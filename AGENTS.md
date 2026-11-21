@@ -3,7 +3,7 @@
 ## 1. Project Context Reference
 - **Goal**: Build MeshCore Client/Repeater on RPi 4 with Uputronics LoRa Hat.
 - **Stack**: Python 3.9+, FastAPI, SPI Drivers, `pytest`.
-- **Install Target**: Official PyPI package is `meshcore` (GitHub: `meshcore_py` by fdlamotte).
+- **Install Target**: Official PyPI package is `pi_lora`.
 - **Directory Layout**:
   - `src/pi_lora/drivers/` (e.g. RFM95W/RFM98W radio drivers, in file lora_module.py)
   - `src/pi_lora/meshcore/` (Protocol client/repeater logic)
@@ -18,7 +18,7 @@
 - **Refs**: Radiolib SX127* drivers, RFM95/98 Datasheets, Semtech SX1276, Uputronics Pinout.
 
 ## 3. Passive Operational Constraints
-*The constraints below must only bew applied IF the user explicitly requests code modifications in the active chat prompt:*
+*The constraints below must only be applied IF the user explicitly requests code modifications in the active chat prompt:*
 
 - **Imports**: All imports must use relative paths (`../drivers/rfm95w`) or explicit aliases. No floating imports allowed.
 - **Safety Mode**: Module detection sequence must remain strictly read-only. Sequence validation: 1. Init SPI (CE0/CE1) -> 2. Return status. Transmission is prohibited during safety mode.
@@ -28,7 +28,15 @@
 ## 4. Permitted Tool Behavior Adjustments
 *These rules govern tool utilization boundaries when Agent Mode is actively deployed by the user:*
 
-- **File Tool Preference**: The agent is must use `single_find_and_replace` rather than `create_new_file` when modifying existing codebases. Code edits should remain idempotent.
+- **File Tool Preference**: When modifying existing files, the agent must use tools while edit the file rather than creating a new file. Code edits should remain idempotent.
 - **Modification Limits**: The agent is restricted to modifying a maximum of one file per execution cycle.
 - **Testing Framework**: The authorized project verification command is `pytest`
-- **Virtual Environment**: For all project actions - e.g. running tests - use the Python virtual environment, either by activating through `.venv` or by using `uv`.
+- **Virtual Environment**: For all project actions - e.g. running tests - use the Python virtual environment by using `uv` (see section 5: `uv` is primary; `.venv` is only a fallback).
+
+## 5. Tool Availability
+- **`uv` CLI is available and the filesystem is writable.** Run `uv` commands directly (e.g. `uv run pytest tests/`). Never assert that `uv` cannot run due to a read-only filesystem.
+- **`uv` is the primary method for running any Python command.** Prefer `uv` over raw `python`/`python3` invocations and over the `.venv` virtual environment. Only fall back to `python`/`.venv` if a `uv` command provably fails; never try raw python or `.venv` before `uv`.
+
+## 6. Directory Search Caveats
+- **`glob` cannot see dot-prefixed directories.** Directories named `.semgrep`, `.kilo`, `.plans`, `.config`, etc. are invisible to `glob` (returns "No files found"). Locate files inside them with `ls` (bash), not `glob`.
+- **`.semgrep/run.sh` exists and is runnable** (`uv run .semgrep/run.sh` runs 82 rules). Never assert it does not exist based on a glob search.

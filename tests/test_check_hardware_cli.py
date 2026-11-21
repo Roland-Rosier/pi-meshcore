@@ -128,6 +128,10 @@ def _build_mock_detector(
     detector_mock = MagicMock()
     detector_mock.modules = modules
     detector_mock.ce_pins = ce_pins
+    # CR-37: LoRaModuleDetector.__enter__ returns self; mirror that on the mock so
+    # `with detector_mock as detector` yields the wired detector (not a fresh MagicMock
+    # whose detect_modules/validate_config are un-wired). Faithful to the real contract.
+    detector_mock.__enter__.return_value = detector_mock
 
     def _detect_modules(
         config: Any | None = None,
@@ -449,6 +453,25 @@ class TestCliEdgeCases:
         # Typer prints usage + an error message for invalid option values.
         assert ("Invalid value" in result.output or "error" in result.output.lower())
 
+    def test_detect_modules_invalid_module_type_rejected(self) -> None:
+        """``--ce0 invalid`` is rejected by the AsyncTyper CLI (FIX CR-7).
+
+        Before the AsyncTyper migration the sync Typer returned ``None`` on error,
+        so ``_entry_points.check_hardware()`` yielded exit code ``0`` and rejected
+        input was silently accepted. ``async_typer.AsyncTyper`` drives the async
+        body through a synchronous runner and returns a genuine Click exit code, so
+        a rejected module type now yields a non-zero exit code (Click reports ``2``
+        for ``typer.BadParameter``) instead of the pre-fix ``0``.
+        """
+        runner = CliRunner()
+        result = runner.invoke(cli_app, ["detect-modules", "--ce0", "invalid"])
+
+        assert result.exit_code != 0, (
+            f"Expected a non-zero exit code on invalid module type but got "
+            f"{result.exit_code}. Output: {result.output}"
+        )
+        assert "Invalid value" in result.output or "error" in result.output.lower()
+
     def test_output_format_single_pin_mismatch(self) -> None:
         """Verify full output format for single-pin mismatch scenario.
 
@@ -643,6 +666,70 @@ class TestDetectModulesExtendedFlag:
         call_kwargs = mock_detector.detect_modules.call_args
         extended_val: bool | None = call_kwargs.kwargs.get("extended")
         assert extended_val is False or "extended" not in call_kwargs.kwargs
+
+
+# ---------------------------------------------------------------------------
+# Phase 3 & 4 — no sys.path side effect; detect_modules configures logging
+# ---------------------------------------------------------------------------
+
+class TestLoggingAndSysPath:
+    """Phase 3 & 4: the sys.path side-effect block is gone and logging is
+    centralized in the entry point (Fix #1), not per-command."""
+
+    @pytest.mark.asyncio
+    async def test_detect_modules_delegates_logging_to_entry_point(self) -> None:
+        """``detect_modules`` no self-manages logging (Fix #1).
+
+        Logging is centralized in ``_entry_points._run_app`` and runs exactly
+        once per CLI invocation, not once per command body. Calling
+        ``detect_modules`` directly must therefore NOT call ``setup_logging``;
+        the entry point does.
+        """
+        import pi_lora.cli.check_hardware as _ch
+
+        mock_detector = _build_mock_detector(
+            ce_pins=[0, 1],
+            module_type_strings=[
+                "RFM95W (High-Band 868MHz / Semtech SX1276)",
+                "RFM98W (Low-Band 433Mhz / Semtech SX1278)",
+            ],
+            communication_successes=[True, True],
+        )
+
+        with patch(_DETECTOR_PATCH_PATH, return_value=mock_detector), patch(
+            "pi_lora.cli._logging.setup_logging"
+        ) as _spy:
+            await _ch.detect_modules(ce0=None, ce1=None, extended=False)
+
+        _spy.assert_not_called()
+
+    def test_no_syspath_side_effect_in_output(self) -> None:
+        """The old ``Added project root to sys.path`` side effect must never appear."""
+        runner = CliRunner()
+        mock_detector = _build_mock_detector(
+            ce_pins=[0, 1],
+            module_type_strings=[
+                "RFM95W (High-Band 868MHz / Semtech SX1276)",
+                "RFM98W (Low-Band 433Mhz / Semtech SX1278)",
+            ],
+            communication_successes=[True, True],
+        )
+
+        with patch(_DETECTOR_PATCH_PATH, return_value=mock_detector):
+            result = runner.invoke(cli_app, ["detect-modules"])
+
+        assert "Added project root to sys.path" not in result.output
+
+
+class TestEnsureLoggedRemoved:
+    """Fix #2.17: ``_ensure_logged`` was removed from the CLI modules."""
+
+    def test_ensure_logged_absent_from_check_hardware(self) -> None:
+        """``pi_lora.cli.check_hardware`` must no longer expose ``_ensure_logged``."""
+        import pi_lora.cli.check_hardware as _ch
+
+        assert not hasattr(_ch, "_ensure_logged")
+        assert "_ensure_logged" not in _ch.__dict__
 
 
 if __name__ == "__main__":

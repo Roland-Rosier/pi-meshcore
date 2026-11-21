@@ -4,12 +4,17 @@
 #
 # Usage: uv run .semgrep/run.sh
 
+# PLAN-22 (Section 6, Item 11): mkdir -p ensures temp parent exists; trap handles EXIT INT TERM for cleanup on Ctrl+C/kill.
+# Item 11: `mktemp -d --tmpdir=...` is not universally supported on non-GNU systems; the POSIX-compliant form uses the `TMPDIR=... mktemp -d` construct where `TMPDIR` is a standard environment variable.
 mkdir -p /tmp/sandbox/semgrep_tmp
-TMPDIR=/tmp/sandbox/semgrep_tmp/ uv run semgrep scan --verbose \
-  --config=".semgrep/rules/security/" \
-       ".semgrep/rules/best-practice/" \
-       ".semgrep/rules/correctness/" \
-       ".semgrep/rules/maintainability/" \
+TMPDIR=$(TMPDIR=/tmp/sandbox/semgrep_tmp mktemp -d)
+uv run semgrep scan --verbose \
+   --disable-version-check \
+   --config=".semgrep/rules/security/" \
+   --config=".semgrep/rules/best-practice/" \
+   --config=".semgrep/rules/correctness/" \
+   --config=".semgrep/rules/maintainability/" \
+   --config=".semgrep/rules/custom/" \
   src/pi_lora/drivers/rfm9x_sx127x*.py \
   tests/test_rfm9x_sx127x*.py \
   src/pi_lora/framework/*.py \
@@ -18,4 +23,5 @@ TMPDIR=/tmp/sandbox/semgrep_tmp/ uv run semgrep scan --verbose \
   tests/spi/*.py \
   src/pi_lora/cli/config.py \
   tests/test_config_*.py
+trap 'rm -rf "$TMPDIR"' EXIT INT TERM
 

@@ -14,7 +14,31 @@
 
 """Fake SPI driver for testing LoRa module detection."""
 
+import contextvars
+import sys
+import threading
+import types
+from collections.abc import Iterator
+from contextlib import contextmanager
 from unittest.mock import MagicMock
+
+# PLAN-34 FIX (CR-33.6): module-level import to eliminate the circular-import risk.
+# The original code imported `_spidev_patch_active` at RUNTIME inside the context
+# manager body (a code smell: runtime import hides a circular dependency between
+# tests/fakes.py and pi_lora.drivers.spi.bus). Pulling it to module-level makes the
+# import explicit and resolvable at import time. See code_review-33.1.json, CR-33.6.
+from pi_lora.drivers.spi.bus import _spidev_patch_active
+
+# PLAN-30 FIX (CR-29-6): threading.Lock protects process-wide sys.modules from
+# concurrent async task clobbering. contextvars.ContextVar (_spidev_patch_active)
+# isolates the _spidev_patch_active COUNTER per task, but sys.modules is shared. The lock
+# serializes the critical section. threading.Lock (not aiologic.Lock) is required
+# because this is a SYNCHRONOUS @contextmanager with no await points.
+_spidev_patch_lock = threading.Lock()
+
+# P31-4 TEST: tests/drivers/spi/test_spidev_patch_contextvar.py::test_spidev_kernel_patch_thread_safety_under_concurrency
+# Verifies 20 concurrent workers with unique FakeSpiDev instances see no cross-contamination.
+# threading.Lock serializes sys.modules access; ContextVar isolates counter per task.
 
 
 class FakeSpiDev:
@@ -151,13 +175,16 @@ class FakeSpiDev:
         """Set no CS setting (no-op in simulation)."""
         pass
 
-    def xfer2(self, data: list[int]) -> list[int]:
+    def xfer2(self, data: list[int] | bytearray) -> list[int]:
         """Simulate SPI transfer.
 
         :param data: Data to transfer (write bytes)
         :return: Received data (read bytes)
         :raises Exception: If simulating an error condition
         """
+        if isinstance(data, bytearray):
+            data = list(data)
+
         if not self._opened:
             raise OSError("SPI device not opened")
 
@@ -428,6 +455,84 @@ def patch_spidev_with_fake(fake_spi: FakeSpiDev) -> MagicMock:
     mock = MagicMock()
     mock.return_value = fake_spi
     return mock
+
+
+@contextmanager
+def spidev_kernel_patch(fake_spi: FakeSpiDev) -> Iterator[object]:
+    """Inject a fake ``spidev`` module into ``sys.modules`` so that
+    ``import spidev`` (as performed by ``RealSpiBus.open``) resolves to a module
+    whose ``SpiDev`` returns *fake_spi*.
+
+    This wires the ``RealSpiBus -> spidev -> kernel SPI`` chain end-to-end without
+    requiring the real ``spidev`` Cython extension to be importable. The injected
+    module is removed (or restored) on exit so no namespace pollution persists.
+
+    :param fake_spi: The FakeSpiDev kernel to expose as ``spidev.SpiDev``.
+    :yield: None. The injected fake spidev module is not consumed by callers.
+
+    .. warning:: CONCURRENCY LIMITation: The lock protecting ``sys.modules`` and
+       the ``_spidev_patch_active`` ContextVar is released during the ``yield``
+       (user code execution). If multiple async tasks in the SAME process use
+       this context manager concurrently with different ``fake_spi`` instances,
+       they will overwrite each other's ``sys.modules["spidev"]`` patch. This is
+       a fundamental limitation of the ``@contextmanager`` pattern for
+       process-global namespace patching.
+
+       Mitigation: Test infrastructure uses this in controlled patterns:
+       - Sequential test execution (default pytest behavior)
+       - Isolated fixtures per test
+       - Multi-process parallelism (``pytest-xdist``) is SAFE since each worker
+         has its own ``sys.modules``
+
+       For true concurrent safety within a process, a callback-based API would
+       be required (breaking change). This limitation is accepted for the
+       controlled test usage patterns in this codebase.
+     """
+    token: contextvars.Token[int] | None = None
+    with _spidev_patch_lock:
+        backup: types.ModuleType | None = sys.modules.get("spidev", None)
+        fake_module: types.SimpleNamespace = types.SimpleNamespace(SpiDev=lambda: fake_spi)
+        sys.modules["spidev"] = fake_module  # type: ignore[assignment]
+        # CR-8 FIX (R-4): mark the injected spidev kernel patch as active via a
+        # context-local ContextVar so _verify_patch_active() can detect misuse after
+        # the context exits. .set()/.reset() isolate the flag per async context and
+        # are transparent to the synchronous callers of this context manager.
+        #
+        # REVIEWer anti-regression (Plan-27 Fix #6, Finding 1011, CR-3.11):
+        # _spidev_patch_active is a ContextVar[int] counter (bus.py default 0), NOT a
+        # bool. The original code did .set(True), which broke counter semantics:
+        # nested spidev_kernel_patch contexts could not increment/decrement, so a
+        # double-nested context read 1 instead of 2 and resets left the var at a
+        # stale bool. This fix reads the current counter, sets current + 1, and
+        # resets on exit, so nesting tracks correctly (outer=1, inner=2, exit=0).
+        #
+        # Alternatives rejected:
+        #   - .set(True) / .reset(): bool identity; no nesting counter (the bug).
+        #   - A class-level bool attribute: leaks across instances/contexts; the
+        #     ContextVar isolates per async context (KEY regression), so rejected.
+        current: int = _spidev_patch_active.get()
+        token: contextvars.Token[int] = _spidev_patch_active.set(current + 1)
+    try:
+        yield None
+    finally:
+        with _spidev_patch_lock:
+            if backup is None:
+                sys.modules.pop("spidev", None)
+            else:
+                sys.modules["spidev"] = backup  # type: ignore[assignment]
+            # CR-33.5 FIX (Plan-34, code_review-33.1.json): reset the ContextVar INSIDE
+            # the lock so the counter returns to 0 after the context exits; without this
+            # the counter stays > 0 and _verify_patch_active() never fires, so a retained
+            # bus reference silently reaches import spidev instead of raising RuntimeError.
+            if token is not None:
+                _spidev_patch_active.reset(token)
+            # the lock. The original code called _spidev_patch_active.reset(token) OUTSIDE
+            # the lock, then re-acquired the lock to restore sys.modules. Between the reset
+            # and the sys.modules restore, another worker could read an inconsistent state
+            # (counter already decremented but sys.modules still pointing at the injected
+            # fake module) -- a race window. Keeping the reset inside the same lock that
+            # guards sys.modules maintains the invariant that the counter and sys.modules
+            # state are always consistent.
 
 
 def verify_frequency_in_range(fake_spi: FakeSpiDev, frequency_khz: int) -> bool:

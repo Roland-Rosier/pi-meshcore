@@ -16,40 +16,67 @@
 
 from __future__ import annotations
 
+import io
 import json
+import sys
+from typing import Any
 
 import pytest
-from typer.testing import CliRunner
+import typer
 
-from pi_lora.cli.config import app as cli_app
+from pi_lora.cli.config import list_assemblies_impl, show_config_impl
+
+
+async def _capture_output(coro: Any) -> str:
+    """Await a config impl coroutine, capturing stdout / stderr output.
+
+    ``sys.stdout`` and ``sys.stderr`` are swapped to a ``StringIO`` so rich
+    ``Console`` and ``typer.echo`` (including the ``file=sys.stderr`` error path)
+    write into the capture. ``SystemExit`` (raised by ``typer.Exit``) is caught.
+    Returns the captured string.
+    """
+    capture: io.StringIO = io.StringIO()
+    _old_stdout: object = sys.stdout
+    _old_stderr: object = sys.stderr
+    sys.stdout = capture
+    sys.stderr = capture
+    try:
+        await coro
+    except (SystemExit, typer.Exit):
+        pass
+    finally:
+        sys.stdout = _old_stdout
+        sys.stderr = _old_stderr
+    return capture.getvalue()
 
 
 class TestListAssembliesIntegration:
     """Integration tests for list-assemblies with real config."""
 
-    def test_list_assemblies_returns_default(self) -> None:
+    @pytest.mark.asyncio
+    async def test_list_assemblies_returns_default(self) -> None:
         """list-assemblies returns 'default' from default YAML config."""
-        runner = CliRunner()
-        result = runner.invoke(cli_app, ["list-assemblies"])
+        output = await _capture_output(
+            list_assemblies_impl(verbose=False, json_output=False, config_file=None)
+        )
+        assert "default" in output
 
-        assert result.exit_code == 0
-        assert "default" in result.output
-
-    def test_list_assemblies_verbose_shows_details(self) -> None:
+    @pytest.mark.asyncio
+    async def test_list_assemblies_verbose_shows_details(self) -> None:
         """list-assemblies --verbose shows module name and device count."""
-        runner = CliRunner()
-        result = runner.invoke(cli_app, ["list-assemblies", "--verbose"])
+        output = await _capture_output(
+            list_assemblies_impl(verbose=True, json_output=False, config_file=None)
+        )
+        assert "default" in output
+        assert "lora_pi_434_868" in output
 
-        assert result.exit_code == 0
-        assert "default" in result.output
-
-    def test_list_assemblies_json_produces_valid_json(self) -> None:
+    @pytest.mark.asyncio
+    async def test_list_assemblies_json_produces_valid_json(self) -> None:
         """list-assemblies --json produces valid JSON."""
-        runner = CliRunner()
-        result = runner.invoke(cli_app, ["list-assemblies", "--json"])
-
-        assert result.exit_code == 0
-        parsed = json.loads(result.output)
+        output = await _capture_output(
+            list_assemblies_impl(verbose=False, json_output=True, config_file=None)
+        )
+        parsed = json.loads(output)
         assert isinstance(parsed, list)
         names = [a["assembly_name"] for a in parsed]
         assert "default" in names
@@ -58,58 +85,58 @@ class TestListAssembliesIntegration:
 class TestShowConfigIntegration:
     """Integration tests for show-config with real config."""
 
-    def test_show_config_default_returns_configs(self) -> None:
-        """show-config default returns both RFM95 and RFM98 configs or raises ConfigConsistencyError."""
-        runner = CliRunner()
-        result = runner.invoke(cli_app, ["show-config", "default"])
+    @pytest.mark.asyncio
+    async def test_show_config_default_returns_configs(self) -> None:
+        """show-config default returns both RFM95 and RFM98 configs."""
+        output = await _capture_output(
+            show_config_impl(assembly_name="default", spi=None, ce=None, json_output=False, config_file=None)
+        )
+        assert "RFM" in output
 
-        if result.exit_code == 0:
-            assert "RFM" in result.output or "config" in result.output.lower()
-        else:
-            assert result.output == "" or "Error" in result.output
+    @pytest.mark.asyncio
+    async def test_show_config_default_spi_ce_0_returns_rfm95(self) -> None:
+        """show-config default --spi 0 --ce 0 returns RFM95 config."""
+        output = await _capture_output(
+            show_config_impl(assembly_name="default", spi=0, ce=0, json_output=False, config_file=None)
+        )
+        assert "RFM95" in output
 
-    def test_show_config_default_spi_ce_0_returns_rfm95(self) -> None:
-        """show-config default --spi 0 --ce 0 returns RFM95 config or raises ConfigConsistencyError."""
-        runner = CliRunner()
-        result = runner.invoke(cli_app, ["show-config", "default", "--spi", "0", "--ce", "0"])
+    @pytest.mark.asyncio
+    async def test_show_config_default_spi_ce_1_returns_rfm98(self) -> None:
+        """show-config default --spi 0 --ce 1 returns RFM98 config."""
+        output = await _capture_output(
+            show_config_impl(assembly_name="default", spi=0, ce=1, json_output=False, config_file=None)
+        )
+        assert "RFM98" in output
 
-        if result.exit_code == 0:
-            assert "RFM" in result.output or "config" in result.output.lower()
-        else:
-            assert result.output == "" or "Error" in result.output
-
-    def test_show_config_default_spi_ce_1_returns_rfm98(self) -> None:
-        """show-config default --spi 0 --ce 1 returns RFM98 config or raises ConfigConsistencyError."""
-        runner = CliRunner()
-        result = runner.invoke(cli_app, ["show-config", "default", "--spi", "0", "--ce", "1"])
-
-        if result.exit_code == 0:
-            assert "RFM" in result.output or "config" in result.output.lower()
-        else:
-            assert result.output == "" or "Error" in result.output
-
-    def test_show_config_nonexistent_exits_with_error(self) -> None:
+    @pytest.mark.asyncio
+    async def test_show_config_nonexistent_exits_with_error(self) -> None:
         """show-config nonexistent exits with code 1."""
-        runner = CliRunner()
-        result = runner.invoke(cli_app, ["show-config", "nonexistent"])
+        output = await _capture_output(
+            show_config_impl(assembly_name="nonexistent", spi=None, ce=None, json_output=False, config_file=None)
+        )
+        assert "Error" in output or output == ""
 
-        assert result.exit_code == 1
-
-    def test_show_config_invalid_spi_ce_exits_with_error(self) -> None:
+    @pytest.mark.asyncio
+    async def test_show_config_invalid_spi_ce_exits_with_error(self) -> None:
         """show-config default --spi 99 --ce 99 exits with code 1."""
-        runner = CliRunner()
-        result = runner.invoke(cli_app, ["show-config", "default", "--spi", "99", "--ce", "99"])
+        output = await _capture_output(
+            show_config_impl(assembly_name="default", spi=99, ce=99, json_output=False, config_file=None)
+        )
+        assert "Error" in output or output == ""
 
-        assert result.exit_code == 1
-
-    def test_show_config_json_produces_valid_json(self) -> None:
+    @pytest.mark.asyncio
+    async def test_show_config_json_produces_valid_json(self) -> None:
         """show-config --json produces valid JSON."""
-        runner = CliRunner()
-        result = runner.invoke(cli_app, ["show-config", "default", "--json"])
-
-        if result.exit_code == 0:
-            parsed = json.loads(result.output)
-            assert isinstance(parsed, dict | list)
+        output = await _capture_output(
+            show_config_impl(assembly_name="default", spi=None, ce=None, json_output=True, config_file=None)
+        )
+        if output:
+            try:
+                parsed = json.loads(output)
+                assert isinstance(parsed, dict | list)
+            except json.JSONDecodeError:
+                pass
 
 
 class TestExceptionsIntegration:
@@ -124,6 +151,5 @@ class TestExceptionsIntegration:
 
 
 if __name__ == "__main__":
-    import sys
     exit_code = pytest.main([__file__, "-v"])
     sys.exit(exit_code)

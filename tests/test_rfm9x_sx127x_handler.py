@@ -17,12 +17,12 @@
 import dataclasses
 
 import pytest
-from src.pi_lora.drivers.rfm9x_sx127x_handler import (
+
+from pi_lora.drivers.rfm9x_sx127x_handler import (
     FrequencyCalculationConfig,
     Rfm9xSx127xHandler,
 )
-from src.pi_lora.drivers.rfm9x_sx127x_modes import ModeBits
-
+from pi_lora.drivers.rfm9x_sx127x_modes import ModeBits
 from tests.spi.mock import MockSpiBusFactory
 
 
@@ -83,9 +83,9 @@ class TestRfm9xSx127xHandler:
 
     @pytest.mark.asyncio
     async def test_handler_methods_accessible_via_guard(self) -> None:
-        from src.pi_lora.drivers.rfm9x_sx127x_modes import StateBits
-        from src.pi_lora.drivers.rfm9x_sx127x_module import Rfm9xSx127xModule
-        from src.pi_lora.drivers.rfm9x_sx127x_radio_instance import RadioInstanceConfig
+        from pi_lora.drivers.rfm9x_sx127x_modes import StateBits
+        from pi_lora.drivers.rfm9x_sx127x_module import Rfm9xSx127xModule
+        from pi_lora.drivers.rfm9x_sx127x_radio_instance import RadioInstanceConfig
 
         radio_config = RadioInstanceConfig(
             module_name="LoPi4", spi_device_id=0, ce_number=0, device_name="RFM95W",
@@ -99,7 +99,10 @@ class TestRfm9xSx127xHandler:
     @pytest.mark.asyncio
     async def test_write_and_verify_frequency_with_mock_spi_bus(self) -> None:
         factory = MockSpiBusFactory()
-        module = MockModule(factory.create(bus=0, device=0))
+        bus = factory.create(bus=0, device=0)
+        # BUG-5 LSP contract: create() returns an unopened bus; caller owns open().
+        bus.open()
+        module = MockModule(bus)
         config = FrequencyCalculationConfig(osc_freq_hz=32_000_000)
         result = await Rfm9xSx127xHandler.write_and_verify_frequency_for_khz(module, config, 415000)
         success = result[0]

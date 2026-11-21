@@ -22,6 +22,7 @@ subcommands (check-hardware, config, test) and that each sub-app's
 from __future__ import annotations
 
 from typing import Any
+from unittest.mock import patch
 
 import pytest
 from typer.testing import CliRunner
@@ -161,6 +162,95 @@ class TestNoArgsShowsHelp:
         assert "check-hardware" in result.output
         assert "config" in result.output
         assert "test" in result.output
+
+
+# ---------------------------------------------------------------------------
+# Test 6 — shared logging module is the single source of truth
+# ---------------------------------------------------------------------------
+
+class TestSharedLogging:
+    """Phase 15: ``pi_lora.cli._logging`` owns the shared logging setup."""
+
+    def test_setup_logging_exists_and_is_callable(self) -> None:
+        """Import and call ``pi_lora.cli._logging.setup_logging`` directly.
+
+        Verify the module exposes ``setup_logging`` and that calling it does
+        not raise. ``_ensure_logged`` was removed (Fix #2.17).
+        """
+        import pi_lora.cli._logging as _shared
+
+        assert callable(_shared.setup_logging)
+        assert not hasattr(_shared, "_ensure_logged")
+        _shared.setup_logging()
+
+    @pytest.mark.asyncio
+    async def test_check_hardware_detect_modules_delegates_logging(self) -> None:
+        """``check_hardware.detect_modules`` no self-manages logging (Fix #1).
+
+        Logging is centralized in ``_entry_points._run_app`` and runs exactly
+        once per CLI invocation, not once per command body. Patch the detector
+        and ``setup_logging`` and invoke ``detect_modules`` with all-None
+        defaults, then assert ``setup_logging`` is NOT called. ``detect_modules``
+        is an async command body (FIX CR-7), so it is awaited here.
+        """
+        import pi_lora.cli._logging as _shared
+        import pi_lora.cli.check_hardware as _ch
+
+        with patch("pi_lora.cli.check_hardware.LoRaModuleDetector"), patch.object(
+            _shared, "setup_logging", autospec=True
+        ) as _spy:
+            await _ch.detect_modules(ce0=None, ce1=None, extended=False)
+            _spy.assert_not_called()
+
+
+# ---------------------------------------------------------------------------
+# Test 7 — invalid log level validation (Phase 10)
+# ---------------------------------------------------------------------------
+
+class TestSharedLoggingInvalidLevel:
+    """Phase 10: ``setup_logging`` validates ``PI_LORA_LOG_LEVEL``."""
+
+    def test_invalid_level_emits_warning(self) -> None:
+        """``PI_LORA_LOG_LEVEL=INVALID`` reports the invalid level via ``sys.stderr`` and defaults to WARNING."""
+        import io
+        import logging
+        import os
+        import sys
+
+        import pi_lora.cli._logging as _shared
+
+        with patch.dict(os.environ, {"PI_LORA_LOG_LEVEL": "INVALID"}), patch.object(sys, "stderr", new=io.StringIO()) as _stderr:
+            _shared.setup_logging()
+        assert "Invalid log level" in _stderr.getvalue()
+        assert logging.getLogger().level == logging.WARNING
+
+    def test_valid_level_applied_without_warning(self) -> None:
+        """A valid level (``INFO``) is applied and no warning is emitted."""
+        import logging
+        import os
+        import warnings
+
+        import pi_lora.cli._logging as _shared
+
+        with patch.dict(os.environ, {"PI_LORA_LOG_LEVEL": "INFO"}), warnings.catch_warnings(record=True) as _rw:
+            warnings.simplefilter("always")
+            _shared.setup_logging()
+        assert not any(issubclass(w.category, UserWarning) for w in _rw)
+        assert logging.getLogger().level == logging.INFO
+
+    def test_default_level_is_warning_without_warning(self) -> None:
+        """With no env var, the default level is ``WARNING`` and no warning fires."""
+        import logging
+        import os
+        import warnings
+
+        import pi_lora.cli._logging as _shared
+
+        with patch.dict(os.environ, {}, clear=True), warnings.catch_warnings(record=True) as _rw:
+            warnings.simplefilter("always")
+            _shared.setup_logging()
+        assert not any(issubclass(w.category, UserWarning) for w in _rw)
+        assert logging.getLogger().level == logging.WARNING
 
 
 if __name__ == "__main__":

@@ -18,14 +18,14 @@ import gc
 import unittest.mock
 
 import pytest
-from src.pi_lora.drivers.rfm9x_sx127x_modes import (
+
+from pi_lora.drivers.rfm9x_sx127x_modes import (
     FskOokSleepState,
     StateBits,
     UnknownState,
 )
-from src.pi_lora.drivers.rfm9x_sx127x_module import Rfm9xSx127xModule
-from src.pi_lora.drivers.rfm9x_sx127x_radio_instance import RadioInstanceConfig
-
+from pi_lora.drivers.rfm9x_sx127x_module import Rfm9xSx127xModule
+from pi_lora.drivers.rfm9x_sx127x_radio_instance import RadioInstanceConfig
 from tests.spi.mock import MockSpiBusFactory
 
 

@@ -16,6 +16,7 @@
 
 from __future__ import annotations
 
+import warnings
 from dataclasses import dataclass
 from typing import NamedTuple
 
@@ -90,11 +91,12 @@ class RadioInstanceError(Exception):
         self.context: dict[str, object] = context or {}
 
 
-class ModuleNotFoundError(RadioInstanceError):
+class DriverModuleNotFoundError(RadioInstanceError):
     """Raised when a module is not found in the config."""
 
     def __init__(self, module_name: str) -> None:
         super().__init__(f"Module '{module_name}' not found", {"module_name": module_name})
+        self.module_name = module_name
 
 
 class DeviceAttachmentNotFoundError(RadioInstanceError):
@@ -105,16 +107,35 @@ class DeviceAttachmentNotFoundError(RadioInstanceError):
             f"No attachment for module '{module_name}' at SPI:{spi_device_id} CE:{ce_number}",
             {"module_name": module_name, "spi_device_id": spi_device_id, "ce_number": ce_number}
         )
+        self.module_name = module_name
+        self.spi_device_id = spi_device_id
+        self.ce_number = ce_number
 
 
+# PLAN-22 FIX (Item 10): AssemblyNotFoundError param renamed from module_name
+# to assembly_name. Before: parameter named 'module_name' but actually held
+# the assembly name (confusing). Now parameter and attribute are 'assembly_name'.
+# C2 VERIFIED: All exception handlers updated to use .assembly_name.
 class AssemblyNotFoundError(RadioInstanceError):
     """Raised when no assembly is found for the module."""
 
-    def __init__(self, module_name: str, device_key: DeviceIdentity) -> None:
+    def __init__(self, assembly_name: str, device_key: DeviceIdentity) -> None:
         super().__init__(
-            f"No assembly found for module '{module_name}' device {device_key}",
-            {"module_name": module_name, "device_key": str(device_key)}
+            f"No assembly found for assembly '{assembly_name}' device {device_key}",
+            {"assembly_name": assembly_name, "device_key": str(device_key)}
         )
+        self.assembly_name = assembly_name
+        self.device_key = device_key
+
+    @property
+    def module_name(self) -> str:
+        """Deprecated: Use assembly_name instead."""
+        warnings.warn(
+            "AssemblyNotFoundError.module_name is deprecated; use assembly_name",
+            DeprecationWarning,
+            stacklevel=2,
+        )
+        return self.assembly_name
 
 
 class DeviceSpecNotFoundError(RadioInstanceError):
@@ -122,6 +143,7 @@ class DeviceSpecNotFoundError(RadioInstanceError):
 
     def __init__(self, device_name: str) -> None:
         super().__init__(f"Device spec '{device_name}' not found", {"device_name": device_name})
+        self.device_name = device_name
 
 
 class FamilyNotFoundError(RadioInstanceError):
@@ -129,6 +151,7 @@ class FamilyNotFoundError(RadioInstanceError):
 
     def __init__(self, device_name: str) -> None:
         super().__init__(f"No family found containing device '{device_name}'", {"device_name": device_name})
+        self.device_name = device_name
 
 
 class ConfigConsistencyError(RadioInstanceError):
@@ -138,7 +161,7 @@ class ConfigConsistencyError(RadioInstanceError):
         super().__init__(message, context)
 
 
-def create_radio_instance(
+def _create_radio_instance_core(
     assembly_name: str,
     spi_device_id: int,
     ce_number: int,
@@ -146,17 +169,26 @@ def create_radio_instance(
 ) -> RadioInstanceConfig:
     """Resolve and aggregate configuration for a single radio instance.
 
+    CR-2 FIX (sync core): This is the pure aggregation body extracted from the
+    former ``create_radio_instance`` coroutine. It performs NO config-loading,
+    NO I/O, and NO ``await`` — it consumes an already-loaded ``config`` and
+    returns the aggregated ``RadioInstanceConfig``. The finding that changed
+    ``create_radio_instance`` from sync to async made ``config`` optional and
+    broke synchronous callers; this core restores the sync path so callers can
+    load config explicitly via ``load_config()`` and call
+    ``create_radio_instance_sync()`` without awaiting.
+
     Args:
         assembly_name: Assembly identifier (e.g., "default").
         spi_device_id: SPI bus number (e.g., 0).
         ce_number: Chip enable slot (e.g., 0 or 1).
-        config: Pre-loaded config (REQUIRED - no global default).
+        config: Pre-loaded config (required — callers load it explicitly).
 
     Returns:
         Fully populated RadioInstanceConfig.
 
     Raises:
-        ModuleNotFoundError: If module_name not in config.modules.
+        DriverModuleNotFoundError: If module_name not in config.modules.
         DeviceAttachmentNotFoundError: If no attachment matches spi_device_id/ce_number.
         AssemblyNotFoundError: If no assembly found for the module.
         DeviceSpecNotFoundError: If device spec not in config.devices.
@@ -172,7 +204,7 @@ def create_radio_instance(
     # 2. Get module name from assembly
     module_name = assembly.module_name
     if module_name not in config.modules:
-        raise ModuleNotFoundError(module_name)
+        raise DriverModuleNotFoundError(module_name)
 
     module_obj = config.modules[module_name]
 
@@ -266,11 +298,115 @@ def create_radio_instance(
     return result
 
 
-def create_radio_instance_from_default(
+async def create_radio_instance(
+    assembly_name: str,
+    spi_device_id: int,
+    ce_number: int,
+    config: Rfm9xSx127xConfig | None = None,
+) -> RadioInstanceConfig:
+    """Resolve and aggregate configuration for a single radio instance.
+
+    CR-2 FIX (async wrapper): This is the async wrapper around the sync core
+    ``_create_radio_instance_core``. When ``config`` is None it auto-loads the
+    preloaded default config via ``get_preloaded_config()`` (available in async
+    context per H-7). Callers that must stay synchronous should instead load
+    config via ``load_config()`` and call ``create_radio_instance_sync()``.
+
+    Args:
+        assembly_name: Assembly identifier (e.g., "default").
+        spi_device_id: SPI bus number (e.g., 0).
+        ce_number: Chip enable slot (e.g., 0 or 1).
+        config: Pre-loaded config. If None, the preloaded default config is loaded.
+
+    Returns:
+        Fully populated RadioInstanceConfig.
+
+    Raises:
+        DriverModuleNotFoundError: If module_name not in config.modules.
+        DeviceAttachmentNotFoundError: If no attachment matches spi_device_id/ce_number.
+        AssemblyNotFoundError: If no assembly found for the module.
+        DeviceSpecNotFoundError: If device spec not in config.devices.
+        FamilyNotFoundError: If no family contains the device_name.
+        ConfigConsistencyError: If cross-reference validation fails.
+    """
+    # CR-2 FIX: config is optional here because the async wrapper can await the
+    # preloaded config. Sync callers cannot await, so they must pass an explicit
+    # config (loaded via ``load_config()``) and use ``create_radio_instance_sync()``.
+    if config is None:
+        from pi_lora.drivers.rfm9x_sx127x_config_loader import get_preloaded_config
+        config = await get_preloaded_config()
+
+    return _create_radio_instance_core(assembly_name, spi_device_id, ce_number, config)
+
+
+def create_radio_instance_sync(
+    assembly_name: str,
+    spi_device_id: int,
+    ce_number: int,
+    config: Rfm9xSx127xConfig,
+) -> RadioInstanceConfig:
+    """Resolve and aggregate configuration for a single radio instance (sync).
+
+     Plan-22 Section 6 / Item 9 FIX (sync wrapper): Synchronous callers cannot
+     ``await`` the async ``create_radio_instance`` wrapper, and making that
+     function sync originally broke callers that relied on the auto-loaded
+     config. This wrapper requires an explicit ``config`` and delegates to the
+     pure sync core ``_create_radio_instance_core``. Sync migration path:
+
+         from pi_lora.drivers.rfm9x_sx127x_config_loader import load_config
+         config = load_config()
+         result = create_radio_instance_sync(
+             assembly_name="default", spi_device_id=0, ce_number=0, config=config
+         )
+
+     NOTE: Unlike the async wrapper ``create_radio_instance()``, this sync
+     function does NOT auto-load configuration. The async wrapper can await
+     ``get_preloaded_config()`` because it runs in an async context; sync
+     callers must explicitly load config via ``load_config()``. This is by
+     design — explicit config loading avoids hidden I/O in synchronous code.
+
+     Anti-Regression (Plan-22 Item 9): The absence of an auto-load here is
+     intentional, not a bug. A reviewer might otherwise flag the missing
+     auto-load as a defect because ``create_radio_instance_sync()`` has no
+     default value for ``config``. If the signature were ever relaxed to make
+     ``config`` optional again, sync callers would silently start loading config
+     via ``load_config()`` (hidden I/O), re-introducing the very regression this
+     contract forbids. Keep ``config`` non-optional so the explicit load stays
+     in the caller's code and the hidden I/O cannot silently reappear.
+
+    Args:
+        assembly_name: Assembly identifier (e.g., "default").
+        spi_device_id: SPI bus number (e.g., 0).
+        ce_number: Chip enable slot (e.g., 0 or 1).
+        config: Pre-loaded config (required — load it via ``load_config()``).
+
+    Returns:
+        Fully populated RadioInstanceConfig.
+
+    Raises:
+        DriverModuleNotFoundError: If module_name not in config.modules.
+        DeviceAttachmentNotFoundError: If no attachment matches spi_device_id/ce_number.
+        AssemblyNotFoundError: If no assembly found for the module.
+        DeviceSpecNotFoundError: If device spec not in config.devices.
+        FamilyNotFoundError: If no family contains the device_name.
+        ConfigConsistencyError: If cross-reference validation fails.
+    """
+    return _create_radio_instance_core(assembly_name, spi_device_id, ce_number, config)
+
+
+async def create_radio_instance_from_default(
     assembly_name: str,
     spi_device_id: int,
     ce_number: int,
 ) -> RadioInstanceConfig:
-    """Convenience wrapper using the preloaded default config."""
-    from pi_lora.drivers.rfm9x_sx127x_config_loader import get_preloaded_config
-    return create_radio_instance(assembly_name, spi_device_id, ce_number, get_preloaded_config())
+    """Convenience wrapper using the preloaded default config.
+
+    PLAN-26 FIX (Finding 376): Simplified from explicit get_preloaded_config() +
+    create_radio_instance(config=...) to single call with config=None. The async
+    wrapper create_radio_instance() already auto-loads the default config when
+    config is None (CR-2 FIX, Plan 21). The previous explicit call was redundant
+    and introduced in Plan 21 when create_radio_instance was split into a sync
+    core + async wrapper but this convenience function was not updated.
+    Cross-reference: durable summary docs/plan_summaries/2026_10_08_hardening_spike.md — Plan-25 scope (4 CRITICAL + 8 HIGH from code_review-24.1); radio_instance.py is a 5+ plan-iteration key file.
+    """
+    return await create_radio_instance(assembly_name, spi_device_id, ce_number, config=None)

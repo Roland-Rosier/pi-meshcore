@@ -76,8 +76,8 @@ class Rfm9xSx127xModule:
         self._stop_mode: StopMode = StopMode.DRAIN
         self._paused: bool = False
         self._event_buffer: dict[EventType, deque[ModuleEvent[Any]]] = defaultdict(
-            lambda: deque(maxlen=1000)
-        )
+             lambda: deque(maxlen=1000)  # nosemgrep: correctness.return-in-init
+         )
         self._event_waiters: dict[EventType, list[_EventWaiter]] = defaultdict(list)
 
     # ------------------------------------------------------------------
@@ -109,7 +109,7 @@ class Rfm9xSx127xModule:
         self.spi_bus = self._spi_factory.create(
             bus=self.spi_device_id, device=self.ce_number
         )
-        self.spi_bus.open(self.spi_device_id, self.ce_number)
+        self.spi_bus.open()
 
     async def close_spi(self) -> None:
         """Close the SPI bus if one is open."""
@@ -283,7 +283,7 @@ class Rfm9xSx127xModule:
         try:
             try:
                 await asyncio.wait_for(waiter.event.wait(), timeout=timeout)
-            except asyncio.TimeoutError:
+            except asyncio.TimeoutError:  # PLAN-19: Use asyncio.TimeoutError explicitly (not builtin TimeoutError alias) for clarity in async context.
                 return None
             return waiter.result
         finally:

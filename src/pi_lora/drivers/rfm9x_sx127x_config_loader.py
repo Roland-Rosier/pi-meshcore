@@ -16,24 +16,41 @@
 
 from __future__ import annotations
 
+import importlib
 import importlib.resources
 from pathlib import Path
 
-import aiologic
-from pydantic import ValidationError
 from ruamel.yaml import YAML
 
 from pi_lora.drivers.rfm9x_sx127x_config_model import (
     Rfm9xSx127xConfig,
     Rfm9xSx127xFamilyConfig,
 )
+from pi_lora.framework.lazy_async_lock import LazyAsyncLock
+
+# PLAN-22 FIX (Item 1): Anti-regression guard at the import site.
+# Fix rationale: the explicit `import importlib.resources` guarantees that the
+# `resources` submodule is bound, so `importlib.resources.files()` (called in
+# _resolve_default_path()) is always available.
+# Why the issue could regress: a bare `import importlib` does NOT bind the
+# `resources` submodule; relying on implicit submodule import is fragile — a
+# reviewer could remove the explicit import and the `importlib.resources.files()`
+# call would fail. This explicit import protects against that regression.
+# Cross-reference: Plan-22 Section 6, Anti-Regression Documentation for Item 1.
 
 # Default config resource path as configuration string (not magic).
 _DEFAULT_CONFIG_RESOURCE: str = "pi_lora.drivers.configs:rfm9x_sx127x_config.yaml"
 
-# Lazy singleton cache and lock.
+# CONFIG LOCK: LazyAsyncLock wraps aiologic.Lock with a persisted holder guard.
+# Rationale:
+# - LazyAsyncLock handles the aiologic import internally and creates exactly
+#   ONE aiologic.Lock per instance (see framework/lazy_async_lock.py)
+# - No sentinel object → no sentinel race possible
+# - Single code path in get_preloaded_config() — no init/else branches
+# - aiologic import is deferred to the async coroutine, so the sync
+#   load_config/load_family_config paths never import aiologic at import time
+_config_lock: LazyAsyncLock = LazyAsyncLock()
 _config_cache: Rfm9xSx127xConfig | None = None
-_config_lock: aiologic.Lock = aiologic.Lock()
 
 
 def _resolve_default_path() -> Path:
@@ -63,7 +80,7 @@ def load_config(
         Validated Rfm9xSx127xConfig instance.
 
     Raises:
-        ValidationError: If the configuration data fails Pydantic validation.
+        pydantic.ValidationError: If the configuration data fails Pydantic validation.
         FileNotFoundError: If the config file does not exist.
         ValueError: If config_name is provided but not found in YAML.
     """
@@ -76,22 +93,32 @@ def load_config(
     if not isinstance(yaml_data, dict):
         raise ValueError("YAML root must be a mapping (dict).")
 
-    try:
-        config: Rfm9xSx127xConfig = Rfm9xSx127xConfig.model_validate(yaml_data)
-    except ValidationError as exc:
-        raise exc
+    config: Rfm9xSx127xConfig = Rfm9xSx127xConfig.model_validate(yaml_data)
 
     if config_name is not None:
         key_map: dict[str, object] = {
             "devices": config.devices,
             "families": config.families,
             "modules": config.modules,
+            # Plan-17 / H-16-4: assemblies was validated here but had no explicit
+            # handling branch, so it fell through to the families return and
+            # populated families instead of assemblies. Added below.
+            "assemblies": config.assemblies,
         }
         if config_name not in key_map:
             raise ValueError(
                 f"config_name '{config_name}' not recognized. "
                 f"Valid keys: {list(key_map.keys())}"
             )
+        if config_name == "devices":
+            return Rfm9xSx127xConfig(devices=config.devices)
+        if config_name == "modules":
+            return Rfm9xSx127xConfig(modules=config.modules)
+        # Plan-17 / H-16-4: explicit assemblies branch mirroring devices/modules.
+        # Previously missing; fell through to families (wrong section populated).
+        if config_name == "assemblies":
+            return Rfm9xSx127xConfig(assemblies=config.assemblies)
+        return Rfm9xSx127xConfig(families=config.families)
 
     return config
 
@@ -108,7 +135,7 @@ def load_family_config(
         Validated Rfm9xSx127xFamilyConfig instance.
 
     Raises:
-        ValidationError: If the configuration data fails Pydantic validation.
+        pydantic.ValidationError: If the configuration data fails Pydantic validation.
         FileNotFoundError: If the config file does not exist.
     """
     path: Path = config_path or _resolve_default_path()
@@ -121,19 +148,19 @@ def load_family_config(
         raise ValueError("YAML data missing 'families' key.")
 
     family_data: dict[str, object] = {"families": yaml_data["families"]}
-    try:
-        config: Rfm9xSx127xFamilyConfig = Rfm9xSx127xFamilyConfig.model_validate(family_data)
-    except ValidationError as exc:
-        raise exc
+    config: Rfm9xSx127xFamilyConfig = Rfm9xSx127xFamilyConfig.model_validate(family_data)
 
     return config
 
 
-def get_preloaded_config(
+async def get_preloaded_config(
     force_reload: bool = False,
     config_path: Path | None = None,
 ) -> Rfm9xSx127xConfig:
     """Return the pre-loaded default configuration with lazy singleton support.
+
+    This coroutine guards the singleton cache with an ``aiologic.Lock`` so the
+    first load is performed safely under concurrency.
 
     Args:
         force_reload: If True, forces re-reading from disk regardless of cache.
@@ -141,22 +168,31 @@ def get_preloaded_config(
 
     Returns:
         A validated Rfm9xSx127xConfig instance.
+
+    .. note::
+        Unlike the sync ``load_config()``, this async coroutine updates the
+        internal cache when ``force_reload=True``, so subsequent calls without
+        ``force_reload`` return the freshly loaded config.
     """
-    # Override path bypasses cache entirely.
-    if config_path is not None:
-        return load_config(config_path=config_path)
-
-    # Force reload bypasses cache.
-    if force_reload:
-        return load_config()
-
-    # Lazy singleton: load on first call, cache thereafter.
     global _config_cache
-    if _config_cache is not None:
-        return _config_cache
 
-    with _config_lock:
-        if _config_cache is not None:
-            return _config_cache  # type: ignore[unreachable]  # pragma: no cover
+    # NOT a double-lock. LazyAsyncLock.acquire() returns the underlying aiologic.Lock
+    # WITHOUT acquiring it; the actual acquisition happens here in `async with config_lock:`.
+    # This is the correct pattern from Plan 29. It replaced the buggy version that used
+    # __aenter__/__aexit__ on the holder lock, which DID deadlock by acquiring the holder.
+    # Identical pattern: src/pi_lora/drivers/spi/locks.py:113-114.
+    config_lock = await _config_lock.acquire()
+
+    # SINGLE CODE PATH — no init/else branches, no sentinel race possible
+    async with config_lock:
+        if _config_cache is not None and not force_reload and config_path is None:
+            return _config_cache
+
+        if config_path is not None:
+            config = load_config(config_path=config_path)
+            if force_reload:
+                _config_cache = config
+            return config
+
         _config_cache = load_config()
-    return _config_cache
+        return _config_cache

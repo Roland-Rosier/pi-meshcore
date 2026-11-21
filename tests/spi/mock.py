@@ -14,7 +14,13 @@
 
 from __future__ import annotations
 
-from pi_lora.drivers.spi.bus import SpiBus
+import os
+from collections.abc import Iterator
+from contextlib import contextmanager
+from typing import TYPE_CHECKING
+
+if TYPE_CHECKING:
+    from pi_lora.drivers.spi.bus import RealSpiBus, SpiBus
 
 
 class MockSpiBus:
@@ -22,6 +28,8 @@ class MockSpiBus:
 
     def __init__(
         self,
+        bus_number: int = 0,
+        device_number: int = 0,
         max_speed_hz: int = 1000000,
         mode: int = 0,
         lsbfirst: bool = False,
@@ -29,17 +37,20 @@ class MockSpiBus:
     ) -> None:
         """Initialize the mock SPI bus.
 
-        Bus/device identity is set by ``open()`` — matching the underlying
-        ``spidev.SpiDev`` lifecycle (init → open).
+        Bus/device identity is fixed at construction — matching the ``SpiBus``
+        protocol where ``open()`` takes no args and bus/device are set once.
+        Cross-reference: Plan-25 Fix 11 / Issue 24.11 (LSP compliance).
 
         Args:
+            bus_number: The bus identifier.
+            device_number: The device identifier.
             max_speed_hz: Maximum speed in Hertz.
             mode: SPI mode setting.
             lsbfirst: Whether least significant bit comes first.
             no_cs: Whether chip select is disabled.
         """
-        self.bus_number: int = 0
-        self.device_number: int = 0
+        self.bus_number: int = bus_number
+        self.device_number: int = device_number
         self._max_speed_hz: int = max_speed_hz
         self._mode: int = mode
         self._lsbfirst: bool = lsbfirst
@@ -47,15 +58,18 @@ class MockSpiBus:
         self._registers: dict[int, int] = {}
         self._opened: bool = False
 
-    def open(self, bus: int, device: int) -> None:
-        """Open the SPI bus for the given device.
+    def open(self) -> None:
+        """Open the SPI bus using bus/device fixed at construction.
 
-        Args:
-            bus: The bus identifier.
-            device: The device identifier.
+        LSP compliance: ``open()`` takes no args, matching the ``SpiBus``
+        protocol ``open(self) -> None``. bus/device are set once at
+        construction (or via :func:`MockSpiBusFactory.create`).
+
+        PLAN-25 FIX (Fix 11, Issue 24.11): LSP compliance — open() takes no
+        args, matching the SpiBus protocol open(self) -> None. bus/device are
+        fixed at construction via MockSpiBusFactory.create().
+        Cross-reference: code_review-24.1.json finding 24.11.
         """
-        self.bus_number = bus
-        self.device_number = device
         self._opened = True
         self._registers = {}
 
@@ -64,7 +78,7 @@ class MockSpiBus:
         self._opened = False
         self._registers = {}
 
-    async def xfer2(self, data: list[int]) -> list[int]:
+    async def xfer2(self, data: list[int] | bytearray) -> list[int]:
         """Transfer data through the SPI bus using in-memory simulation.
 
         Implements address-based register simulation matching ``FakeSpiDev``:
@@ -79,6 +93,9 @@ class MockSpiBus:
         Returns:
             List of received byte values (simulated response).
         """
+        if isinstance(data, bytearray):
+            data = list(data)
+
         if not self._opened:
             raise RuntimeError("SPI bus not opened")
 
@@ -113,20 +130,36 @@ class MockSpiBus:
         """Maximum speed in Hertz."""
         return self._max_speed_hz
 
+    @max_speed_hz.setter
+    def max_speed_hz(self, value: int) -> None:
+        self._max_speed_hz = value
+
     @property
     def mode(self) -> int:
         """SPI mode setting."""
         return self._mode
+
+    @mode.setter
+    def mode(self, value: int) -> None:
+        self._mode = value
 
     @property
     def lsbfirst(self) -> bool:
         """Whether least significant bit comes first."""
         return self._lsbfirst
 
+    @lsbfirst.setter
+    def lsbfirst(self, value: bool) -> None:
+        self._lsbfirst = value
+
     @property
     def no_cs(self) -> bool:
         """Whether chip select is disabled."""
         return self._no_cs
+
+    @no_cs.setter
+    def no_cs(self, value: bool) -> None:
+        self._no_cs = value
 
 
 class MockSpiBusFactory:
@@ -136,8 +169,104 @@ class MockSpiBusFactory:
         self,
         bus: int = 0,
         device: int = 0,
+        *,  # keyword-only args to match protocol
+        xfer_timeout: float = 5.0,
+        factory_owned: bool = False,
     ) -> SpiBus:
-        """Return a new mock SPI bus configured for *bus* and *device*."""
-        mock_bus = MockSpiBus(max_speed_hz=1000000, mode=0, lsbfirst=False, no_cs=False)
-        mock_bus.open(bus=bus, device=device)
+        """Return a new *unopened* mock SPI bus for *bus* and *device*.
+
+        FIX (BUG-5, Plan-11 Phase 5): this factory aligns with
+        :class:`RealSpiBusFactory`, which returns an unopened bus. ``create()``
+        must NOT open the bus so both implementations honor the same
+        ``SpiBusFactory`` Liskov contract — callers own the open/close lifecycle
+        and must call :meth:`MockSpiBus.open` explicitly after :meth:`create`.
+
+        FIX 11 (Issue 24.11, Plan-25): bus/device are passed into the
+        ``MockSpiBus`` constructor so they are fixed at construction, and
+        ``open()`` takes no args to satisfy the ``SpiBus`` protocol.
+
+        FIX 7 (Plan-38): ``xfer_timeout`` and ``factory_owned`` are added as
+        keyword-only params to satisfy the ``SpiBusFactory`` protocol Liskov
+        contract — callers passing these keywords to the mock must not fail.
+        They are accepted but ignored since the mock needs neither.
+        """
+        mock_bus = MockSpiBus(
+            bus_number=bus,
+            device_number=device,
+            max_speed_hz=1000000,
+            mode=0,
+            lsbfirst=False,
+            no_cs=False,
+        )
         return mock_bus
+
+
+def hardware_enabled() -> bool:
+    """Return True when the ``PI_LORA_HARDWARE`` runtime flag is set to ``1``.
+
+    Real-hardware integration tests are gated on this flag so they run only on
+    actual RPi hardware and remain valid no-ops when the flag is unset.
+
+    :return: True when ``os.environ["PI_LORA_HARDWARE"] == "1"``.
+    """
+    return os.environ.get("PI_LORA_HARDWARE", "0") == "1"
+
+
+def spidev_available() -> bool:
+    """Return True when the real ``spidev`` Cython extension is importable.
+
+    :return: True if ``import spidev`` succeeds.
+    """
+    try:
+        import spidev  # noqa: F401
+
+        return True
+    except ImportError:
+        return False
+
+
+class FakeSpiBusKernelFactory:
+    """Produces a ``RealSpiBus`` wired to a fake ``spidev`` kernel SPI.
+
+    The factory builds a real :class:`RealSpiBus`, then opens it inside
+    :func:`spidev_kernel_patch` so ``RealSpiBus.open`` exercises the genuine
+    ``import spidev`` / ``spidev.SpiDev()`` / ``.open()`` path with a
+    :class:`FakeSpiDev` kernel instead of the real Cython extension. This
+    exercises the ``RealSpiBus -> spidev -> kernel SPI`` chain end-to-end.
+
+    The factory is a context-manager factory: :meth:`create_bus` must be used
+    inside a ``with`` block so the ``spidev`` patch stays active for the bus's
+    whole lifetime and the bus is closed on block exit.
+    """
+
+    @contextmanager
+    def create_bus(self, bus: int, device: int, module_type: str = "rfm95w") -> Iterator[RealSpiBus]:
+        """Yield an opened ``RealSpiBus`` whose ``_spidev`` is a :class:`FakeSpiDev`.
+
+        The ``spidev`` patch remains active for the entire duration the bus is
+        yielded, so any ``import spidev`` performed by ``RealSpiBus`` / ``xfer2``
+        resolves to the injected fake module. The bus is closed on block exit.
+
+        Args:
+            bus: The bus identifier.
+            device: The device identifier.
+            module_type: Type of module to simulate ("rfm95w", "rfm98w", "multi_band", "none").
+                Defaults to "rfm95w" for backward compatibility.
+
+        Yields:
+            An opened ``RealSpiBus`` whose ``_spidev`` is the fake kernel while
+            the ``spidev`` patch is active.
+        """
+        from pi_lora.drivers.spi.bus import RealSpiBus
+        from tests.fakes import create_fake_spi_dev, spidev_kernel_patch
+
+        bus_instance: RealSpiBus = RealSpiBus(
+            bus_number=bus, device_number=device, factory_owned=True
+        )
+        fake_kernel = create_fake_spi_dev(module_type=module_type)
+        with spidev_kernel_patch(fake_kernel):
+            bus_instance.open()
+            try:
+                yield bus_instance
+            finally:
+                bus_instance.close()
