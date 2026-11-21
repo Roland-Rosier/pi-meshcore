@@ -9,7 +9,7 @@ alwaysApply: true
 * **Arch**: Qwen3 native reasoning. Optimized for deep planning and multi-turn tool precision.
 
 ### File Header Protocol
-* **Headers**: Prepend metadata/licenses with the native `single_find_and_replace` tool.
+* **Headers**: When prepending metadata or licenses to a file, modify only the top of the file. 
 * **Anchor Strategy**: Use the absolute first line of the target file as your anchor string. 
 * **Constraint**: Do **NOT** rewrite the entire file to insert headers.
 

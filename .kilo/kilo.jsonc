@@ -2,10 +2,10 @@
   "$schema": "https://app.kilo.ai/config.json",
   "instructions": [
     ".kilo/rules/01-strict-tool-calls.md",
-    ".kilo/rules/02-system-constraints.md",
+    ".kilo/rules/02-system-constraints.md"
     // ".kilo/rules/03-execution-protocol.md",
-    ".kilo/rules/04-use-desktop-commander-mcp.md",
-    ".kilo/rules/05-use-native-edit-tools.md"
+    // ".kilo/rules/04-use-desktop-commander-mcp.md", // Not suited for kilo code; will need re-writing if required.
+    // ".kilo/rules/05-use-native-edit-tools.md" // Not suited for kilo code; will need re-writing if required.
   ],
   "agent": {
     "code": {
@@ -33,11 +33,13 @@
       ],
       "permission": {
         "edit": {
+          ".plans/*.md": "allow",         // Directly allows writing/modifying in this directory
           ".plans/**/*.md": "allow",      // Directly allows writing/modifying in this directory
           ".kilo/plans/**/*.md": "allow", // Retains default behaviour
           "*": "deny"                     // Categorically blocks this agent from editing anything else
         },
         "write": {
+          ".plans/*.md": "allow",         // Directly allows writing/modifying in this directory
           ".plans/**/*.md": "allow",      // Directly allows writing/modifying in this directory
           ".kilo/plans/**/*.md": "allow", // Retains default behaviour
           "*": "deny"                     // Categorically blocks this agent from writing anything else
@@ -53,11 +55,13 @@
       ],
       "permission": {
         "edit": {
+          ".plans/*.md": "allow",         // Directly allows writing/modifying in this directory
           ".plans/**/*.md": "allow",      // Directly allows writing/modifying in this directory
           ".kilo/plans/**/*.md": "allow", // Retains default behaviour
           "*": "deny"                     // Categorically blocks this agent from editing anything else
         },
         "write": {
+          ".plans/*.md": "allow",         // Directly allows writing/modifying in this directory
           ".plans/**/*.md": "allow",      // Directly allows writing/modifying in this directory
           ".kilo/plans/**/*.md": "allow", // Retains default behaviour
           "*": "deny"                     // Categorically blocks this agent from writing anything else
