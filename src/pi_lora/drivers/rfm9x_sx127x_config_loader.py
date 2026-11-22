@@ -172,14 +172,9 @@ async def get_preloaded_config(
         The sync ``load_config()`` always reads from disk and does not use the
         internal cache. This async coroutine caches the default config on first
         load; use ``force_reload=True`` to bypass the cache and refresh from disk.
-        When ``config_path`` is provided, the cache is bypassed but only updated
-        if ``force_reload=True``.
-    # PLAN-12 FIX (Item 4a): The misleading note implied sync `load_config()` had a
-    # `force_reload` parameter. Root cause: `force_reload` was removed from
-    # `load_config()` in Plan-12 (KNOWN_DEFECTs.md §5.7 API asymmetry), so the old
-    # note described a non-existent parameter. The corrected note documents the actual
-    # contract: sync always reads from disk; async caches on first load. Prevents the
-    # docstring from misleading callers into passing an invalid keyword.
+        When ``config_path`` is provided, the loaded configuration updates the
+        internal cache so subsequent calls without ``config_path`` return the
+        freshly loaded config.
     """
     global _config_cache
 
@@ -192,14 +187,23 @@ async def get_preloaded_config(
 
     # SINGLE CODE PATH — no init/else branches, no sentinel race possible
     async with config_lock:
+        # Fast-path: return cached default if no override requested
         if _config_cache is not None and not force_reload and config_path is None:
             return _config_cache
 
+        # Determine config to load
         if config_path is not None:
             config = load_config(config_path=config_path)
-            if force_reload:
-                _config_cache = config
-            return config
+        else:
+            config = load_config()
 
-        _config_cache = load_config()
-        return _config_cache
+        # Update cache if: force_reload requested OR cache empty OR config_path provided
+        # PLAN-2 FIX (Cache Coherence): config_path loads now update _config_cache.
+        # Previously, custom config_path bypassed cache (KNOWN_DEFECTs §3.1), causing
+        # subsequent default loads to return stale data. Now any explicit config load
+        # refreshes the singleton cache. Callers: Application uses own cache layer,
+        # radio_instance uses no-args only. Safe to update globally.
+        if force_reload or _config_cache is None or config_path is not None:
+            _config_cache = config
+
+        return config

@@ -148,40 +148,35 @@ class TestGetPreloadedConfig:
 
     @pytest.mark.asyncio
     async def test_config_path_and_cache_concurrent_consistency(self) -> None:
-        """PLAN-25 FIX (Issue 24.1): concurrent mixed config_path/cache calls stay consistent.
+        """PLAN-2 FIX (Cache Coherence): config_path loads refresh the module cache.
 
-        Runs many ``get_preloaded_config`` calls with and without ``config_path``
-        concurrently. Every cache access is serialized through ``_config_lock``,
-        so callers that omit ``config_path`` must all receive one shared cached
-        instance, and callers that supply ``config_path`` must all receive one
-        shared path-loaded instance. This proves the config_path branch and the
-        cache-load fallback are no longer read outside the lock.
+        Runs concurrent ``config_path`` calls (each loads fresh from path and
+        refreshes ``_config_cache``), then concurrent no-``config_path`` calls.
+        Every no-``config_path`` caller must receive the same refreshed singleton
+        instance, proving the cache is serialized through ``_config_lock`` and
+        reflects the latest explicit load. Under the Plan-2 contract a
+        ``config_path`` load refreshes the singleton, so the two phases cannot be
+        interleaved: the cache state depends on execution order.
         """
         override_path: Path = Path(
             "/home/rpiuser/TestMeshcore/src/pi_lora/drivers/configs/rfm9x_sx127x_config.yaml"
         )
-        mix: list[object] = []
-        for _ in range(25):
-            mix.append(get_preloaded_config())
-            mix.append(get_preloaded_config(config_path=override_path))
-        results: list[Rfm9xSx127xConfig] = await asyncio.gather(*mix)
 
-        cached = results[0::2]
-        pathed = results[1::2]
+        pathed = await asyncio.gather(
+            *[get_preloaded_config(config_path=override_path) for _ in range(25)]
+        )
+        assert all(isinstance(c, Rfm9xSx127xConfig) for c in pathed)
+        assert all(len(c.devices) > 0 for c in pathed)
 
-        assert all(isinstance(c, Rfm9xSx127xConfig) for c in results)
-        assert all(len(c.devices) > 0 for c in results)
-
+        cached = await asyncio.gather(
+            *[get_preloaded_config() for _ in range(25)]
+        )
+        assert all(isinstance(c, Rfm9xSx127xConfig) for c in cached)
         assert all(c is cached[0] for c in cached), (
-            "Every cache caller (no config_path) must receive the same cached instance; "
+            "Every no-config_path caller must receive the same refreshed singleton; "
             "cache accesses must be serialized under _config_lock."
         )
-        assert all(len(c.devices) > 0 for c in pathed), (
-            "Every config_path caller must receive a valid path-loaded instance."
-        )
-        assert cached[0] is not pathed[0], (
-            "The cached instance and the path-loaded instance must differ."
-        )
+        assert all(len(c.devices) > 0 for c in cached)
 
     def test_importlib_resources_resolution(self) -> None:
         """Test that default config path is resolved via importlib.resources."""
