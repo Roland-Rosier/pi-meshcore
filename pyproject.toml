@@ -85,9 +85,8 @@ dependencies = [
     # See H-6 FIX in src/pi_lora/drivers/spi/locks.py — no sync fallback by design.
     # PLAN-XX FIX (Item 1): Pin aiologic to 0.17.1, the <0.2 version that exposes
     # green_release (async_release/green_release SPI contract). 0.1.0 and 0.1.1
-    # both lack green_release; 0.17.1 is the working version the repo used. uv's
-    # resolver does not list 0.17.1 on current PyPI, so the exact pin relies on the
-    # already-installed version. Cross-reference: KNOWN_DEFECTs.md Section 5.1.
+    # both lack green_release; 0.17.1 is the working version the repo used.
+    # Available on PyPI (verified via uv.lock). Cross-reference: .plans/KNOWN_DEFECTS.md Section 5.1.
     "aiologic==0.17.1",
     # --- Optional: MeshCore protocol library ---
     # Uncomment the line below if you need MeshCore client/repeater functionality.
@@ -251,7 +250,7 @@ disable_error_code = ["has-type"]
 # getters max_speed_hz, mode, lsbfirst, no_cs (bus.py) are resolved via explicit
 # typing.cast annotations on those methods — aiologic/spidev lack stubs so the wrapped
 # values are Any. ignore_missing_imports is retained because aiologic/spidev still lack stubs.
-# Cross-reference: KNOWN_DEFECTs.md Section 6.
+# Cross-reference: .plans/KNOWN_DEFECTS.md Section 6.
 [[tool.mypy.overrides]]
 module = ["pi_lora.drivers.spi.bus", "pi_lora.drivers.spi.factory", "pi_lora.drivers.spi.locks"]
 ignore_missing_imports = true

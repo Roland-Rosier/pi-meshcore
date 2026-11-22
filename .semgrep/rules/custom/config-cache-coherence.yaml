@@ -1,0 +1,29 @@
+rules:
+  # Plan-2 FIX (Cache Coherence) anti-regression guard.
+  #
+  # Detects the KNOWN_DEFECTs §3.1 defective shape: a `config_path` branch that
+  # loads the config and returns it directly while only updating _config_cache
+  # under a bare `force_reload:` guard. That shape leaves the singleton cache on
+  # the stale default for subsequent no-config_path calls.
+  #
+  # The correct post-fix shape (see rfm9x_sx127x_config_loader.py) unifies the
+  # load path (config_path / else default) and refreshes _config_cache when
+  # `force_reload` OR the cache is empty OR `config_path` was provided, so any
+  # explicit config load refreshes the singleton. This rule flags only the
+  # defective reintroduction; the fixed code does not match.
+  - id: config-cache-coherence-guard
+    languages:
+      - python
+    severity: ERROR
+    message: >-
+      config_path load must update _config_cache (Plan-2 fix). A config_path
+      branch that returns the loaded config without a cache update that includes
+      the "config_path is not None" condition reintroduces KNOWN_DEFECTs §3.1:
+      subsequent no-config_path calls would return the stale default.
+    patterns:
+      - pattern: |
+          if $CONFIG_PATH is not None:
+              $CONFIG = load_config(config_path=$CONFIG_PATH)
+              if force_reload:
+                  _config_cache = $CONFIG
+              return $CONFIG
