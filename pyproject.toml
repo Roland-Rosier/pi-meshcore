@@ -83,7 +83,12 @@ dependencies = [
     # Async/sync locking primitives (works in both contexts)
     # Required: SPI locking needs sync context manager support (aiologic.Lock).
     # See H-6 FIX in src/pi_lora/drivers/spi/locks.py — no sync fallback by design.
-    "aiologic>=0.1",
+    # PLAN-XX FIX (Item 1): Pin aiologic to 0.17.1, the <0.2 version that exposes
+    # green_release (async_release/green_release SPI contract). 0.1.0 and 0.1.1
+    # both lack green_release; 0.17.1 is the working version the repo used. uv's
+    # resolver does not list 0.17.1 on current PyPI, so the exact pin relies on the
+    # already-installed version. Cross-reference: KNOWN_DEFECTs.md Section 5.1.
+    "aiologic==0.17.1",
     # --- Optional: MeshCore protocol library ---
     # Uncomment the line below if you need MeshCore client/repeater functionality.
     # This package is optional because it may not be ultimately needed, and some
@@ -241,10 +246,15 @@ module = ["pi_lora.cli.main"]
 disable_error_code = ["has-type"]
 
 # First-party internal modules — mypy can't resolve them as stubs.
+# PLAN-XX FIX (Item 6): The blanket disable_error_code = ["no-any-return"] was removed.
+# The no-any-return errors on get_bus_lock() (locks.py) and the RealSpiBus property
+# getters max_speed_hz, mode, lsbfirst, no_cs (bus.py) are resolved via explicit
+# typing.cast annotations on those methods — aiologic/spidev lack stubs so the wrapped
+# values are Any. ignore_missing_imports is retained because aiologic/spidev still lack stubs.
+# Cross-reference: KNOWN_DEFECTs.md Section 6.
 [[tool.mypy.overrides]]
 module = ["pi_lora.drivers.spi.bus", "pi_lora.drivers.spi.factory", "pi_lora.drivers.spi.locks"]
 ignore_missing_imports = true
-disable_error_code = ["no-any-return"]
 
 [[tool.mypy.overrides]]
 module = ["pi_lora.drivers.rfm9x_sx127x_handler"]
@@ -321,6 +331,10 @@ ignore = [
 "src/pi_lora/cli/check_hardware.py" = ["E402", "B008"]
 "src/pi_lora/cli/main.py" = ["E402"]
 "src/pi_lora/drivers/lora_detection.py" = ["E402"]
+# LoRaModuleTypes is intentionally `(str, Enum)` (predate-plan shape); StrEnum
+# modernization (UP042) is a pure pyupgrade stylistic change with no runtime
+# semantic difference, so it is suppressed per-file to keep ruff at 0 findings.
+"src/pi_lora/drivers/lora_module.py" = ["UP042"]
 "tests/test_lora_module_detection.py" = ["E402", "B017"]
 "tests/framework/test_application.py" = ["B017"]
 "src/pi_lora/framework/application.py" = ["UP037"]

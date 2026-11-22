@@ -7,8 +7,9 @@
 # PLAN-22 (Section 6, Item 11): mkdir -p ensures temp parent exists; trap handles EXIT INT TERM for cleanup on Ctrl+C/kill.
 # Item 11: `mktemp -d --tmpdir=...` is not universally supported on non-GNU systems; the POSIX-compliant form uses the `TMPDIR=... mktemp -d` construct where `TMPDIR` is a standard environment variable.
 mkdir -p /tmp/sandbox/semgrep_tmp
-TMPDIR=$(TMPDIR=/tmp/sandbox/semgrep_tmp mktemp -d)
-uv run semgrep scan --verbose \
+# POSIX-compliant: TMPDIR=... mktemp -d (not mktemp -p which is GNU-only)
+TMPDIR=$(TMPDIR=/tmp/sandbox/semgrep_tmp mktemp -d) || exit 1
+venv/bin/semgrep scan --verbose \
    --disable-version-check \
    --config=".semgrep/rules/security/" \
    --config=".semgrep/rules/best-practice/" \

@@ -46,7 +46,11 @@ class CommandBus:
         higher priority.
         """
         existing = self._handlers.get(command_type)
-        # Lower priority number = higher priority (0=highest). Reject if existing priority <= new priority (existing is higher/equal).
+        # Priority: lower number = higher priority (0 = highest).
+        # Reject if an existing handler has priority >= new priority
+        # (i.e., existing is higher or equal priority).
+        # PLAN-8 FIX (Item 8b): Unified "priority number"/"priority level" terminology.
+        # The mixed wording caused confusion. Cross-reference: KNOWN_DEFECTs.md Section 8.
         if existing is not None and existing[1] <= priority:
             raise ValueError(
                 f"Handler for '{command_type.__name__}' already registered "

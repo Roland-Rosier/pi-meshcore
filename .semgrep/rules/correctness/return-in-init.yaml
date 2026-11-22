@@ -12,11 +12,17 @@ rules:
               ...
               def $F(...):
                   ...
+      - pattern-not-inside: |
+          defaultdict(...)
       - patterns:
           - pattern: return ...
           - pattern-not: return
           - pattern-not: return None
-    message: "`return` should never appear inside a class __init__ function. This will cause a runtime error."
+    message: >-
+      `return` should never appear inside a class __init__ function. This will
+      cause a runtime error. Factory lambdas passed to defaultdict (e.g.
+      `defaultdict(lambda: deque(...))`) are valid and excluded via
+      pattern-not-inside; they are not return statements.
     languages: [python]
     severity: ERROR
     metadata:

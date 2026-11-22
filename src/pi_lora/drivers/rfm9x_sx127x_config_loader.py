@@ -16,7 +16,6 @@
 
 from __future__ import annotations
 
-import importlib
 import importlib.resources
 from pathlib import Path
 
@@ -170,9 +169,17 @@ async def get_preloaded_config(
         A validated Rfm9xSx127xConfig instance.
 
     .. note::
-        Unlike the sync ``load_config()``, this async coroutine updates the
-        internal cache when ``force_reload=True``, so subsequent calls without
-        ``force_reload`` return the freshly loaded config.
+        The sync ``load_config()`` always reads from disk and does not use the
+        internal cache. This async coroutine caches the default config on first
+        load; use ``force_reload=True`` to bypass the cache and refresh from disk.
+        When ``config_path`` is provided, the cache is bypassed but only updated
+        if ``force_reload=True``.
+    # PLAN-12 FIX (Item 4a): The misleading note implied sync `load_config()` had a
+    # `force_reload` parameter. Root cause: `force_reload` was removed from
+    # `load_config()` in Plan-12 (KNOWN_DEFECTs.md §5.7 API asymmetry), so the old
+    # note described a non-existent parameter. The corrected note documents the actual
+    # contract: sync always reads from disk; async caches on first load. Prevents the
+    # docstring from misleading callers into passing an invalid keyword.
     """
     global _config_cache
 

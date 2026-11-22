@@ -226,10 +226,11 @@ class IdlePacer:
             now = time.monotonic()
             for module in list(self._idle_enabled_modules):
                 module_id = id(module)
-                # Scheduler fix: per-module exponential backoff (Phase 4, plan-4
-                # IdlePacer._idle_task CPU spin). See
-                # docs/plan_summaries/2026_10_08_hardening_spike.md 'Scheduler (Plans 4-38)'.
-                # Check backoff
+                # Per-module exponential backoff: if this module's queue was full,
+                # skip IDLE delivery until backoff window expires (bounds log spam).
+                # PLAN-8 FIX (Item 8a): Replaced internal planning jargon ("Phase 4, plan-4")
+                # with a functional description. The vague comment obscured what/why.
+                # Cross-reference: KNOWN_DEFECTs.md Section 8.
                 if module_id in self._backoff_until and now < self._backoff_until[module_id]:
                     continue
 
