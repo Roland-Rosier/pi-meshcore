@@ -10,11 +10,14 @@ However, it has pivoted to attempt to use the radio transceivers in more of a li
 
 ## Project Overview
 
-This implementation includes:
-- **MeshCore Protocol**: Client/Repeater implementation using [meshcore_py](https://github.com/meshcore-dev/meshcore_py)
-- **LoRa Drivers**: SPI drivers for RFM95W (868MHz) and RFM98W (434MHz)
-- **Web Interface**: FastAPI-based dashboard for status monitoring and configuration
-- **CLI Tools**: Command-line interface for hardware checks and configuration
+This implementation **currently includes**:
+- **LoRa Drivers**: SPI drivers for RFM95W (868MHz) and RFM98W (434MHz) with auto-detection
+- **Framework**: Application lifecycle, command bus, scheduler, module manager, SPI lock abstraction
+- **CLI Tools**: `check-hardware` (detection/validation), `pi-lora-config` (configuration), `pi-lora-test` (test utilities)
+
+**Planned / Not Yet Implemented:**
+- **MeshCore Protocol**: Client/Repeater implementation (optional dependency `meshcore>=2.3` available but not integrated)
+- **Web Interface**: FastAPI-based dashboard (optional dependency `fastapi>=0.115`, `uvicorn>=0.34` available but not implemented)
 
 ---
 
@@ -118,26 +121,24 @@ uv remove <package-name>
 
 ## Software Architecture
 
-### Core Components
-1. **MeshCore Implementation**
-   - Client mode
-   - Repeater mode
-   - Implements MeshCore API ([meshcore_py](https://github.com/meshcore-dev/meshcore_py))
+## Software Architecture (UPDATED)
 
-2. **Command Line Interface (CLI)**
-   - Hardware checks
-   - Configuration management
-   - Status monitoring
+### Core Components (IMPLEMENTED)
+1. **LoRa Driver Layer** (`src/pi_lora/drivers/`)
+2. **Framework Infrastructure** (`src/pi_lora/framework/`)
+3. **CLI Layer** (`src/pi_lora/cli/`)
 
-3. **Web Interface**
-   - FastAPI-based API endpoint
-   - Real-time status dashboard
-   - Configuration UI
+### Core Components (PLANNED)
+4. **MeshCore Protocol** (`src/pi_lora/meshcore/`) — Not started
+5. **Web Interface** (`src/pi_lora/web/`) — Not started
 
-4. **Communication Protocols**
-   - Over-The-Air (OTA) protocol ([MeshCore spec](https://github.com/meshcore-dev/MeshCore))
-   - LoRaWAN (Class A) for RFM95W/RFM98W modules
-   - EU LoRa duty cycle compliance enforced
+### Ambition
+6. Fully implements a CLI with hardware checks, configuration management and status monitoring.
+7. Able to communicate via the (WHAD)[https://whad.io/] protocol.
+8. Implements MeshCore API ([meshcore_py](https://github.com/meshcore-dev/meshcore_py)) as a Client and Repeater mode.
+9. Over-The-Air (OTA) protocol ([MeshCore spec](https://github.com/meshcore-dev/MeshCore))
+10. Web Interface, with FastAPI-based API endpoint, real-time status dashboard and a configuration UI
+11. EU LoRa duty cycle compliance: **Not yet implemented** — tracked as deferred item (see docs/coding_culture.md)"
 
 ---
 
@@ -163,16 +164,8 @@ uv remove <package-name>
 ## Project Structure
 
 ```
-├── .continue/                        # Continue.dev agent configuration
-│   ├── get_tree.py                   # Tree structure retrieval script for agent workflows
-│   ├── mcpServers/
-│   │   └── desktop-commander-mcp.yaml  # MCP server config for Desktop Commander integration
-│   └── rules/
-│       ├── 01-system-constraints.md    # Global system constraints and safety modes
-│       ├── 02-execution-protocol.md      # Phase-based execution protocol guidelines
-│       ├── 03-use-desktop-commander-mcp.md # Desktop Commander MCP tool usage rules
-│       └── 04-use-native-edit-tools.md   # Native file editing tool (single_find_and_replace) rules
-├── .kilo/                              # Kilo agent configuration directory
+├── .continue/                        # Continue.dev agent configuration (obsolete)
+├── .kilo/                            # Kilo agent configuration directory
 │   ├── agents/
 │   │   ├── architectreviewer.md      # Architect reviewer agent configuration
 │   │   ├── repo_analyst.md           # Repository analysis agent configuration
