@@ -9,7 +9,7 @@
 mkdir -p /tmp/sandbox/semgrep_tmp
 # POSIX-compliant: TMPDIR=... mktemp -d (not mktemp -p which is GNU-only)
 TMPDIR=$(TMPDIR=/tmp/sandbox/semgrep_tmp mktemp -d) || exit 1
-venv/bin/semgrep scan --verbose \
+uv run semgrep scan --verbose \
    --disable-version-check \
    --config=".semgrep/rules/security/" \
    --config=".semgrep/rules/best-practice/" \
