@@ -18,7 +18,7 @@ import asyncio
 import contextvars
 import logging
 import math
-from typing import Any, Protocol
+from typing import Any, Protocol, cast
 
 from .locks import get_bus_lock
 
@@ -400,7 +400,11 @@ class RealSpiBus:
         Check `max_speed_hz > 0` to determine if the bus is open and configured.
         """
         if self._spidev is not None:
-            return self._spidev.max_speed_hz
+            # PLAN-XX FIX (Item 6): Explicit return type instead of blanket no-any-return suppression.
+            # max_speed_hz returned Any because spidev.SpiDev lacks stubs, so self._spidev.max_speed_hz is Any.
+            # Explicit cast(int, ...) fixes it.
+            # Cross-reference: KNOWN_DEFECTs.md Section 6.
+            return cast(int, self._spidev.max_speed_hz)
         return 0  # Safe default: unconfigured
 
     @max_speed_hz.setter
@@ -426,7 +430,11 @@ class RealSpiBus:
     def mode(self) -> int:
         """SPI mode setting. Returns 0 if bus not opened."""
         if self._spidev is not None:
-            return self._spidev.mode
+            # PLAN-XX FIX (Item 6): Explicit return type instead of blanket no-any-return suppression.
+            # mode returned Any because spidev.SpiDev lacks stubs, so self._spidev.mode is Any.
+            # Explicit cast(int, ...) fixes it.
+            # Cross-reference: KNOWN_DEFECTs.md Section 6.
+            return cast(int, self._spidev.mode)
         return 0
 
     @mode.setter
@@ -452,7 +460,11 @@ class RealSpiBus:
     def lsbfirst(self) -> bool:
         """Whether least significant bit comes first. Returns False if bus not opened."""
         if self._spidev is not None:
-            return self._spidev.lsbfirst
+            # PLAN-XX FIX (Item 6): Explicit return type instead of blanket no-any-return suppression.
+            # lsbfirst returned Any because spidev.SpiDev lacks stubs, so self._spidev.lsbfirst is Any.
+            # Explicit cast(bool, ...) fixes it.
+            # Cross-reference: KNOWN_DEFECTs.md Section 6.
+            return cast(bool, self._spidev.lsbfirst)
         return False
 
     @lsbfirst.setter
@@ -478,7 +490,11 @@ class RealSpiBus:
     def no_cs(self) -> bool:
         """Whether chip select is disabled. Returns False if bus not opened."""
         if self._spidev is not None:
-            return self._spidev.no_cs
+            # PLAN-XX FIX (Item 6): Explicit return type instead of blanket no-any-return suppression.
+            # no_cs returned Any because spidev.SpiDev lacks stubs, so self._spidev.no_cs is Any.
+            # Explicit cast(bool, ...) fixes it.
+            # Cross-reference: KNOWN_DEFECTs.md Section 6.
+            return cast(bool, self._spidev.no_cs)
         return False
 
     @no_cs.setter

@@ -76,7 +76,7 @@ class Rfm9xSx127xModule:
         self._stop_mode: StopMode = StopMode.DRAIN
         self._paused: bool = False
         self._event_buffer: dict[EventType, deque[ModuleEvent[Any]]] = defaultdict(
-             lambda: deque(maxlen=1000)  # nosemgrep: correctness.return-in-init
+             lambda: deque(maxlen=1000)
          )
         self._event_waiters: dict[EventType, list[_EventWaiter]] = defaultdict(list)
 
@@ -283,7 +283,12 @@ class Rfm9xSx127xModule:
         try:
             try:
                 await asyncio.wait_for(waiter.event.wait(), timeout=timeout)
-            except asyncio.TimeoutError:  # PLAN-19: Use asyncio.TimeoutError explicitly (not builtin TimeoutError alias) for clarity in async context.
+            except asyncio.TimeoutError:  # Python 3.11+: asyncio.TimeoutError is the builtin TimeoutError
+            # PLAN-12 FIX (Item 4b): The prior comment asserted `asyncio.TimeoutError` is a
+            # distinct alias of builtin `TimeoutError`. Root cause: since Python 3.11 they
+            # are the same object (KNOWN_DEFECTs.md §4.6). Project requires >=3.11, so the
+            # explicit `asyncio.TimeoutError` is correct but the comment was stale. Updated
+            # to state the aliasing truth so future edits don't reintroduce the misconception.
                 return None
             return waiter.result
         finally:

@@ -15,8 +15,8 @@
 """Tests for the RFM9x/SX127x config loader singleton cache and force_reload.
 
 The loader exposes a module-level ``_config_cache`` that ``get_preloaded_config``
-populates on first load and shares across concurrent calls. ``force_reload=True``
-with an explicit ``config_path`` (Plan-19 Fix 4) updates that cache, so a
+populates on first load and shares across concurrent calls. Any call with an
+explicit ``config_path`` or ``force_reload=True`` updates the cache, so a
 subsequent non-forced call returns the freshly loaded configuration instead of
 the stale default. Module-level globals are read through the module object, never
 through ``from``-imports, which would bind a stale value.
@@ -177,6 +177,52 @@ async def test_config_loader_full_lifecycle() -> None:
         assert third is second
         assert third != first
         assert _device_name(third, "rfm95") == "CUSTOM95"
+    finally:
+        _loader._config_cache = _original_cache
+
+
+@pytest.mark.asyncio
+async def test_config_loader_config_path_updates_cache() -> None:
+    """config_path load (without force_reload) updates module-level cache.
+
+    This tests the fix for KNOWN_DEFECTs §3.1: previously a custom config_path
+    would not update _config_cache, causing subsequent default loads to return
+    stale data. Now any explicit config_path load refreshes the singleton cache.
+    """
+    from contextlib import suppress
+    from pathlib import Path
+
+    import pi_lora.drivers.rfm9x_sx127x_config_loader as _loader
+
+    _original_cache = _loader._config_cache
+    _loader._config_cache = None
+
+    try:
+        # 1. Load default config (populates cache)
+        first = await _loader.get_preloaded_config()
+        assert isinstance(first, Rfm9xSx127xConfig)
+        assert _device_name(first, "rfm95") == "RFM95"
+
+        # 2. Load custom config via config_path (WITHOUT force_reload)
+        custom_yaml: str = _make_custom_yaml("CUSTOM95")
+        custom_path: Path = Path("/tmp/sandbox/config_loader_custom.yaml")
+        with suppress(OSError):
+            custom_path.write_text(custom_yaml)
+
+        try:
+            second = await _loader.get_preloaded_config(config_path=custom_path)
+        finally:
+            with suppress(OSError):
+                custom_path.unlink()
+
+        # 3. Load default again (no args) — should return custom, not stale default
+        third = await _loader.get_preloaded_config()
+
+        # Cache should now hold the custom config
+        assert third is second
+        assert third != first
+        assert _device_name(third, "rfm95") == "CUSTOM95"
+        assert _loader._config_cache is second
     finally:
         _loader._config_cache = _original_cache
 

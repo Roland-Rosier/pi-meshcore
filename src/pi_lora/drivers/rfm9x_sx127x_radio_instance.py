@@ -22,6 +22,7 @@ from typing import NamedTuple
 
 from pi_lora.drivers.rfm9x_sx127x_config_model import (
     DeviceConfig,
+    FamilyConfig,
     Rfm9xSx127xConfig,
 )
 
@@ -229,24 +230,32 @@ def _create_radio_instance_core(
     dio_gpio_mappings: tuple[str, ...] = tuple(dio_gpio_mappings_list)
 
     # 4. Get device spec
-    device_spec: DeviceConfig | None = None
-    for _key, spec in config.devices.items():
-        if spec.name == device_name:
-            device_spec = spec
-            break
+    # PLAN-05 FIX (Item 5): Build O(1) lookup indexes instead of O(n) linear scans.
+    # The device spec lookup was an O(n) linear scan over config.devices.items().
+    # Precomputed index gives O(1) lookup; None-on-no-match behavior preserved.
+    # Cross-reference: KNOWN_DEFECTs.md Section 1.
+    device_by_name: dict[str, DeviceConfig] = {}
+    for spec in config.devices.values():
+        if spec.name not in device_by_name:
+            device_by_name[spec.name] = spec
+    device_spec: DeviceConfig | None = device_by_name.get(device_name)
 
     if device_spec is None:
         raise DeviceSpecNotFoundError(device_name)
 
     # 5. RESOLVE FAMILY: Reverse lookup (device → family) — NOT device_spec.family_name
-    matching_families = [
-        fam for fam in config.families.values()
-        if device_spec.name in fam.devices
-    ]
-    if not matching_families:
+    # PLAN-05 FIX (Item 5): Build O(1) reverse index instead of O(n) linear scan over
+    # config.families.values(). First-match-wins tie-break preserved via guard;
+    # FamilyNotFoundError behavior on no-match preserved.
+    # Cross-reference: KNOWN_DEFECTs.md Section 1.
+    family_by_device: dict[str, FamilyConfig] = {}
+    for fam in config.families.values():
+        for dev_name in fam.devices:
+            if dev_name not in family_by_device:
+                family_by_device[dev_name] = fam
+    family_config: FamilyConfig | None = family_by_device.get(device_spec.name)
+    if family_config is None:
         raise FamilyNotFoundError(device_spec.name)
-    # Tie-break: first match (documented contract)
-    family_config = matching_families[0]
 
     # 6. Get antenna config from assembly.devices["spi:ce"]
     antenna_type: str | None = None
@@ -306,11 +315,15 @@ async def create_radio_instance(
 ) -> RadioInstanceConfig:
     """Resolve and aggregate configuration for a single radio instance.
 
-    CR-2 FIX (async wrapper): This is the async wrapper around the sync core
-    ``_create_radio_instance_core``. When ``config`` is None it auto-loads the
-    preloaded default config via ``get_preloaded_config()`` (available in async
-    context per H-7). Callers that must stay synchronous should instead load
-    config via ``load_config()`` and call ``create_radio_instance_sync()``.
+    Async wrapper around the sync core ``_create_radio_instance_core``.
+    When ``config`` is None, auto-loads the preloaded default config via
+    ``get_preloaded_config()``. Synchronous callers must load config explicitly
+    via ``load_config()`` and use ``create_radio_instance_sync()``.
+    # PLAN-12 FIX (Item 4c): The prior docstring mixed implementation history
+    # (CR-2 FIX, "per H-7") into the API contract. Root cause: docstring referenced
+    # stale plan identifiers instead of describing the public contract
+    # (KNOWN_DEFECTs.md §5.9 async wrapper). Rewritten to focus on the API contract so
+    # callers get correct guidance without stale internal history.
 
     Args:
         assembly_name: Assembly identifier (e.g., "default").

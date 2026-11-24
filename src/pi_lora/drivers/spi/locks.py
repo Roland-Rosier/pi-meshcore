@@ -16,7 +16,7 @@ from __future__ import annotations
 
 import sys
 import threading
-from typing import Any, Protocol, Self
+from typing import Any, Protocol, Self, cast
 
 from pi_lora.framework.lazy_async_lock import LazyAsyncLock
 
@@ -140,7 +140,11 @@ async def get_bus_lock(bus_number: int) -> SpiLock:
     async with registry_lock:
         if bus_number not in _bus_locks:
             _bus_locks[bus_number] = _aiologic_module.Lock()
-        return _bus_locks[bus_number]
+        # PLAN-XX FIX (Item 6): Explicit return type instead of blanket no-any-return suppression.
+        # get_bus_lock returned Any because _bus_locks is dict[int, Any] and aiologic.Lock lacks stubs,
+        # so _bus_locks[bus_number] is Any. Explicit cast(SpiLock, ...) fixes it.
+        # Cross-reference: KNOWN_DEFECTs.md Section 6.
+        return cast(SpiLock, _bus_locks[bus_number])
 
 
 def _verify_single_registry() -> None:

@@ -1,14 +1,13 @@
 # MeshCore Pi4 LoRa Implementation Profile
 
 ## 1. Project Context Reference
-- **Goal**: Build MeshCore Client/Repeater on RPi 4 with Uputronics LoRa Hat.
-- **Stack**: Python 3.9+, FastAPI, SPI Drivers, `pytest`.
-- **Install Target**: Official PyPI package is `pi_lora`.
+- **Goal**: Build LoRa driver framework + CLI on RPi 4 with Uputronics LoRa Hat.
+- **Stack**: Python 3.11+, SPI Drivers, `pytest`, `typer`/`async-typer`.
+- **Install Target**: Official PyPI package is `pi-lora` (distribution name); import path is `pi_lora`.
 - **Directory Layout**:
-  - `src/pi_lora/drivers/` (e.g. RFM95W/RFM98W radio drivers, in file lora_module.py)
-  - `src/pi_lora/meshcore/` (Protocol client/repeater logic)
-  - `src/pi_lora/cli/` (Command Line UI - meshtui style)
-  - `src/pi_lora/web/` (FastAPI web backend & dashboard)
+  - `src/pi_lora/drivers/` (RFM95W/RFM98W radio drivers: lora_module.py, lora_detection.py, config loader/validator)
+  - `src/pi_lora/framework/` (Application lifecycle, command bus, scheduler, module manager, lazy async lock)
+  - `src/pi_lora/cli/` (Command Line UI: check-hardware, config, test entry points)
   - `tests/` (Unit/integration) | `docs/` (Guides)
 
 ## 2. Hardware Specs & Pin Mapping
