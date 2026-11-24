@@ -4,6 +4,8 @@
 - **Goal**: Build LoRa driver framework + CLI on RPi 4 with Uputronics LoRa Hat.
 - **Stack**: Python 3.11+, SPI Drivers, `pytest`, `typer`/`async-typer`.
 - **Install Target**: Official PyPI package is `pi-lora` (distribution name); import path is `pi_lora`.
+- **Install Target**: Official PyPI package is `pi-lora` (distribution name, hyphen).
+- **Import Path**: `import pi_lora` (Python package, underscore).
 - **Directory Layout**:
   - `src/pi_lora/drivers/` (RFM95W/RFM98W radio drivers: lora_module.py, lora_detection.py, config loader/validator)
   - `src/pi_lora/framework/` (Application lifecycle, command bus, scheduler, module manager, lazy async lock)
