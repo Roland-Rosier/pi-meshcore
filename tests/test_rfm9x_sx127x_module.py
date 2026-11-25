@@ -26,6 +26,10 @@ from pi_lora.drivers.rfm9x_sx127x_modes import (
 )
 from pi_lora.drivers.rfm9x_sx127x_module import Rfm9xSx127xModule
 from pi_lora.drivers.rfm9x_sx127x_radio_instance import RadioInstanceConfig
+from pi_lora.framework.events import (
+    EventType,
+    is_state_change_event,
+)
 from tests.spi.mock import MockSpiBusFactory
 
 
@@ -254,3 +258,48 @@ class TestRfm9xSx127xModuleWithRadioConfig:
         module.spi_bus = spi_bus
         result: bool = await module.write_and_verify_frequency_for_khz(415000)
         assert result is True
+
+
+class TestUnknownStateAutoTransition:
+    """Fix #4 regression: UnknownState startup auto-transitions to RESET_STATE."""
+
+    def test_request_reset_transition_queues_state_change_event(self) -> None:
+        config = _make_radio_config()
+        module = Rfm9xSx127xModule(config, StateBits.FSK_OOK_SLEEP)
+        assert module.get_event_queue_size() == 0
+        module.request_reset_transition(reason="initial_reset")
+        event = module.event_queue.get_nowait()
+        assert event.event_type == EventType.STATE_CHANGE
+        assert event.source == "unknown_state_entry"
+        assert event.payload is not None
+        assert event.payload.new_state == StateBits.RESET_STATE
+        assert event.payload.reason == "initial_reset"
+
+    def test_init_with_unknown_state_queues_reset_event(self) -> None:
+        config = _make_radio_config()
+        module = Rfm9xSx127xModule(config, StateBits.UNKNOWN_STATE)
+        assert isinstance(module.current_state_instance, UnknownState)
+        assert module.get_event_queue_size() == 1
+        event = module.event_queue.get_nowait()
+        assert event.event_type == EventType.STATE_CHANGE
+        assert event.source == "unknown_state_entry"
+        assert event.payload is not None
+        assert event.payload.new_state == StateBits.RESET_STATE
+
+    @pytest.mark.asyncio
+    async def test_event_loop_reaches_reset_state(self) -> None:
+        config = _make_radio_config()
+        module = Rfm9xSx127xModule(config, StateBits.UNKNOWN_STATE)
+        await module.start_event_loop()
+        try:
+            event = await module.wait_for_event(
+                EventType.STATE_CHANGE,
+                lambda e: is_state_change_event(e)
+                and e.payload is not None
+                and e.payload.new_state == StateBits.RESET_STATE,
+                timeout=5.0,
+            )
+            assert event is not None
+            assert module.get_current_state_name() == "ResetState"
+        finally:
+            await module.stop_event_loop()

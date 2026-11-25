@@ -13,8 +13,6 @@ from pi_lora.drivers.rfm9x_sx127x_radio_instance import RadioInstanceConfig
 from pi_lora.framework.application import Application
 from pi_lora.framework.events import (
     EventType,
-    ModuleEvent,
-    StateChangeEvent,
     is_state_change_event,
 )
 from pi_lora.framework.exceptions import (
@@ -100,15 +98,17 @@ async def test_hardware_impl(
             console.print("[red]Error:[/red] No modules match the given SPI/CE filters")
             raise typer.Exit(code=1)
 
-        # Send STATE_CHANGE to RESET_STATE
-        reset_event = ModuleEvent[StateChangeEvent](
-            event_type=EventType.STATE_CHANGE,
-            payload=StateChangeEvent(new_state=StateBits.RESET_STATE, reason="test_hardware_command"),
-            source="cli_test_hardware",
-        )
-
-        for module in modules:
-            await module.event_queue.put(reset_event)
+        # PLAN-3 FIX (Issue 3): removed the manual STATE_CHANGE event construction and
+        # queueing block. Modules auto-transition to RESET_STATE on startup via
+        # rfm9x_sx127x_modes.UnknownState.on_entry() -> module.request_reset_transition(),
+        # so the CLI no longer sends the event itself. Root cause: the module now owns
+        # the reset transition, so a manual send would double-transition. Cross-reference:
+        # docs/plan_summaries/2026_10_08_hardening_spike.md (Plan-3).
+        #
+        # CR-34.3-2 / Plan-35: keep the wait_for_event loop -- it correctly replays
+        # buffered events to catch transitions that occurred during application.start(),
+        # so this loop now validates the automatic startup transition instead.
+        console.print("[cyan]Waiting for modules to auto-transition to RESET_STATE...[/cyan]")
 
         # Wait for all modules to confirm transition
         for module in modules:

@@ -33,7 +33,19 @@ from .rfm9x_sx127x_modes import Rfm9xSx127xMode, StateBitsMapping
 from .rfm9x_sx127x_radio_instance import RadioInstanceConfig
 from .spi.bus import SpiBus
 from .spi.factory import SpiBusFactory
-from ..framework.events import EventType, ModuleEvent, StopMode, is_state_change_event
+
+# PLAN-1 FIX (Issue 1): StateChangeEvent payload must be importable at module
+# level so request_reset_transition() can construct STATE_CHANGE events without
+# TYPE_CHECKING coupling. Root cause: StateChangeEvent was previously only
+# reachable via is_state_change_event() TypeGuard, not directly imported.
+# Cross-reference: framework/events.py StateChangeEvent, types.py StateBits.RESET_STATE
+from ..framework.events import (
+    EventType,
+    ModuleEvent,
+    StateChangeEvent,
+    StopMode,
+    is_state_change_event,
+)
 from ..types import LoraMode, ModeBits, StateBits
 
 logger = logging.getLogger(__name__)
@@ -65,13 +77,33 @@ class Rfm9xSx127xModule:
         self.ce_number: int = radio_config.ce_number
         self._spi_factory: SpiBusFactory | None = spi_factory
         self.spi_bus: SpiBus | None = None
-        self.current_state_instance: Rfm9xSx127xMode|None = self._create_state_instance(state)
+        # PLAN-1 FIX (Issue 1): Reorder so state_instances cache is built before the
+        # initial state entry hook runs. set_current_state() reads state_instances to
+        # resolve the mode class, so it must run AFTER _create_instances(). Root cause:
+        # the prior ordering set current_state_instance via a fresh _create_state_instance
+        # without firing on_entry(), leaving the initial state's entry hook un-invoked.
+        # Cross-reference: set_current_state() fires on_entry()/on_exit(); no concurrency
+        # in __init__, so no stale-read race is introduced here.
         self.state_instances: dict[type[Rfm9xSx127xMode], Rfm9xSx127xMode] = (
             self._create_instances()
         )
 
-        # Event loop infrastructure
+        # Event loop infrastructure — created before set_current_state() so
+        # UnknownState.on_entry() → request_reset_transition() can put_nowait() the
+        # RESET_STATE event safely during __init__ (before the event loop runs).
+        # Root cause: event_queue was previously created AFTER set_current_state(),
+        # which would raise AttributeError if the initial state is UNKNOWN_STATE.
+        # Cross-reference: request_reset_transition() uses self.event_queue.put_nowait().
         self.event_queue: asyncio.Queue[ModuleEvent[Any]] = asyncio.Queue()
+        # current_state_instance must exist before set_current_state() guards on it;
+        # the initial call has no prior state, so start from None. Root cause: the
+        # prior code set current_state_instance only inside _create_state_instance(),
+        # but set_current_state() reads self.current_state_instance in its guard,
+        # raising AttributeError on the first call. Cross-reference: set_current_state()
+        # (rfm9x_sx127x_module.py) assigns self.current_state_instance at the end.
+        self.current_state_instance: Rfm9xSx127xMode | None = None
+        self.set_current_state(state)
+
         self.event_loop_task: asyncio.Task[None] | None = None
         self._stop_mode: StopMode = StopMode.DRAIN
         self._paused: bool = False
@@ -132,6 +164,26 @@ class Rfm9xSx127xModule:
 
         self.current_state_instance = new_instance
         self.current_state_instance.on_entry(self)
+
+    # PLAN-1 FIX (Issue 1): Add request_reset_transition() so UnknownState.on_entry()
+    # can queue a RESET_STATE STATE_CHANGE event without importing EventType/StateChangeEvent
+    # into the state classes themselves (decoupling). Root cause: state classes previously
+    # could not emit reset transitions without coupling to event types.
+    # Cross-reference: framework/events.py ModuleEvent, EventType.STATE_CHANGE, StateChangeEvent;
+    # types.py StateBits.RESET_STATE.
+    def request_reset_transition(self, reason: str = "reset") -> None:
+        """Queue a STATE_CHANGE event to RESET_STATE.
+
+        Called by UnknownState.on_entry to avoid coupling state classes to event types.
+        Safe to call during __init__ (before event loop starts) — uses put_nowait().
+        """
+        reset_event = ModuleEvent(
+            event_type=EventType.STATE_CHANGE,
+            payload=StateChangeEvent(new_state=StateBits.RESET_STATE, reason=reason),
+            source="unknown_state_entry",
+        )
+        # Unbounded queue → put_nowait() never raises QueueFull
+        self.event_queue.put_nowait(reset_event)
 
     def is_in_state(self, state: StateBits) -> bool:
         """Return ``True`` when the current active instance matches *state*."""

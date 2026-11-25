@@ -285,9 +285,16 @@ class TestApplicationLifecycle:
 
         mod = app.module_manager.get_module(0, 0)
         assert mod is not None
-        assert not mod.event_queue.empty()
-        event = await mod.event_queue.get()
-        assert event.event_type == EventType.COMMAND
+        # Startup auto-transition (UNKNOWN_STATE -> RESET_STATE) queues a STATE_CHANGE
+        # event before the command; scan the queue for the COMMAND event rather than
+        # assuming it is the first element.
+        command_event: Any | None = None
+        while not mod.event_queue.empty():
+            queued_event = mod.event_queue.get_nowait()
+            if queued_event.event_type == EventType.COMMAND:
+                command_event = queued_event
+                break
+        assert command_event is not None
 
         await app.stop()
 

@@ -48,9 +48,15 @@ def mock_radio_config() -> MagicMock:
 
 @pytest.fixture
 def module(mock_radio_config: MagicMock) -> Any:
-    """Create a fresh Rfm9xSx127xModule instance."""
+    """Create a fresh Rfm9xSx127xModule instance.
+
+    Start in a settled non-UNKNOWN state so the startup auto-transition
+    (UNKNOWN_STATE -> RESET_STATE, exercised separately in
+    test_rfm9x_sx127x_module.py) does not queue an incidental STATE_CHANGE event
+    that would shift the queue or replace the mock_state spy during dispatch tests.
+    """
     Rfm9xSx127xModule = _get_module_class()
-    return Rfm9xSx127xModule(radio_config=mock_radio_config, state=StateBits.UNKNOWN_STATE)
+    return Rfm9xSx127xModule(radio_config=mock_radio_config, state=StateBits.FSK_OOK_SLEEP)
 
 
 @pytest.fixture

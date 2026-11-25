@@ -32,6 +32,13 @@ from typing import TYPE_CHECKING, Any
 if TYPE_CHECKING:
     from .rfm9x_sx127x_module import Rfm9xSx127xModule
     from ..framework.events import ModuleEvent
+    # ModuleEvent is referenced only in forward-quoted type hints and stays under
+    # TYPE_CHECKING so it is never imported at runtime. Root cause: the prior code
+    # left ModuleEvent undefined for mypy/ruff F821 while still avoiding a runtime
+    # import; UnknownState.on_entry() delegates the reset to
+    # module.request_reset_transition() instead of referencing
+    # EventType/StateChangeEvent/ModuleEvent at runtime. Cross-reference:
+    # rfm9x_sx127x_module.py request_reset_transition() (fix #1), framework/events.py.
 
 from ..types import LoraMode, MetaModeBits, ModeBits, StateBits
 
@@ -495,6 +502,13 @@ class UnknownState(Rfm9xSx127xMode):
 
     class _Constants(Enum):
         STATE_BITS = StateBits.UNKNOWN_STATE
+
+    # PLAN-02 FIX (Issue 2): UnknownState fires a reset on entry by delegating to module.request_reset_transition(). Root cause: state classes must not reference EventType/StateChangeEvent/ModuleEvent at runtime; the reset transition is a module context side-effect, not a state knowledge concern. Cross-reference: rfm9x_sx127x_module.py request_reset_transition() (fix #1), framework/events.py EventType.STATE_CHANGE, StateBits.RESET_STATE.
+    def on_entry(self, module: "Rfm9xSx127xModule") -> None:
+        """Called when entering UNKNOWN_STATE - request automatic reset via module."""
+        super().on_entry(module)  # Parent logs the entry
+        # Delegate transition side-effect to module context
+        module.request_reset_transition(reason="initial_reset")
 
 
 class ResetState(Rfm9xSx127xMode):

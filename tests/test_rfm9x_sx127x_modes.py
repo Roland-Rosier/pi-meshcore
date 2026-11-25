@@ -14,7 +14,9 @@
 
 """Tests for RFM9x/SX127x device mode classes."""
 
+import ast
 import asyncio
+import inspect
 from unittest.mock import MagicMock
 
 import pytest
@@ -358,6 +360,52 @@ class TestResetStateEventHandlers:
         module = _make_module()
         with pytest.raises(NotImplementedError):
             asyncio.run(state.on_interrupt(0, module))
+
+
+class TestUnknownStateDecoupling:
+    """Fix #4 decoupling: UnknownState delegates reset to module, no runtime import."""
+
+    def test_unknown_state_on_entry_requests_reset(self) -> None:
+        mode = UnknownState()
+        module = _make_module()
+        mode.on_entry(module)
+        module.request_reset_transition.assert_called_once_with(reason="initial_reset")
+
+    def test_modes_do_not_import_event_types_at_runtime(self) -> None:
+        import pi_lora.drivers.rfm9x_sx127x_modes as modes_module
+
+        tree = ast.parse(inspect.getsource(modes_module))
+        # TYPE_CHECKING blocks are erased at runtime; only imports OUTSIDE them execute.
+        # The decoupling guarantee is about *runtime* imports, so TYPE_CHECKING
+        # forward-reference imports must not be counted as runtime coupling.
+        guarded_ids: set[int] = set()
+        for node in ast.walk(tree):
+            if isinstance(node, ast.If) and getattr(node.test, "id", None) == "TYPE_CHECKING":
+                for body_node in ast.walk(node):
+                    guarded_ids.add(id(body_node))
+        imported_names: set[str] = set()
+        for node in ast.walk(tree):
+            if id(node) in guarded_ids:
+                continue
+            if isinstance(node, ast.Import):
+                for alias in node.names:
+                    imported_names.add(alias.name.split(".")[0])
+            elif isinstance(node, ast.ImportFrom):
+                for alias in node.names:
+                    imported_names.add(alias.name)
+
+        for forbidden in ("EventType", "StateChangeEvent", "ModuleEvent"):
+            assert forbidden not in imported_names, (
+                f"{forbidden} imported at runtime in rfm9x_sx127x_modes — decoupling broken"
+            )
+
+    def test_modes_namespace_exposes_no_event_types(self) -> None:
+        import pi_lora.drivers.rfm9x_sx127x_modes as modes_module
+
+        namespace = vars(modes_module)
+        assert "EventType" not in namespace
+        assert "StateChangeEvent" not in namespace
+        assert "ModuleEvent" not in namespace
 
 
 class TestStateBitsEnum:
