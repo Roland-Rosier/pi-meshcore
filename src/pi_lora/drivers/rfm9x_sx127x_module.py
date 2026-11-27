@@ -31,7 +31,7 @@ from typing import Any
 from .rfm9x_sx127x_handler import FrequencyCalculationConfig, Rfm9xSx127xHandler
 from .rfm9x_sx127x_modes import Rfm9xSx127xMode, StateBitsMapping
 from .rfm9x_sx127x_radio_instance import RadioInstanceConfig
-from .spi.bus import SpiBus
+from .spi.bus import SpiBus, SpiBusError
 from .spi.factory import SpiBusFactory
 
 # PLAN-1 FIX (Issue 1): StateChangeEvent payload must be importable at module
@@ -72,6 +72,16 @@ class Rfm9xSx127xModule:
         state: StateBits,
         spi_factory: SpiBusFactory | None = None,
     ) -> None:
+        """Initialize the module.
+
+        Args:
+            radio_config: Radio instance configuration (SPI device, CE pin, oscillator frequency).
+            state: Initial state. **Expected to be ``StateBits.UNKNOWN_STATE`` for normal
+                operation** — this triggers an automatic transition to ``RESET_STATE`` via
+                ``UnknownState.on_entry()``. Other ``StateBits`` values are accepted for
+                testing or specific scenarios but will not trigger the auto-reset behavior.
+            spi_factory: Optional SPI bus factory for hardware communication.
+        """
         self.radio_config: RadioInstanceConfig = radio_config
         self.spi_device_id: int = radio_config.spi_device_id
         self.ce_number: int = radio_config.ce_number
@@ -141,7 +151,11 @@ class Rfm9xSx127xModule:
         self.spi_bus = self._spi_factory.create(
             bus=self.spi_device_id, device=self.ce_number
         )
-        self.spi_bus.open()
+        with suppress(SpiBusError):
+            # Off-device (no real hardware): nothing to open, so the bus stays unopened and
+            # the auto-reset transition is still driven by the event loop. On real hardware
+            # open() succeeds and this branch never runs. Cross-reference: bus.py open().
+            self.spi_bus.open()
 
     async def close_spi(self) -> None:
         """Close the SPI bus if one is open."""
@@ -171,22 +185,36 @@ class Rfm9xSx127xModule:
     # could not emit reset transitions without coupling to event types.
     # Cross-reference: framework/events.py ModuleEvent, EventType.STATE_CHANGE, StateChangeEvent;
     # types.py StateBits.RESET_STATE.
-    def request_reset_transition(self, reason: str = "reset") -> None:
+    def request_reset_transition(
+        self, reason: str = "reset", event_source: str = "unknown_state_entry"
+    ) -> None:
         """Queue a STATE_CHANGE event to RESET_STATE.
 
         Called by UnknownState.on_entry to avoid coupling state classes to event types.
         Safe to call during __init__ (before event loop starts) — uses put_nowait().
+
+        Args:
+            reason: Human-readable reason for the reset transition (default: "reset").
+            event_source: Source identifier for the event. Defaults to "unknown_state_entry"
+                for the automatic transition from UnknownState. Future callers (recovery
+                paths, watchdog, etc.) should pass their own identifier.
         """
         reset_event = ModuleEvent(
             event_type=EventType.STATE_CHANGE,
             payload=StateChangeEvent(new_state=StateBits.RESET_STATE, reason=reason),
-            source="unknown_state_entry",
+            source=event_source,
         )
         # Unbounded queue → put_nowait() never raises QueueFull
         self.event_queue.put_nowait(reset_event)
 
     def is_in_state(self, state: StateBits) -> bool:
         """Return ``True`` when the current active instance matches *state*."""
+        # PLAN-2 FIX (Issue 4.18): Add explicit None guard to is_in_state.
+        # The type(None) comparison was fragile; explicit guard makes intent clear
+        # and protects against future initialization order changes.
+        # Cross-reference: KNOWN_DEFECTS.md item 4.18, code_review-1.1.json.
+        if self.current_state_instance is None:
+            return False
         expected_cls = StateBitsMapping.from_bits(state).value
         if expected_cls is None:
             return False

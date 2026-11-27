@@ -31,14 +31,14 @@ from typing import TYPE_CHECKING, Any
 
 if TYPE_CHECKING:
     from .rfm9x_sx127x_module import Rfm9xSx127xModule
-    from ..framework.events import ModuleEvent
-    # ModuleEvent is referenced only in forward-quoted type hints and stays under
-    # TYPE_CHECKING so it is never imported at runtime. Root cause: the prior code
-    # left ModuleEvent undefined for mypy/ruff F821 while still avoiding a runtime
-    # import; UnknownState.on_entry() delegates the reset to
-    # module.request_reset_transition() instead of referencing
-    # EventType/StateChangeEvent/ModuleEvent at runtime. Cross-reference:
-    # rfm9x_sx127x_module.py request_reset_transition() (fix #1), framework/events.py.
+    from ..framework.events import ModuleEvent  # noqa: F401
+    # ModuleEvent is referenced only in forward-quoted type hints ("ModuleEvent[Any]")
+    # and stays under TYPE_CHECKING so it is never imported at runtime. Root cause guard:
+    # mypy --strict resolves string annotations by name lookup in the module scope, so the
+    # forward-referenced name MUST be importable here (even under TYPE_CHECKING) or mypy/ruff
+    # emit F821 (name-defined). Restored to satisfy the static analyzers while remaining
+    # behavior-neutral (TYPE_CHECKING is False at runtime). Cross-reference:
+    # framework/events.py ModuleEvent, rfm9x_sx127x_module.py request_reset_transition().
 
 from ..types import LoraMode, MetaModeBits, ModeBits, StateBits
 
