@@ -303,3 +303,26 @@ class TestUnknownStateAutoTransition:
             assert module.get_current_state_name() == "ResetState"
         finally:
             await module.stop_event_loop()
+
+    def test_is_in_state_returns_false_when_current_state_is_none(self) -> None:
+        """Plan §Testing Strategy item 1: None guard makes is_in_state() safe."""
+        config = _make_radio_config()
+        module = Rfm9xSx127xModule(config, StateBits.UNKNOWN_STATE)
+        module.current_state_instance = None
+        # The explicit None guard (PLAN-2 FIX Issue 4.18, rfm9x_sx127x_module.py)
+        # must return False for any state instead of raising on type() comparison.
+        assert module.is_in_state(StateBits.UNKNOWN_STATE) is False
+        assert module.is_in_state(StateBits.RESET_STATE) is False
+        assert module.is_in_state(StateBits.FSK_OOK_SLEEP) is False
+
+    def test_request_reset_transition_accepts_custom_event_source(self) -> None:
+        """Plan §Testing Strategy items 2-3: event_source forwards into the event."""
+        config = _make_radio_config()
+        module = Rfm9xSx127xModule(config, StateBits.FSK_OOK_SLEEP)
+        module.request_reset_transition(reason="custom_reset", event_source="my_source")
+        event = module.event_queue.get_nowait()
+        assert event.event_type == EventType.STATE_CHANGE
+        assert event.source == "my_source"
+        assert event.payload is not None
+        assert event.payload.new_state == StateBits.RESET_STATE
+        assert event.payload.reason == "custom_reset"

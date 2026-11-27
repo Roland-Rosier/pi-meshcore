@@ -32,13 +32,10 @@ from typing import TYPE_CHECKING, Any
 if TYPE_CHECKING:
     from .rfm9x_sx127x_module import Rfm9xSx127xModule
     from ..framework.events import ModuleEvent  # noqa: F401
-    # ModuleEvent is referenced only in forward-quoted type hints ("ModuleEvent[Any]")
-    # and stays under TYPE_CHECKING so it is never imported at runtime. Root cause guard:
-    # mypy --strict resolves string annotations by name lookup in the module scope, so the
-    # forward-referenced name MUST be importable here (even under TYPE_CHECKING) or mypy/ruff
-    # emit F821 (name-defined). Restored to satisfy the static analyzers while remaining
-    # behavior-neutral (TYPE_CHECKING is False at runtime). Cross-reference:
-    # framework/events.py ModuleEvent, rfm9x_sx127x_module.py request_reset_transition().
+    # retained: forward-quoted "ModuleEvent[Any]" hints require the name
+    # resolvable under mypy --strict (F821); plan-2 intended removal but
+    # static analyzers need it here. Behavior-neutral (TYPE_CHECKING is
+    # False at runtime).
 
 from ..types import LoraMode, MetaModeBits, ModeBits, StateBits
 
@@ -503,7 +500,12 @@ class UnknownState(Rfm9xSx127xMode):
     class _Constants(Enum):
         STATE_BITS = StateBits.UNKNOWN_STATE
 
-    # PLAN-02 FIX (Issue 2): UnknownState fires a reset on entry by delegating to module.request_reset_transition(). Root cause: state classes must not reference EventType/StateChangeEvent/ModuleEvent at runtime; the reset transition is a module context side-effect, not a state knowledge concern. Cross-reference: rfm9x_sx127x_module.py request_reset_transition() (fix #1), framework/events.py EventType.STATE_CHANGE, StateBits.RESET_STATE.
+    # PLAN-02 FIX (Issue 2): UnknownState fires a reset on entry by delegating to
+    # module.request_reset_transition(). Root cause: state classes must not
+    # reference EventType/StateChangeEvent/ModuleEvent at runtime; the reset
+    # transition is a module context side-effect, not a state knowledge concern.
+    # Cross-reference: rfm9x_sx127x_module.py request_reset_transition() (fix #1),
+    # framework/events.py EventType.STATE_CHANGE, StateBits.RESET_STATE.
     def on_entry(self, module: "Rfm9xSx127xModule") -> None:
         """Called when entering UNKNOWN_STATE - request automatic reset via module."""
         super().on_entry(module)  # Parent logs the entry
