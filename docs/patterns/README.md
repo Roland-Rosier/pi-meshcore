@@ -15,6 +15,7 @@ This index provides a quick reference to all architectural patterns established 
 | **Application Lifecycle** | [application_lifecycle.md](application_lifecycle.md) | `framework/application.py` | `application_lifecycle_guard.yaml` |
 | **Module Registration & Rollback** | [module_registration_rollback.md](module_registration_rollback.md) | `framework/module_manager.py` | `module_manager_guard.yaml` |
 | **SPI Lock Abstraction** | [spi_lock_abstraction.md](spi_lock_abstraction.md) | `drivers/spi/locks.py`, `drivers/spi/bus.py` | `spi_lock_guard.yaml` |
+| **Module Event Queue** | [module_event_queue.md](module_event_queue.md) | `drivers/rfm9x_sx127x_module.py`, `framework/events.py` | `module_event_queue_guard.yaml` |
 | **Scheduler (Timer/Idle/Interrupt)** | [scheduler_patterns.md](scheduler_patterns.md) | `framework/scheduler.py` | `scheduler_guard.yaml` |
 | **Command Bus** | [command_bus_patterns.md](command_bus_patterns.md) | `framework/command_bus.py` | `command_bus_guard.yaml` |
 | **CLI Async (async-typer)** | [cli_async_patterns.md](cli_async_patterns.md) | `cli/_entry_points.py`, `cli/*.py` | `cli_async_guard.yaml` |
@@ -39,8 +40,10 @@ graph TD
     J[Application Lifecycle] --> E
     J --> G
     K[Scheduler Patterns] --> H
-    L[CLI Async] --> M[Entry Points]
-    M --> J
+    K --> L[Module Event Queue] --> M[State Machine]
+    L --> N[Waiter/Buffer Pattern]
+    O[CLI Async] --> P[Entry Points]
+    P --> J
 ```
 
 ---
@@ -137,6 +140,14 @@ uv run pytest tests/ -n auto
 - [ ] `_failure_counts` cleaned on unregister
 - [ ] Stop acquires lock FIRST
 
+### Module Event Queue
+- [ ] No direct `event_queue.put_nowait()` from sync context
+- [ ] No `await event_queue.get()` outside event loop
+- [ ] Explicit `StopMode` in `stop_event_loop()` calls
+- [ ] Modes don't handle `STATE_CHANGE` (intercepted at module level)
+- [ ] Waiter cleanup in `finally` block
+- [ ] Buffer `maxlen=1000` per type (bounds memory)
+
 ### Command Bus
 - [ ] `ExceptionGroup` before `Exception`
 - [ ] Module resolver None check in `execute()`
@@ -159,6 +170,7 @@ uv run pytest tests/ -n auto
 | Config Loader | `drivers/rfm9x_sx127x_config_loader.py` | `tests/drivers/test_config_loader*.py` |
 | Application | `framework/application.py` | `tests/framework/test_application*.py` |
 | Module Manager | `framework/module_manager.py` | `tests/framework/test_module_manager.py` |
+| Module Event Queue | `drivers/rfm9x_sx127x_module.py` | `tests/drivers/test_rfm9x_sx127x_module*.py` |
 | Scheduler | `framework/scheduler.py` | `tests/framework/test_scheduler.py` |
 | Command Bus | `framework/command_bus.py` | `tests/framework/test_command_bus.py` |
 | CLI | `cli/_entry_points.py`, `cli/*.py` | `tests/test_entry_points.py`, `tests/test_cli_*.py` |
